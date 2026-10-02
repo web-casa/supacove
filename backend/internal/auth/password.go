@@ -6,6 +6,8 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -53,6 +55,12 @@ func HashPassword(password string) (string, error) {
 		base64.RawStdEncoding.EncodeToString(key)), nil
 }
 
+// phcParamsRE fully consumes the parameter field of the single supported
+// profile; Sscanf-style prefix matching would accept trailing junk such as
+// "v=19junk" or "p=1,unknown=9" (review P2-02 / round 3 NOT_FIXED).
+var phcVersionRE = regexp.MustCompile(`^v=19$`)
+var phcParamsRE = regexp.MustCompile(`^m=([0-9]+),t=([0-9]+),p=([0-9]+)$`)
+
 // VerifyPassword checks a password against a PHC-formatted Argon2id hash,
 // strictly within the single supported profile: unknown formats, unsupported
 // versions, or out-of-range parameters fail closed without executing the KDF
@@ -62,16 +70,17 @@ func VerifyPassword(encoded, password string) bool {
 	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
 		return false
 	}
-	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version {
+	if !phcVersionRE.MatchString(parts[2]) {
 		return false
 	}
-	var m uint32
-	var t uint32
-	var p uint8
-	if n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil || n != 3 {
+	pm := phcParamsRE.FindStringSubmatch(parts[3])
+	if pm == nil {
 		return false
 	}
+	m64, _ := strconv.ParseUint(pm[1], 10, 32)
+	t64, _ := strconv.ParseUint(pm[2], 10, 32)
+	p64, _ := strconv.ParseUint(pm[3], 10, 8)
+	m, t, p := uint32(m64), uint32(t64), uint8(p64)
 	// Bound parameters: malformed or hostile hashes must neither panic nor
 	// allocate without limits. Only the profile we ourselves produce passes.
 	if m < 8*1024 || m > 512*1024 || t < 1 || t > 16 || p < 1 || p > 4 {

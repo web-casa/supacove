@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"path/filepath"
 
 	"github.com/pressly/goose/v3"
 )
@@ -27,6 +26,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("check schema state: %w", err)
 	}
 	if !fresh {
+		if err := s.CheckSchemaCompatibility(ctx); err != nil {
+			return fmt.Errorf("refusing to migrate: %w", err)
+		}
 		provider, err := s.migrationProvider()
 		if err != nil {
 			return err
@@ -94,10 +96,31 @@ func (s *Store) SchemaReady() (bool, error) {
 	return v > 0, nil
 }
 
+// CheckSchemaCompatibility verifies the database's applied version does not
+// exceed the migration set compiled into THIS binary (SQL + registered Go
+// migrations, via the goose provider's authoritative target version). Note:
+// scanning the embedded FS is NOT sufficient — go:embed directory patterns
+// exclude .go files, so Go migrations would be invisible to it (review
+// round 3, R3-P1-01).
+func (s *Store) CheckSchemaCompatibility(ctx context.Context) error {
+	provider, err := s.migrationProvider()
+	if err != nil {
+		return err
+	}
+	current, target, err := provider.GetVersions(ctx)
+	if err != nil {
+		return fmt.Errorf("read schema versions: %w", err)
+	}
+	if current > target {
+		return fmt.Errorf("database schema (v%d) is newer than this binary supports (v%d); upgrade the binary first", current, target)
+	}
+	return nil
+}
+
 // EnsureFreshSchemaForCLI verifies the schema is migrated AND not newer than
 // this binary understands before a CLI utility performs business writes. CLI
-// stores never migrate themselves (P1-06); a future-schema database must not
-// be written by an older binary (review round 2, P1-06 remainder).
+// stores never migrate themselves (P1-06); an unfinished upgrade or a
+// future-schema database must not be written (review round 2, P1-06).
 func (s *Store) EnsureFreshSchemaForCLI(ctx context.Context) error {
 	ready, err := s.SchemaReady()
 	if err != nil {
@@ -106,44 +129,5 @@ func (s *Store) EnsureFreshSchemaForCLI(ctx context.Context) error {
 	if !ready {
 		return errors.New("database schema is not initialized yet; start the server first and retry")
 	}
-	var dbVersion int64
-	if err := s.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&dbVersion); err != nil {
-		return err
-	}
-	if max := MaxEmbeddedMigrationVersion(); dbVersion > max {
-		return fmt.Errorf("database schema (v%d) is newer than this binary supports (v%d); upgrade the binary before running CLI commands", dbVersion, max)
-	}
-	return nil
-}
-
-// MaxEmbeddedMigrationVersion reports the highest migration version compiled
-// into this binary, from the embedded files and registered Go migrations.
-func MaxEmbeddedMigrationVersion() int64 {
-	var max int64
-	fs.WalkDir(embeddedMigrations, "migrations", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		var v int64
-		if _, err := fmt.Sscanf(filepath.Base(path), "%d_", &v); err == nil && v > max {
-			max = v
-		}
-		return nil
-	})
-	return max
-}
-
-// SchemaVersionCompatible reports whether the applied schema does not exceed
-// this binary's embedded migrations. Used by serve as a startup guard.
-func (s *Store) SchemaVersionCompatible(ctx context.Context) error {
-	var dbVersion int64
-	if err := s.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&dbVersion); err != nil {
-		return err
-	}
-	if max := MaxEmbeddedMigrationVersion(); dbVersion > max {
-		return fmt.Errorf("database schema (v%d) is newer than this binary (v%d); refusing to start with a newer database", dbVersion, max)
-	}
-	return nil
+	return s.CheckSchemaCompatibility(ctx)
 }

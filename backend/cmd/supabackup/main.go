@@ -112,6 +112,10 @@ func openStoreCLIWithSchema(cfg *config.Config, log *slog.Logger) (*db.Store, er
 			store.Close()
 			return nil, err
 		}
+		if err := store.CheckSchemaCompatibility(context.Background()); err != nil {
+			store.Close()
+			return nil, err
+		}
 		return store, nil
 	}
 	if !errors.Is(err, db.ErrLocked) {
@@ -158,7 +162,7 @@ func runServe() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	// Refuse to serve on top of a database written by a NEWER binary.
-	if err := store.SchemaVersionCompatible(ctx); err != nil {
+	if err := store.CheckSchemaCompatibility(ctx); err != nil {
 		return err
 	}
 

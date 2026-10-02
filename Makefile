@@ -19,6 +19,7 @@ frontend: ## Build the SPA and copy it into the Go embed directory
 	cd frontend && npm ci && npm run build
 	rm -rf backend/internal/web/dist
 	cp -r frontend/dist backend/internal/web/dist
+	touch backend/internal/web/dist/.gitkeep  # keep the committed embed marker
 
 build: frontend backend ## Build everything: SPA first, then the Go binary embedding it
 

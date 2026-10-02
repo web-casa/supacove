@@ -116,8 +116,23 @@ func (s *Server) Router() http.Handler {
 			writeError(w, http.StatusInternalServerError, "internal", "unexpected internal error")
 		},
 	}
-	apiHandler := api.HandlerFromMux(
-		api.NewStrictHandlerWithOptions(&apiService{srv: s}, nil, strictOpts), chi.NewRouter())
+	apiRouter := chi.NewRouter()
+	apiRouter.NotFound(func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+	})
+	apiRouter.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	})
+	// HandlerWithOptions (not HandlerFromMux) so that std-layer parameter
+	// errors (e.g. the contract-required CSRF header on logout) also use the
+	// JSON Error shape instead of text/plain http.Error (review round 3,
+	// P1-09 remainder).
+	apiHandler := api.HandlerWithOptions(api.NewStrictHandlerWithOptions(&apiService{srv: s}, nil, strictOpts), api.ChiServerOptions{
+		BaseRouter: apiRouter,
+		ErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		},
+	})
 	if mux, ok := apiHandler.(*chi.Mux); ok {
 		mux.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -250,19 +265,25 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 
-		// The anonymous auth endpoints get bounded, fully-read JSON: the body
-		// (≤16 KiB) is read exactly once here so the strict handler cannot be
-		// fed trailing garbage after the first JSON value, and so both
-		// bootstrap and login are rate limited BEFORE any expensive work
-		// (review P0-02 and round-2 remainder).
-		if !safeMethod(req.Method) && strings.HasPrefix(req.URL.Path, "/api/auth/") && req.ContentLength != 0 {
+		// The ANONYMOUS auth endpoints (login, bootstrap only) get bounded,
+		// fully-read JSON plus pre-decode rate limiting. CRITICAL: this
+		// fast path must never cover protected endpoints — a logout with a
+		// JSON body must still pass the session and CSRF checks below, or the
+		// server-side session would survive a supposed logout (review round 3,
+		// R3-P1-02).
+		if !safeMethod(req.Method) && anonymousAPI[req.Method][req.URL.Path] {
+			// Rate limit BEFORE reading or decoding anything, including empty
+			// bodies (review P0-02 remainder: empty login bodies must not
+			// bypass the limiter).
 			ip := s.clientIP(req)
 			if !s.lim.Allow(ip) {
 				writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 				return
 			}
-			if _, ok := s.readWholeJSON(w, req); !ok {
-				return // response already written
+			if req.ContentLength != 0 {
+				if _, ok := s.readWholeJSON(w, req); !ok {
+					return // response already written
+				}
 			}
 			lw := &loginAttemptWriter{ResponseWriter: w}
 			next.ServeHTTP(lw, req)
@@ -276,6 +297,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		}
 
 		if anonymousAPI[req.Method][req.URL.Path] {
+			// Anonymous request without a body (or GET): straight through.
 			next.ServeHTTP(w, req)
 			return
 		}
@@ -321,7 +343,10 @@ func (s *Server) readWholeJSON(w http.ResponseWriter, req *http.Request) ([]byte
 		writeError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
 		return nil, false
 	}
-	if dec.More() {
+	// A second Decode MUST hit exactly EOF: More() only looks inside the
+	// current container and would accept trailing garbage (review round 3,
+	// P0-02 remainder).
+	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON value")
 		return nil, false
 	}

@@ -35,10 +35,10 @@ func originParts(origin string) (scheme, host, port string, err error) {
 		return "", "", "", errors.New("empty, null, or repeated origin")
 	}
 	// url.Parse drops bare trailing separators; reject them on the raw value.
-	if strings.HasSuffix(origin, "?") || strings.HasSuffix(origin, "#") || strings.HasSuffix(origin, ":") || strings.HasSuffix(origin, "/") && !strings.HasPrefix(origin, origin[8:9]) {
-		if strings.HasSuffix(origin, "?") || strings.HasSuffix(origin, "#") || strings.HasSuffix(origin, ":") {
-			return "", "", "", errors.New("origin has a trailing separator")
-		}
+	// (Plain suffix checks only — no slicing, which caused a short-input panic
+	// in the previous attempt: review round 3, R3-P2-01.)
+	if strings.HasSuffix(origin, "?") || strings.HasSuffix(origin, "#") || strings.HasSuffix(origin, ":") {
+		return "", "", "", errors.New("origin has a trailing separator")
 	}
 	u, err := url.Parse(origin)
 	if err != nil {

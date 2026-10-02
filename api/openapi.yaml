@@ -188,6 +188,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/Internal"
+        "503":
+          description: Session storage temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /auth/me:
     get:
       operationId: getAuthMe

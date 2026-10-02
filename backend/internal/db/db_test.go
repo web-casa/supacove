@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -389,5 +390,40 @@ func TestBackupBeforeMigrateSkippedOnFreshDB(t *testing.T) {
 	name, err := s.backupBeforeMigrate(context.Background())
 	if err != nil || name != "" {
 		t.Fatalf("fresh db must not require a backup: name=%q err=%v", name, err)
+	}
+}
+
+// TestPruneKeepsVersionBatches (review round 3, R3-P1-04): ordering must be
+// by parsed version+timestamp — lexical order would delete v10 while keeping
+// v5..v9 — and failed-upgrade retries of the same version must not crowd out
+// other versions' recovery points.
+func TestPruneKeepsVersionBatches(t *testing.T) {
+	s := openTestStore(t)
+	bdir := filepath.Join(s.dataDir, backupDir)
+	if err := os.MkdirAll(bdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string) {
+		if err := os.WriteFile(filepath.Join(bdir, name+".db"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// v1 historical point, then five retry snapshots of v10 (same version).
+	write("pre-migrate-v1-20250101T000000.000000000")
+	for i := 1; i <= 5; i++ {
+		write(fmt.Sprintf("pre-migrate-v10-20260101T0000%02d.000000000", i))
+	}
+	s.prunePreMigrateBackups()
+	left, _ := filepath.Glob(filepath.Join(bdir, "pre-migrate-*.db"))
+	sort.Strings(left)
+	if len(left) != 2 {
+		t.Fatalf("want v1 + newest v10 only, got %v", left)
+	}
+	for _, name := range left {
+		base := filepath.Base(name)
+		if strings.Contains(base, "v1-2025") || strings.Contains(base, "v10-20260101T000005") {
+			continue
+		}
+		t.Fatalf("unexpected survivor: %s", base)
 	}
 }

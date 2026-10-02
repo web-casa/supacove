@@ -43,7 +43,21 @@ docker run --rm --entrypoint bash "$IMAGE" -c '
   pg_dump -h /tmp/pgsock -U verifier -Fc -f /tmp/dump.dump postgres
   echo "pg_dump -Fc: OK ($(du -h /tmp/dump.dump | cut -f1))"
   psql -h /tmp/pgsock -U verifier -d postgres -qc "DROP TABLE spike;"
-  pg_restore -h /tmp/pgsock -U verifier -d postgres --exit-on-error /tmp/dump.dump
+  # Peak RSS sampling of the restore process (resource evidence, review
+  # round 2 P1-19): poll /proc during the restore.
+  pg_restore -h /tmp/pgsock -U verifier -d postgres --exit-on-error /tmp/dump.dump &
+  RP=$!
+  PEAK=0
+  while kill -0 $RP 2>/dev/null; do
+    if [ -r "/proc/$RP/status" ]; then
+      KB=$(grep VmHWM "/proc/$RP/status" | tr -s " " | cut -d " " -f 2)
+      case "$KB" in ""|*[!0-9]*) KB=0 ;; esac
+      if [ "$KB" -gt "$PEAK" ]; then PEAK=$KB; fi
+    fi
+    sleep 0.05
+  done
+  wait $RP
+  echo "pg_restore --exit-on-error: OK (peak RSS ≈ $((PEAK/1024)) MiB)"
   N=$(psql -h /tmp/pgsock -U verifier -d postgres -tAc "SELECT COUNT(*) FROM spike;")
   echo "pg_restore --exit-on-error: OK (rows=$N)"
   [ "$N" = "'$ROWS'" ] || { echo "ROW MISMATCH"; exit 2; }
@@ -59,9 +73,20 @@ docker run --rm --entrypoint bash "$IMAGE" -c '
   echo "truncated archive rejected: OK"
 
   pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null
-  rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump
+  # Give exiting backends a moment, then assert nothing survives.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f "[p]ostgres.*pgdata" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump /tmp/pg.log
   T1=$(date +%s)
-  echo "stop+cleanup: OK; wall time: $((T1-T0))s"
+  # Failure-cleanup assertions: no postmaster, no sockets, no data left over.
+  if pgrep -af "[p]ostgres" | grep -v pgrep; then
+    echo "CLEANUP FAILURE: postmaster alive"; exit 5
+  fi
+  LEFT=$(ls -A /tmp | grep -cE "pgdata|pgsock|dump|pg.log" || true)
+  [ "$LEFT" = "0" ] || { echo "CLEANUP FAILURE: $LEFT leftovers in /tmp"; exit 5; }
+  echo "stop+cleanup: OK (verified); wall time: $((T1-T0))s"
   echo SPIKE_OK
 '
 echo "--- canary checks (from root exec context) ---"

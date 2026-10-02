@@ -100,6 +100,11 @@ func (a *apiService) PostAuthLogin(ctx context.Context, request api.PostAuthLogi
 	if body == nil || body.Username == "" || body.Password == "" {
 		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username and password are required"}, nil
 	}
+	// Runtime field limits mirror the contract (review P0-02 remainder):
+	// oversized inputs are rejected before touching the KDF.
+	if len(body.Username) > 64 || len(body.Password) > 128 {
+		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username or password exceeds the allowed length"}, nil
+	}
 
 	// Rate limiting already happened in the guard before decoding; issue the
 	// session through the generation-checked store method (review P1-03).

@@ -690,6 +690,15 @@ func (response PostAuthLogout500JSONResponse) VisitPostAuthLogoutResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PostAuthLogout503JSONResponse Error
+
+func (response PostAuthLogout503JSONResponse) VisitPostAuthLogoutResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetAuthMeRequestObject struct {
 }
 

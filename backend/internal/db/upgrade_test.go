@@ -41,7 +41,11 @@ func buildLegacyDB(t *testing.T, dir string, legacy legacyMigrations) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, ro, legacy)
+	// Disable the global Go-migration registry: the OLD binary that built this
+	// database did not know about migration v3, so the fixture must not run it
+	// either (review round 3, R3-P2-02).
+	provider, err := goose.NewProvider(goose.DialectSQLite3, ro, legacy,
+		goose.WithDisableGlobalRegistry(true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +57,37 @@ func buildLegacyDB(t *testing.T, dir string, legacy legacyMigrations) {
 		t.Fatal(err)
 	}
 	ro.Close()
+}
+
+// assertLegacyFixture verifies the pre-upgrade fixture is really at v1 with
+// the expected column state — the tests are meaningless if the fixture was
+// already migrated by newer code.
+func assertLegacyFixture(t *testing.T, dir string, wantColumn bool) {
+	t.Helper()
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ro.Close()
+	var v int64
+	if err := ro.QueryRow(
+		`SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v != 1 {
+		t.Fatalf("fixture must be at schema v1, got v%d", v)
+	}
+	var n int
+	if err := ro.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'auth_generation'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if wantColumn && n != 1 {
+		t.Fatal("fixture expected auth_generation present")
+	}
+	if !wantColumn && n != 0 {
+		t.Fatal("fixture must NOT have auth_generation yet")
+	}
 }
 
 // TestUpgradeFromOriginal0001 (review round 2, R2-P1-01): a database built by
@@ -68,6 +103,7 @@ func TestUpgradeFromOriginal0001(t *testing.T) {
 	}
 	dir := t.TempDir()
 	buildLegacyDB(t, dir, legacyMigrations{"0001_auth.sql": &fstest.MapFile{Data: []byte(oldSQL)}})
+	assertLegacyFixture(t, dir, false)
 
 	s, err := Open(dir)
 	if err != nil {
@@ -97,6 +133,7 @@ func TestUpgradeFromModified0001(t *testing.T) {
 		[]byte("    auth_generation INTEGER NOT NULL DEFAULT 0,\n    created_at    INTEGER NOT NULL"), 1)
 	dir := t.TempDir()
 	buildLegacyDB(t, dir, legacyMigrations{"0001_auth.sql": &fstest.MapFile{Data: augmented}})
+	assertLegacyFixture(t, dir, true)
 
 	s, err := Open(dir)
 	if err != nil {

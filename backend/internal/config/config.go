@@ -171,10 +171,19 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 		return nil, err
 	}
 	os.Remove(tmpName)
-	// Sync the directory so the link survives a crash.
-	if d, err := os.Open(dir); err == nil {
-		d.Sync()
+	// Sync the directory so the link survives a crash; a failure here means
+	// the secret may not persist, which must not be reported as success
+	// (review round 3, P1-04 remainder).
+	d, err := os.Open(dir)
+	if err != nil {
+		return nil, fmt.Errorf("open secret dir for fsync: %w", err)
+	}
+	if err := d.Sync(); err != nil {
 		d.Close()
+		return nil, fmt.Errorf("fsync secret dir: %w", err)
+	}
+	if err := d.Close(); err != nil {
+		return nil, err
 	}
 	return key, nil
 }

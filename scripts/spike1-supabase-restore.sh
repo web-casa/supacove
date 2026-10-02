@@ -28,8 +28,8 @@ restore() { # $1=target url  $2=archive  rest=extra flags
 }
 
 step "0. connectivity + versions"
-psql --dbname="$SOURCE_DB_URL" -tAc "SELECT version();" | head -1 || exit 1
-psql --dbname="$TARGET_DB_URL" -tAc "SELECT version();" | head -1 || exit 1
+psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -tAc "SELECT version();" | head -1 || exit 1
+psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -tAc "SELECT version();" | head -1 || exit 1
 
 step "1. inventory of source (schemas, extensions)"
 psql --dbname="$SOURCE_DB_URL" -tAc \
@@ -99,24 +99,30 @@ if [ "${#CUSTOM_ROLES[@]}" -gt 0 ]; then
   echo "custom roles: ${CUSTOM_ROLES[*]}" >&2
   pg_dumpall --dbname="$SOURCE_DB_URL" --roles-only > "$OUT/roles.sql" 2>/dev/null \
     || echo "note: full roles dump unavailable; staging NOLOGIN placeholders only" >&2
-  # Stage minimal placeholders in the target (review: attributes/GRANTs are
-  # answered only by a real experiment — recorded in ADR-003).
-  role_args=()
   for r in "${CUSTOM_ROLES[@]}"; do
-    role_args+=(--role "$r")
-  done
-  for r in "${CUSTOM_ROLES[@]}"; do
-    # Identifier names are bound as psql variables (stdin mode; -c does not
-    # interpolate) and quoted server-side with format('%I') — never
-    # interpolated into SQL text (review R2-P1-04).
-    stage_sql=$(printf "SELECT format('SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %%L) THEN \'-- exists\' ELSE format(\'CREATE ROLE %%I NOLOGIN\', %%L) END', :'role', :'role');" \
-      | psql --dbname="$TARGET_DB_URL" -At -v role="$r") || { echo "role quoting failed for: $r" >&2; exit 1; }
-    [ -n "$stage_sql" ] || { echo "role quoting empty for: $r" >&2; exit 1; }
-    if [ "$stage_sql" = "-- exists" ]; then
-      echo "role already present: $r" >&2
-    else
-      psql --dbname="$TARGET_DB_URL" -qc "$stage_sql" || { echo "role create failed for: $r" >&2; exit 1; }
-    fi
+    # Two-step, server-side quoting only: check existence, then generate and
+    # execute the DDL. Never interpolate the name into SQL text (R2-P1-04);
+    # single-layer format so quoting cannot break (R3-P1-03). All psql calls
+    # use ON_ERROR_STOP.
+    exists=$(printf "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role') THEN 1 ELSE 0 END;" \
+      | psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -At -v role="$r") \
+      || { echo "role existence check failed: $r" >&2; exit 1; }
+    case "$exists" in
+      1) echo "role already present: $r" >&2 ;;
+      0)
+        ddl=$(printf "SELECT format('CREATE ROLE %I NOLOGIN', :'role');" \
+          | psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -At -v role="$r") \
+          || { echo "role quoting failed: $r" >&2; exit 1; }
+        psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -qc "$ddl" \
+          || { echo "role create failed: $r" >&2; exit 1; }
+        # Verify the role actually exists now (never trust exit codes alone).
+        verify=$(printf "SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role') THEN 1 ELSE 0 END;" \
+          | psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -At -v role="$r") \
+          || { echo "role verify failed: $r" >&2; exit 1; }
+        [ "$verify" = "1" ] || { echo "role NOT created despite success exit: $r" >&2; exit 1; }
+        ;;
+      *) echo "unexpected existence result for role $r: $exists" >&2; exit 1 ;;
+    esac
   done
 fi
 
@@ -186,6 +192,10 @@ for s in "${USER_SCHEMAS[@]}"; do
   done < <(printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
     | psql --dbname="$SOURCE_DB_URL" -At -v sch="$s")
 done
+if grep -q "FAIL" "$OUT/src-counts.txt" "$OUT/tgt-counts.txt"; then
+  echo "COUNT ERRORS PRESENT — failures are never equal"
+  FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
+fi
 if diff -u "$OUT/src-counts.txt" "$OUT/tgt-counts.txt"; then
   echo "exact row counts match"
 else

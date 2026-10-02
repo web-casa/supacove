@@ -446,6 +446,64 @@ func TestSessionLookupFailureIsNot401(t *testing.T) {
 	}
 }
 
+// TestLogoutWithBodyStillRequiresAuthAndCSRF (review round 3, R3-P1-02): a
+// JSON body on logout must never skip the session and CSRF checks — the
+// previous fast path let an anonymous forged-CSRF logout return 204 without
+// revoking anything.
+func TestLogoutWithBodyStillRequiresAuthAndCSRF(t *testing.T) {
+	env := newTestEnv(t)
+	env.bootstrapAdmin(t)
+	csrf := env.csrfToken(t)
+
+	// Anonymous logout (fresh client, no cookies) with a non-empty body:
+	// must be 401, NOT 204.
+	anon := &http.Client{} // deliberately no cookie jar
+	if code, _ := do(t, anon, http.MethodPost, env.base+"/api/auth/logout",
+		map[string]string{}, map[string]string{"Content-Type": "application/json", csrfHeader: "forged"}); code != http.StatusUnauthorized {
+		t.Fatalf("anonymous logout with body: want 401, got %d", code)
+	}
+	// Authenticated but forged CSRF token with a non-empty body: 403.
+	if code, _ := postJSON(t, env, "/api/auth/logout", map[string]string{},
+		map[string]string{csrfHeader: "forged"}); code != http.StatusForbidden {
+		t.Fatalf("logout with forged csrf and body: want 403, got %d", code)
+	}
+	// A protected unknown path with a body never succeeds: anonymous → 401
+	// (default deny); authenticated with valid CSRF → JSON 404 from the API
+	// router — never 2xx, never the SPA.
+	if code, _ := postJSON(t, env, "/api/auth/future-protected", map[string]string{},
+		map[string]string{csrfHeader: csrf}); code < 400 || code >= 500 {
+		t.Fatalf("unknown auth path with body: want a 4xx, got %d", code)
+	}
+	// Sanity: proper logout still works end-to-end.
+	if code, _ := postJSON(t, env, "/api/auth/logout", map[string]string{},
+		map[string]string{csrfHeader: csrf}); code != http.StatusNoContent {
+		t.Fatalf("proper logout: want 204, got %d", code)
+	}
+	if code, _ := getJSON(t, env, "/api/auth/me"); code != http.StatusUnauthorized {
+		t.Fatalf("me after logout: want 401, got %d", code)
+	}
+}
+
+// TestLoginFieldLimits (review P0-02 remainder): oversized inputs are a 400
+// before the KDF, not a 401 credential check.
+func TestLoginFieldLimits(t *testing.T) {
+	env := newTestEnv(t)
+	env.bootstrapAdmin(t)
+
+	code, body := postJSON(t, env, "/api/auth/login", map[string]string{
+		"username": strings.Repeat("u", 65), "password": strings.Repeat("p", 20),
+	})
+	if code != http.StatusBadRequest || body["code"] != "invalid_request" {
+		t.Fatalf("oversized username: want 400 invalid_request, got %d %v", code, body)
+	}
+	code, _ = postJSON(t, env, "/api/auth/login", map[string]string{
+		"username": "admin", "password": strings.Repeat("p", 129),
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("oversized password: want 400, got %d", code)
+	}
+}
+
 // TestProductionCookieAttributes (review P2-01/P1-13 DoD): Secure mode uses
 // __Host- prefixed cookies with Secure and no Domain.
 func TestProductionCookieAttributes(t *testing.T) {

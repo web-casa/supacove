@@ -462,6 +462,15 @@ export interface operations {
                 };
             };
             500: components["responses"]["Internal"];
+            /** @description Session storage temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getAuthMe: {
