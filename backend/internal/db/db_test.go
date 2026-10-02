@@ -427,3 +427,52 @@ func TestPruneKeepsVersionBatches(t *testing.T) {
 		t.Fatalf("unexpected survivor: %s", base)
 	}
 }
+
+// TestPruneKeepsLegacyBackups (review round 4, R4-P1-01): legacy
+// timestamp-only backups form their own group and must survive version-based
+// dedup even alongside new-format snapshots.
+func TestPruneKeepsLegacyBackups(t *testing.T) {
+	s := openTestStore(t)
+	bdir := filepath.Join(s.dataDir, backupDir)
+	if err := os.MkdirAll(bdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string) {
+		if err := os.WriteFile(filepath.Join(bdir, name+".db"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("pre-migrate-20260101T000000.000000000")
+	write("pre-migrate-20260102T000000.000000000")
+	write("pre-migrate-v5-20270101T000000.000000000")
+	s.prunePreMigrateBackups()
+	left, _ := filepath.Glob(filepath.Join(bdir, "pre-migrate-*.db"))
+	// The two legacy files must BOTH survive (same group, under quota);
+	// only the whole-group accounting may drop the OLDER legacy one at most.
+	if len(left) < 2 {
+		t.Fatalf("legacy backups must not be merged into version dedup: %v", left)
+	}
+}
+
+// TestBackupNowCancelLeavesNoOfficialFile (review round 4, P1-08): a
+// cancelled VACUUM must not leave a partial file under the official name.
+func TestBackupNowCancelLeavesNoOfficialFile(t *testing.T) {
+	s := openTestStore(t)
+	ctx := context.Background()
+	if err := s.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel() // already cancelled: VACUUM must fail
+	if _, err := s.BackupNow(cctx, "cancelled"); err == nil {
+		t.Fatal("cancelled backup must fail")
+	}
+	entries, _ := filepath.Glob(filepath.Join(s.dataDir, backupDir, "pre-migrate-*"))
+	if len(entries) != 0 {
+		t.Fatalf("cancelled backup must leave no artifacts: %v", entries)
+	}
+	// The store stays usable for a real backup.
+	if _, err := s.BackupNow(ctx, "after-cancel"); err != nil {
+		t.Fatalf("backup after cancellation: %v", err)
+	}
+}

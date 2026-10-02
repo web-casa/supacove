@@ -29,6 +29,13 @@ docker run --rm --entrypoint bash "$IMAGE" -c '
   chmod 600 /tmp/app-owned-secret
 
   mkdir -p /tmp/pgdata /tmp/pgsock
+  # Any failure must still stop the instance and remove leftovers; the outer
+  # assertions never run when we abort early (review round 4, P1-19).
+  cleanup() {
+    pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null 2>&1 || true
+    rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump /tmp/pg.log
+  }
+  trap cleanup EXIT
   T0=$(date +%s)
   initdb -D /tmp/pgdata -A trust -U verifier >/dev/null 2>&1
   echo "initdb: OK"
@@ -45,32 +52,45 @@ docker run --rm --entrypoint bash "$IMAGE" -c '
   psql -h /tmp/pgsock -U verifier -d postgres -qc "DROP TABLE spike;"
   # Peak RSS sampling of the restore process (resource evidence, review
   # round 2 P1-19): poll /proc during the restore.
+  # Sample BOTH the client and the temporary postmaster (server side matters
+  # for capacity planning; review round 4, P1-19).
+  PM=$(pgrep -f "postgres -D /tmp/pgdata" | head -1 || true)
   pg_restore -h /tmp/pgsock -U verifier -d postgres --exit-on-error /tmp/dump.dump &
   RP=$!
   PEAK=0
+  PMPEAK=0
   while kill -0 $RP 2>/dev/null; do
     if [ -r "/proc/$RP/status" ]; then
       KB=$(grep VmHWM "/proc/$RP/status" | tr -s " " | cut -d " " -f 2)
       case "$KB" in ""|*[!0-9]*) KB=0 ;; esac
       if [ "$KB" -gt "$PEAK" ]; then PEAK=$KB; fi
     fi
+    if [ -n "$PM" ] && [ -r "/proc/$PM/status" ]; then
+      KB=$(grep VmHWM "/proc/$PM/status" | tr -s " " | cut -d " " -f 2)
+      case "$KB" in ""|*[!0-9]*) KB=0 ;; esac
+      if [ "$KB" -gt "$PMPEAK" ]; then PMPEAK=$KB; fi
+    fi
     sleep 0.05
   done
   wait $RP
-  echo "pg_restore --exit-on-error: OK (peak RSS ≈ $((PEAK/1024)) MiB)"
+  echo "pg_restore --exit-on-error: OK (client peak RSS ≈ $((PEAK/1024)) MiB, postmaster ≈ $((PMPEAK/1024)) MiB)"
   N=$(psql -h /tmp/pgsock -U verifier -d postgres -tAc "SELECT COUNT(*) FROM spike;")
   echo "pg_restore --exit-on-error: OK (rows=$N)"
   [ "$N" = "'$ROWS'" ] || { echo "ROW MISMATCH"; exit 2; }
 
   # Corruption detection on a CLEAN target: drop what the restore created so
-  # an "object already exists" error cannot masquerade as rejection (review
-  # round 2, P1-19 remainder).
+  # an "object already exists" error cannot masquerade as rejection. The
+  # truncation point adapts to the archive size, and the rejection reason is
+  # preserved for evidence (review round 2/4, P1-19).
   psql -h /tmp/pgsock -U verifier -d postgres -qc "DROP TABLE IF EXISTS spike;"
-  head -c 200000 /tmp/dump.dump > /tmp/truncated.dump
-  if pg_restore -h /tmp/pgsock -U verifier -d postgres --exit-on-error /tmp/truncated.dump 2>/dev/null; then
+  SZ=$(wc -c < /tmp/dump.dump)
+  HALF=$((SZ / 2))
+  [ "$HALF" -gt 0 ] || HALF=1
+  head -c "$HALF" /tmp/dump.dump > /tmp/truncated.dump
+  if pg_restore -h /tmp/pgsock -U verifier -d postgres --exit-on-error /tmp/truncated.dump 2>/tmp/truncated-error.log; then
     echo "ERROR: truncated dump restored cleanly"; exit 3
   fi
-  echo "truncated archive rejected: OK"
+  echo "truncated archive rejected: OK ($(wc -c < /tmp/truncated.dump) of $SZ bytes; reason: $(head -1 /tmp/truncated-error.log))"
 
   pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null
   # Give exiting backends a moment, then assert nothing survives.

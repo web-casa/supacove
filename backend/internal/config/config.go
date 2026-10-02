@@ -124,6 +124,12 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("secret file %s: %w", path, err)
 		}
+		// A read back from an UNVERIFIED directory must not be reported as
+		// durably persisted: confirm the directory is syncable or fail
+		// (review round 4, P1-04 remainder).
+		if err := syncDir(filepath.Dir(path)); err != nil {
+			return nil, err
+		}
 		return key, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -171,21 +177,26 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 		return nil, err
 	}
 	os.Remove(tmpName)
-	// Sync the directory so the link survives a crash; a failure here means
-	// the secret may not persist, which must not be reported as success
-	// (review round 3, P1-04 remainder).
-	d, err := os.Open(dir)
-	if err != nil {
-		return nil, fmt.Errorf("open secret dir for fsync: %w", err)
-	}
-	if err := d.Sync(); err != nil {
-		d.Close()
-		return nil, fmt.Errorf("fsync secret dir: %w", err)
-	}
-	if err := d.Close(); err != nil {
+	if err := syncDir(dir); err != nil {
 		return nil, err
 	}
 	return key, nil
+}
+
+// syncDir fsyncs a directory so a linked/renamed entry survives a crash.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open secret dir for fsync: %w", err)
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return fmt.Errorf("fsync secret dir: %w", err)
+	}
+	if err := d.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func decodeKey(raw []byte) ([]byte, error) {

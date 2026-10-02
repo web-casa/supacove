@@ -54,11 +54,19 @@ if [ "${#USER_SCHEMAS[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# pg_dump -n/-N take LIKE-style patterns; escape the metacharacters so a
+# schema name containing _ or % matches exactly (review round 2, P1-18).
+escape_pattern() { # stdin: name  stdout: escaped pattern
+  sed -e 's/\\/\\\\/g' -e 's/%/\\%/g' -e 's/_/\\_/g'
+}
+
 schema_flags() { # $1 = -n or -N
   local flag="$1"
   local args=()
+  local esc
   for s in "${USER_SCHEMAS[@]}"; do
-    args+=("$flag" "$s")
+    esc=$(printf '%s' "$s" | escape_pattern)
+    args+=("$flag" "$esc")
   done
   printf '%s\0' "${args[@]}"
 }
@@ -110,7 +118,7 @@ if [ "${#CUSTOM_ROLES[@]}" -gt 0 ]; then
     case "$exists" in
       1) echo "role already present: $r" >&2 ;;
       0)
-        ddl=$(printf "SELECT format('CREATE ROLE %I NOLOGIN', :'role');" \
+        ddl=$(printf "SELECT format('CREATE ROLE %%I NOLOGIN', :'role');" \
           | psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -At -v role="$r") \
           || { echo "role quoting failed: $r" >&2; exit 1; }
         psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -qc "$ddl" \
@@ -155,47 +163,45 @@ else
 fi
 
 step "verification: exact row counts of user tables (source vs target)"
-count_rows() { # $1=url $2=outfile
-  : > "$2"
-  for s in "${USER_SCHEMAS[@]}"; do
-    psql --dbname="$1" -At -c \
-      "SELECT '$s.' || t || ':' || n FROM (
-         SELECT c.relname AS t, pg_catalog.count(*) AS n
-         FROM pg_class c JOIN pg_namespace nsp ON nsp.oid = c.relnamespace
-         WHERE nsp.nspname = '$s' AND c.relkind = 'r'
-       ) sub, LATERAL (
-         SELECT relname AS t, (xpath('/row/c/text()', query_to_xml(
-           format('SELECT count(*) AS c FROM %I.%I', '$s', relname), false, true, '')))[1]::text::int AS n
-         FROM pg_class WHERE oid = (SELECT oid FROM pg_class c2 JOIN pg_namespace n2 ON n2.oid=c2.relnamespace
-           WHERE c2.relname = sub.t AND n2.nspname = '$s')
-       ) x" >> "$2" 2>>"$OUT/count-errors.log" || true
-  done
-  sort -o "$2" "$2"
-}
 # The LATERAL above is intentionally simplified; exact per-table counting is
 # done by the loop below (correctness over cleverness).
 : > "$OUT/src-counts.txt"
 : > "$OUT/tgt-counts.txt"
+COUNT_ERROR=0
 for s in "${USER_SCHEMAS[@]}"; do
   # Table list: schema name bound as a psql variable, quoted server-side.
-  while IFS= read -r tbl; do
+  # Enumeration failure is an error, never an empty-but-successful result
+  # (review round 4, P1-18).
+  mapfile -t TABLES < <(printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
+    | psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -v sch="$s") \
+    || { echo "FATAL: table enumeration failed for schema $s" >&2; exit 1; }
+  if [ "${#TABLES[@]}" -eq 0 ]; then
+    echo "note: schema $s has no tables" >&2
+    continue
+  fi
+  for tbl in "${TABLES[@]}"; do
     [ -n "$tbl" ] || continue
     count_sql=$(printf "SELECT format('SELECT count(*) FROM %%I.%%I', :'sch', :'tbl');" \
-      | psql --dbname="$SOURCE_DB_URL" -At -v sch="$s" -v tbl="$tbl") \
-      || { echo "quote generation failed: $s.$tbl" >&2; exit 1; }
-    src_n=$(psql --dbname="$SOURCE_DB_URL" -At -c "$count_sql" 2>>"$OUT/count-errors.log") \
-      || { echo "source count FAILED: $s.$tbl (recorded as FAIL)"; src_n="FAIL"; }
-    tgt_n=$(psql --dbname="$TARGET_DB_URL" -At -c "$count_sql" 2>>"$OUT/count-errors.log") \
-      || { echo "target count FAILED: $s.$tbl (recorded as FAIL)"; tgt_n="FAIL"; }
+      | psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -v sch="$s" -v tbl="$tbl") \
+      || { echo "FATAL: quote generation failed: $s.$tbl" >&2; exit 1; }
+    src_n=$(psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -c "$count_sql" 2>>"$OUT/count-errors.log")
+    src_rc=$?
+    tgt_n=$(psql --dbname="$TARGET_DB_URL" --set=ON_ERROR_STOP=1 -At -c "$count_sql" 2>>"$OUT/count-errors.log")
+    tgt_rc=$?
+    # A failed count is recorded in a dedicated error column — the VALUE
+    # channel never carries failure markers (review round 4, R4-P2-01).
+    if [ $src_rc -ne 0 ] || [ $tgt_rc -ne 0 ]; then
+      echo "$s.$tbl:COUNT_ERROR" >> "$OUT/src-counts.txt"
+      echo "$s.$tbl:COUNT_ERROR" >> "$OUT/tgt-counts.txt"
+      echo "count FAILED: $s.$tbl" >&2
+      COUNT_ERROR=1
+      continue
+    fi
     echo "$s.$tbl:$src_n" >> "$OUT/src-counts.txt"
     echo "$s.$tbl:$tgt_n" >> "$OUT/tgt-counts.txt"
-  done < <(printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
-    | psql --dbname="$SOURCE_DB_URL" -At -v sch="$s")
+  done
 done
-if grep -q "FAIL" "$OUT/src-counts.txt" "$OUT/tgt-counts.txt"; then
-  echo "COUNT ERRORS PRESENT — failures are never equal"
-  FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
-fi
+[ "$COUNT_ERROR" -eq 0 ] || FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
 if diff -u "$OUT/src-counts.txt" "$OUT/tgt-counts.txt"; then
   echo "exact row counts match"
 else

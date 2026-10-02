@@ -16,6 +16,21 @@ import (
 	_ "github.com/cloudfan/supabackup/backend/internal/db/migrations"
 )
 
+// dbOpenForCLIWithOverlay opens a CLI store whose migration set contains a
+// pending extra migration (simulating an upgrade in progress).
+func dbOpenForCLIWithOverlay(t *testing.T, dir string) (*Store, error) {
+	t.Helper()
+	s, err := OpenForCLI(dir)
+	if err != nil {
+		return nil, err
+	}
+	s.migrations = legacyMigrations{
+		"0001_auth.sql":         &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
+		"0009_test_pending.sql": &fstest.MapFile{Data: []byte("-- +goose Up\nSELECT 1;\n\n-- +goose Down\nSELECT 1;\n")},
+	}
+	return s, nil
+}
+
 // legacyMigrations is an fs.FS serving one historical migration file.
 type legacyMigrations fstest.MapFS
 
@@ -169,5 +184,26 @@ func TestUpgradedStoreStillWorks(t *testing.T) {
 	}
 	if ready, err := s.SchemaReady(); err != nil || !ready {
 		t.Fatalf("schema ready after upgrade: %v err=%v", ready, err)
+	}
+}
+
+// TestCLIReloadsPendingSchema (review round 4, P1-06): a database with
+// PENDING migrations (the owning server died mid-upgrade) must be refused for
+// CLI writes even though its version is not newer.
+func TestCLIReloadsPendingSchema(t *testing.T) {
+	// Build a legacy v1 database, then attach with a migrations FS that also
+	// contains a pending v2: the CLI must refuse to operate.
+	oldSQL := readEmbedded(t, "0001_auth.sql")
+	dir := t.TempDir()
+	buildLegacyDB(t, dir, legacyMigrations{"0001_auth.sql": &fstest.MapFile{Data: []byte(oldSQL)}})
+
+	s, err := dbOpenForCLIWithOverlay(t, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	err = s.EnsureFreshSchemaForCLI(context.Background())
+	if err == nil {
+		t.Fatal("pending migrations must block CLI writes")
 	}
 }

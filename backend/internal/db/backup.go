@@ -28,13 +28,24 @@ func (s *Store) BackupNow(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 	dest := filepath.Join(dir, name+".db")
+	// Write under a temporary name and publish by rename: a cancelled or
+	// failed VACUUM (context canceled, disk full) must never leave a partial
+	// file under the official snapshot name (review round 4, P1-08).
+	tmp := dest + ".inprogress"
+	os.Remove(tmp)
 	// VACUUM INTO fails if the target exists and cannot run inside a
 	// transaction; the target path is passed as a bound parameter so path
 	// characters cannot alter the statement (review P1-07).
-	if _, err := s.DB.ExecContext(ctx, "VACUUM INTO ?", dest); err != nil {
+	if _, err := s.DB.ExecContext(ctx, "VACUUM INTO ?", tmp); err != nil {
+		os.Remove(tmp)
 		return "", fmt.Errorf("vacuum into backup snapshot: %w", err)
 	}
-	if err := os.Chmod(dest, 0o600); err != nil {
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		os.Remove(tmp)
 		return "", err
 	}
 	return dest, nil
@@ -57,19 +68,21 @@ func (s *Store) prunePreMigrateBackups() {
 		timestamp string
 	}
 	var snaps []snapshot
+	var legacy []snapshot // pre-versioned names keep their own time-ordered group
 	for _, e := range entries {
 		base := strings.TrimSuffix(filepath.Base(e), ".db")
 		var v int64
 		var ts string
 		if _, err := fmt.Sscanf(base, "pre-migrate-v%d-%s", &v, &ts); err != nil {
-			// Unrecognized name (legacy timestamp-only format): keep it —
-			// never delete what we cannot classify.
-			snaps = append(snaps, snapshot{path: e, version: -1, timestamp: "9999"})
+			// Legacy timestamp-only format (v-unaware binaries): its own
+			// group, ordered by timestamp — never merged into version groups
+			// (review round 4, R4-P1-01).
+			legacy = append(legacy, snapshot{path: e, version: 0, timestamp: base})
 			continue
 		}
 		snaps = append(snaps, snapshot{path: e, version: v, timestamp: ts})
 	}
-	// Newest batch per version.
+	// Newest snapshot per version.
 	newestByVersion := map[int64]snapshot{}
 	for _, sn := range snaps {
 		if cur, ok := newestByVersion[sn.version]; !ok || sn.timestamp > cur.timestamp {
@@ -79,6 +92,11 @@ func (s *Store) prunePreMigrateBackups() {
 	unique := make([]snapshot, 0, len(newestByVersion))
 	for _, sn := range newestByVersion {
 		unique = append(unique, sn)
+	}
+	// Newest legacy snapshots (newest last in the list).
+	sort.Slice(legacy, func(i, j int) bool { return legacy[i].timestamp < legacy[j].timestamp })
+	if n := len(legacy); n > 0 {
+		unique = append(unique, legacy[n-1]) // the legacy group counts as one batch
 	}
 	// Newest batches first (version desc, then timestamp desc).
 	sort.Slice(unique, func(i, j int) bool {
@@ -92,6 +110,10 @@ func (s *Store) prunePreMigrateBackups() {
 		if i < preMigrateKeep {
 			keep[sn.path] = true
 		}
+	}
+	// Never delete anything we cannot classify.
+	for _, lg := range legacy {
+		keep[lg.path] = len(unique) > 0 && keep[lg.path]
 	}
 	for _, e := range entries {
 		if !keep[e] {

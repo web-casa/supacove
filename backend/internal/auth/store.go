@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // User is an account row.
@@ -330,7 +331,10 @@ const (
 )
 
 func ValidateUsername(u string) error {
-	if len(u) < usernameMin || len(u) > usernameMax {
+	// The contract counts CHARACTERS (review round 4, P1-09: 4 CJK chars are
+	// 12 bytes but 4 characters).
+	n := utf8.RuneCountInString(u)
+	if n < usernameMin || n > usernameMax {
 		return fmt.Errorf("username must be %d-%d characters", usernameMin, usernameMax)
 	}
 	for _, r := range u {
@@ -344,10 +348,11 @@ func ValidateUsername(u string) error {
 }
 
 func ValidatePassword(p string) error {
-	if len(p) < passwordMin {
+	n := utf8.RuneCountInString(p)
+	if n < passwordMin {
 		return fmt.Errorf("password must be at least %d characters", passwordMin)
 	}
-	if len(p) > passwordMax {
+	if n > passwordMax {
 		return fmt.Errorf("password must be at most %d characters", passwordMax)
 	}
 	return nil

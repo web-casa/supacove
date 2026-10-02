@@ -129,5 +129,16 @@ func (s *Store) EnsureFreshSchemaForCLI(ctx context.Context) error {
 	if !ready {
 		return errors.New("database schema is not initialized yet; start the server first and retry")
 	}
+	// An unfinished upgrade (pending migrations) means the owning server is
+	// mid-upgrade or dead: CLI writes are refused (review round 3/4, P1-06).
+	provider, err := s.migrationProvider()
+	if err != nil {
+		return err
+	}
+	if pending, err := provider.HasPending(ctx); err != nil {
+		return err
+	} else if pending {
+		return errors.New("database schema has pending migrations; run the server once to complete the upgrade")
+	}
 	return s.CheckSchemaCompatibility(ctx)
 }

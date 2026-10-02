@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
@@ -100,10 +101,13 @@ func (a *apiService) PostAuthLogin(ctx context.Context, request api.PostAuthLogi
 	if body == nil || body.Username == "" || body.Password == "" {
 		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username and password are required"}, nil
 	}
-	// Runtime field limits mirror the contract (review P0-02 remainder):
-	// oversized inputs are rejected before touching the KDF.
-	if len(body.Username) > 64 || len(body.Password) > 128 {
-		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username or password exceeds the allowed length"}, nil
+	// Runtime field limits mirror the contract in CHARACTER terms (review
+	// P0-02/P1-09 remainder): both bounds are enforced before the KDF.
+	if n := utf8.RuneCountInString(body.Username); n < 3 || n > 64 {
+		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username must be 3-64 characters"}, nil
+	}
+	if n := utf8.RuneCountInString(body.Password); n < 12 || n > 128 {
+		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "password must be 12-128 characters"}, nil
 	}
 
 	// Rate limiting already happened in the guard before decoding; issue the

@@ -77,7 +77,7 @@ jobs:
           build-args: |
             VERSION=ci
             COMMIT=${{ github.sha }}
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.head_commit.timestamp || 'unknown' }}
           tags: supabackup:ci
       - name: "Image smoke: non-root, healthz, takeover, healthcheck"
         run: |
@@ -88,6 +88,10 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/auth/bootstrap -H 'Content-Type: application/json' -d '{"token":"x","username":"nope","password":"nope-pass-123"}')
           test "$code" -ge 400
           docker exec sb-ci /app/supabackup bootstrap | grep -q "One-time bootstrap token"
+          test "$(docker inspect --format '{{.State.Health.Status}}' sb-ci)" = "healthy"
+          curl -fsS http://127.0.0.1:18080/ | grep -q supabackup
+          docker stop -t 15 sb-ci >/dev/null
+          test "$(docker inspect --format '{{.State.ExitCode}}' sb-ci)" = "0"
           docker rm -f sb-ci >/dev/null
       - name: "Workflow file is valid YAML"
         run: python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"

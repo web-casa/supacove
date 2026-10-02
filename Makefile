@@ -43,9 +43,7 @@ lint: ## gofmt + go vet
 	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
 	go vet ./backend/...
 
-check: lint api-check test ## Everything CI runs
-	cd frontend && npm ci && npm run lint && npm run build
-	$(MAKE) build
+check: lint test frontend api-check ## Everything CI runs (deps are set up by the frontend target first)
 
 clean:
 	rm -rf bin frontend/dist frontend/node_modules

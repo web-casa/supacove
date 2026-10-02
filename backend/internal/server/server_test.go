@@ -248,7 +248,7 @@ func TestLoginRateLimit(t *testing.T) {
 	saw429 := false
 	for i := 0; i < 7; i++ {
 		code, _ := postJSON(t, env, "/api/auth/login", map[string]string{
-			"username": "admin", "password": fmt.Sprintf("wrong-%d", i),
+			"username": "admin", "password": fmt.Sprintf("wrong-password-%d", i),
 		})
 		if code == http.StatusTooManyRequests {
 			saw429 = true
