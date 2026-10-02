@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,24 +66,31 @@ func (s *Store) IsFresh() (bool, error) {
 }
 
 // backupBeforeMigrate snapshots the store ahead of an actual schema upgrade.
-// It is only called when goose reports pending migrations (review P1-08), so
-// plain restarts never churn or prune the upgrade rollback point. A failure
-// here aborts the migration: the store may contain the only copy of scheduling
-// state and key references (dev-plan P0-08).
-func (s *Store) backupBeforeMigrate(ctx context.Context) error {
+// The snapshot name records the schema version being upgraded from, so
+// recovery points remain attributable across retries (review round 2, P1-08).
+// Pruning happens only after the upgrade SUCCEEDS (see Migrate). Returns the
+// backup file base name.
+func (s *Store) backupBeforeMigrate(ctx context.Context) (string, error) {
 	// A never-migrated database has nothing to roll back to: skip the
 	// snapshot and let fresh installs migrate directly (review P1-08).
 	fresh, err := s.IsFresh()
 	if err != nil {
-		return fmt.Errorf("check schema state: %w", err)
+		return "", fmt.Errorf("check schema state: %w", err)
 	}
 	if fresh {
-		return nil
+		return "", nil
 	}
-	name := "pre-migrate-" + time.Now().UTC().Format("20060102T150405.000000000")
+	version := schemaVersionForName(ctx, s.DB)
+	name := fmt.Sprintf("pre-migrate-v%d-%s", version, time.Now().UTC().Format("20060102T150405.000000000"))
 	if _, err := s.BackupNow(ctx, name); err != nil {
-		return fmt.Errorf("pre-migration backup failed, refusing to migrate: %w", err)
+		return "", fmt.Errorf("pre-migration backup failed, refusing to migrate: %w", err)
 	}
-	s.prunePreMigrateBackups()
-	return nil
+	return name, nil
+}
+
+func schemaVersionForName(ctx context.Context, db *sql.DB) int64 {
+	var v int64
+	_ = db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&v)
+	return v
 }

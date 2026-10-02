@@ -157,6 +157,10 @@ func runServe() error {
 	if err := store.Migrate(ctx); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
+	// Refuse to serve on top of a database written by a NEWER binary.
+	if err := store.SchemaVersionCompatible(ctx); err != nil {
+		return err
+	}
 
 	authStore := auth.NewStore(store.DB)
 	srv := server.New(store, authStore, cfg, key, limiter.New(), log, server.BuildInfo{
@@ -167,8 +171,11 @@ func runServe() error {
 		Addr:              cfg.Addr,
 		Handler:           srv.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		// ReadTimeout bounds the whole body read for control-plane JSON;
+		// streaming backup endpoints (later phases) get per-request deadlines.
+		ReadTimeout:    30 * time.Second,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	// Hourly purge of expired sessions and bootstrap tokens.

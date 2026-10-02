@@ -73,11 +73,13 @@ jobs:
         with:
           context: .
           load: true
+          target: runtime
           build-args: |
             VERSION=ci
             COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
           tags: supabackup:ci
-      - name: Smoke: non-root, healthz, takeover blocked, healthcheck
+      - name: "Image smoke: non-root, healthz, takeover, healthcheck"
         run: |
           docker run -d --name sb-ci -p 18080:8080 supabackup:ci
           sleep 3
@@ -87,3 +89,5 @@ jobs:
           test "$code" -ge 400
           docker exec sb-ci /app/supabackup bootstrap | grep -q "One-time bootstrap token"
           docker rm -f sb-ci >/dev/null
+      - name: "Workflow file is valid YAML"
+        run: python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"

@@ -1,6 +1,9 @@
 # supabackup — single-container production image.
 # Multi-stage: build SPA → build Go binary with the SPA embedded → slim runtime.
-# Build: docker build --build-arg VERSION=$(git describe --tags --always) -t supabackup .
+# Build (release = the `runtime` stage; ALWAYS pass --target when scripting):
+#   docker build --target runtime -t supabackup .
+# The file's last stage is runtime-spike (PG server binaries for ADR-004
+# experiments); compose and CI pin target: runtime and it must never ship.
 
 ARG GO_VERSION=1.26
 
@@ -24,6 +27,7 @@ COPY --from=frontend /src/dist ./backend/internal/web/dist
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
     -o /out/supabackup ./backend/cmd/supabackup
+
 
 FROM debian:bookworm-slim AS runtime
 # PostgreSQL clients come from PGDG (bookworm's own repo tops out below 18).
@@ -62,6 +66,11 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
 
 ENTRYPOINT ["/app/supabackup"]
 CMD ["serve"]
+
+# Runtime-shape verification target for Spike 2 (ADR-004): the release runtime
+# plus PostgreSQL server binaries, same non-root UID 10001, for the
+# embedded-verifier feasibility experiment. compose/CI pin target: runtime;
+# this last stage must never be shipped by default.
 
 # Runtime-shape verification target for Spike 2 (ADR-004): the release runtime
 # plus PostgreSQL server binaries, same non-root UID 10001, for the

@@ -133,29 +133,48 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	// Hex-encoded for human inspectability; permissions are the security
-	// boundary. O_EXCL makes concurrent first starts pick exactly one winner;
-	// losers re-read the winner's key.
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	// boundary. The key is written COMPLETELY to a temp file, fsynced, then
+	// published with link(2) — atomic and never overwriting — so a concurrent
+	// reader can never observe a half-written secret and a crash cannot leave
+	// an invalid final file (review round 2, P1-04 remainder).
+	tmp, err := os.CreateTemp(dir, ".secret-*.tmp")
 	if err != nil {
+		return nil, err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once linked and removed below
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return nil, err
+	}
+	if _, err := tmp.Write([]byte(hex.EncodeToString(key))); err != nil {
+		tmp.Close()
+		return nil, err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return nil, err
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Link(tmpName, path); err != nil {
 		if errors.Is(err, os.ErrExist) {
+			// Someone else won the race; use their key.
 			return LoadOrCreateSecret(path)
 		}
 		return nil, err
 	}
-	if _, err := f.Write([]byte(hex.EncodeToString(key))); err != nil {
-		f.Close()
-		return nil, err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return nil, err
-	}
-	if err := f.Close(); err != nil {
-		return nil, err
+	os.Remove(tmpName)
+	// Sync the directory so the link survives a crash.
+	if d, err := os.Open(dir); err == nil {
+		d.Sync()
+		d.Close()
 	}
 	return key, nil
 }

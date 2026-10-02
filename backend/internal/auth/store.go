@@ -197,12 +197,15 @@ func (s *Store) IssueSession(ctx context.Context, username, password string, ttl
 		`SELECT id, username, password_hash, auth_generation, created_at FROM users WHERE username = ?`,
 		username).Scan(&u.ID, &u.Username, &hash, &generation, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Burn comparable time to reduce a username oracle.
+		// Burn comparable time to reduce a username oracle. KDF-busy errors
+		// MUST propagate here too: otherwise 401 (unknown user) vs 503 (known
+		// user) under load would leak account existence (review R2-P2-01).
 		release, kerr := acquireKDF(ctx)
-		if kerr == nil {
-			_, _ = HashPassword(password)
-			release()
+		if kerr != nil {
+			return nil, "", kerr
 		}
+		_, _ = HashPassword(password)
+		release()
 		return nil, "", ErrBadCredentials
 	}
 	if err != nil {

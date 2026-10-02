@@ -400,6 +400,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Origin header present but not same-origin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             /** @description Rate limited (too many attempts or consecutive failures). */
@@ -418,7 +427,10 @@ export interface operations {
     postAuthLogout: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Session-bound CSRF token (double-submit via the sb_csrf cookie). */
+                "X-CSRF-Token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -480,6 +492,15 @@ export interface operations {
                 };
             };
             500: components["responses"]["Internal"];
+            /** @description Session storage temporarily unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
 }

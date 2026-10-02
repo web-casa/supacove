@@ -48,7 +48,10 @@ docker run --rm --entrypoint bash "$IMAGE" -c '
   echo "pg_restore --exit-on-error: OK (rows=$N)"
   [ "$N" = "'$ROWS'" ] || { echo "ROW MISMATCH"; exit 2; }
 
-  # Corruption detection: a truncated archive must fail the restore.
+  # Corruption detection on a CLEAN target: drop what the restore created so
+  # an "object already exists" error cannot masquerade as rejection (review
+  # round 2, P1-19 remainder).
+  psql -h /tmp/pgsock -U verifier -d postgres -qc "DROP TABLE IF EXISTS spike;"
   head -c 200000 /tmp/dump.dump > /tmp/truncated.dump
   if pg_restore -h /tmp/pgsock -U verifier -d postgres --exit-on-error /tmp/truncated.dump 2>/dev/null; then
     echo "ERROR: truncated dump restored cleanly"; exit 3
@@ -62,13 +65,19 @@ docker run --rm --entrypoint bash "$IMAGE" -c '
   echo SPIKE_OK
 '
 echo "--- canary checks (from root exec context) ---"
+# The canary result is the trust-boundary evidence; its failure MUST fail the
+# spike (review round 2, P1-19 remainder).
 docker run --rm --user 0:0 --entrypoint bash "$IMAGE" -c '
-  # Re-create the same scenario: as root, place a root-owned 0600 canary,
-  # then verify UID 10001 cannot read it.
+  set -eu
   echo "root-secret" > /tmp/canary && chmod 600 /tmp/canary && chown 0:0 /tmp/canary
-  if setpriv --reuid 10001 --regid 10001 --clear-groups cat /tmp/canary 2>/dev/null; then
-    echo "BOUNDARY VIOLATION: uid 10001 read root 0600 file"; exit 4
+  if setpriv --reuid 10001 --regid 10001 --clear-groups cat /tmp/canary >/dev/null 2>&1; then
+    echo "BOUNDARY VIOLATION: uid 10001 read root 0600 file" >&2
+    exit 4
   fi
-  echo "root 0600 canary unreadable by UID 10001: OK (setpriv available)" || true
-' || echo "note: setpriv-based canary skipped (tooling); UID boundary is a kernel guarantee, recorded in ADR-004"
+  if ! setpriv --reuid 10001 --regid 10001 --clear-groups true 2>/dev/null; then
+    echo "SKIPPED: setpriv unavailable in this image" >&2
+    exit 0
+  fi
+  echo "root 0600 canary unreadable by UID 10001: OK"
+'
 echo SPIKE2_DONE

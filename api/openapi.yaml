@@ -128,6 +128,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
+        "403":
+          description: Origin header present but not same-origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "400":
           description: Validation error.
           content:
@@ -158,6 +164,13 @@ paths:
     post:
       operationId: postAuthLogout
       summary: Revoke the current session.
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Session-bound CSRF token (double-submit via the sb_csrf cookie).
       responses:
         "204":
           description: Logged out.
@@ -194,6 +207,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/Internal"
+        "503":
+          description: Session storage temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 components:
   responses:
     PayloadTooLarge:
@@ -278,14 +297,17 @@ components:
       properties:
         token:
           type: string
+          maxLength: 128
           description: One-time token printed by `supabackup bootstrap`.
         username:
           type: string
           minLength: 3
           maxLength: 64
+          pattern: "^[A-Za-z0-9._-]+$"
         password:
           type: string
           minLength: 12
+          maxLength: 128
           format: password
     LoginRequest:
       type: object
@@ -293,8 +315,12 @@ components:
       properties:
         username:
           type: string
+          minLength: 3
+          maxLength: 64
         password:
           type: string
+          minLength: 12
+          maxLength: 128
           format: password
     Error:
       type: object

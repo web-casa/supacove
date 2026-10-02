@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/runtime"
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
@@ -87,6 +88,12 @@ type RateLimited = Error
 // UnsupportedMediaType defines model for UnsupportedMediaType.
 type UnsupportedMediaType = Error
 
+// PostAuthLogoutParams defines parameters for PostAuthLogout.
+type PostAuthLogoutParams struct {
+	// XCSRFToken Session-bound CSRF token (double-submit via the sb_csrf cookie).
+	XCSRFToken string `json:"X-CSRF-Token"`
+}
+
 // PostAuthBootstrapJSONRequestBody defines body for PostAuthBootstrap for application/json ContentType.
 type PostAuthBootstrapJSONRequestBody = BootstrapRequest
 
@@ -103,7 +110,7 @@ type ServerInterface interface {
 	PostAuthLogin(w http.ResponseWriter, r *http.Request)
 	// Revoke the current session.
 	// (POST /auth/logout)
-	PostAuthLogout(w http.ResponseWriter, r *http.Request)
+	PostAuthLogout(w http.ResponseWriter, r *http.Request, params PostAuthLogoutParams)
 	// Current authenticated user.
 	// (GET /auth/me)
 	GetAuthMe(w http.ResponseWriter, r *http.Request)
@@ -136,7 +143,7 @@ func (_ Unimplemented) PostAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 // Revoke the current session.
 // (POST /auth/logout)
-func (_ Unimplemented) PostAuthLogout(w http.ResponseWriter, r *http.Request) {
+func (_ Unimplemented) PostAuthLogout(w http.ResponseWriter, r *http.Request, params PostAuthLogoutParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -204,14 +211,44 @@ func (siw *ServerInterfaceWrapper) PostAuthLogin(w http.ResponseWriter, r *http.
 // PostAuthLogout operation middleware
 func (siw *ServerInterfaceWrapper) PostAuthLogout(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PostAuthLogoutParams
+
+	headers := r.Header
+
+	// ------------- Required header parameter "X-CSRF-Token" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("X-CSRF-Token")]; found {
+		var XCSRFToken string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "X-CSRF-Token", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "X-CSRF-Token", valueList[0], &XCSRFToken, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "X-CSRF-Token", Err: err})
+			return
+		}
+
+		params.XCSRFToken = XCSRFToken
+
+	} else {
+		err := fmt.Errorf("Header parameter X-CSRF-Token is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "X-CSRF-Token", Err: err})
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostAuthLogout(w, r)
+		siw.Handler.PostAuthLogout(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -554,6 +591,15 @@ func (response PostAuthLogin401JSONResponse) VisitPostAuthLoginResponse(w http.R
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PostAuthLogin403JSONResponse Error
+
+func (response PostAuthLogin403JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type PostAuthLogin413JSONResponse struct{ PayloadTooLargeJSONResponse }
 
 func (response PostAuthLogin413JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
@@ -602,6 +648,7 @@ func (response PostAuthLogin503JSONResponse) VisitPostAuthLoginResponse(w http.R
 }
 
 type PostAuthLogoutRequestObject struct {
+	Params PostAuthLogoutParams
 }
 
 type PostAuthLogoutResponseObject interface {
@@ -673,6 +720,15 @@ type GetAuthMe500JSONResponse struct{ InternalJSONResponse }
 func (response GetAuthMe500JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAuthMe503JSONResponse Error
+
+func (response GetAuthMe503JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -860,8 +916,10 @@ func (sh *strictHandler) PostAuthLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // PostAuthLogout operation middleware
-func (sh *strictHandler) PostAuthLogout(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) PostAuthLogout(w http.ResponseWriter, r *http.Request, params PostAuthLogoutParams) {
 	var request PostAuthLogoutRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.PostAuthLogout(ctx, request.(PostAuthLogoutRequestObject))

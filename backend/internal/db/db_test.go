@@ -386,7 +386,8 @@ func TestMigrateNoPendingDoesNotCreateOrPruneBackup(t *testing.T) {
 
 func TestBackupBeforeMigrateSkippedOnFreshDB(t *testing.T) {
 	s := openTestStore(t)
-	if err := s.backupBeforeMigrate(context.Background()); err != nil {
-		t.Fatalf("fresh db must not require a backup: %v", err)
+	name, err := s.backupBeforeMigrate(context.Background())
+	if err != nil || name != "" {
+		t.Fatalf("fresh db must not require a backup: name=%q err=%v", name, err)
 	}
 }

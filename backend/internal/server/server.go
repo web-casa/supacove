@@ -4,12 +4,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -221,36 +224,58 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		if req.Body != nil {
 			req.Body = http.MaxBytesReader(w, req.Body, apiBodyLimit)
 		}
-		// JSON media type is required for bodies the contract declares as JSON.
+		// JSON media type is required and must be exactly application/json
+		// (parameters like charset are fine; jsonp or missing types are not —
+		// review round 2, P1-09 remainder).
 		if !safeMethod(req.Method) && req.Body != nil && req.ContentLength != 0 {
-			if ct := req.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+			ct := req.Header.Get("Content-Type")
+			mt, _, ok := strings.Cut(strings.ToLower(ct), ";")
+			mt = strings.TrimSpace(mt)
+			if !ok && mt == "" {
+				mt = strings.TrimSpace(strings.ToLower(ct))
+			}
+			if mt != "application/json" {
 				writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
 					"Content-Type must be application/json")
 				return
 			}
+		}
+		// A repeated Origin header is never a valid browser signature.
+		if len(req.Header.Values("Origin")) > 1 {
+			writeError(w, http.StatusForbidden, "cross_origin", "invalid Origin header")
+			return
 		}
 		if !safeMethod(req.Method) && !s.sameOrigin(req) {
 			writeError(w, http.StatusForbidden, "cross_origin", "cross-origin state changes are rejected")
 			return
 		}
 
-		if anonymousAPI[req.Method][req.URL.Path] {
-			if req.URL.Path == loginPath {
-				ip := s.clientIP(req)
-				if !s.lim.Allow(ip) {
-					writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
-					return
-				}
-				lw := &loginAttemptWriter{ResponseWriter: w}
-				next.ServeHTTP(lw, req)
-				switch lw.status {
-				case http.StatusOK, http.StatusCreated:
-					s.lim.Reset(ip)
-				case http.StatusUnauthorized, http.StatusBadRequest:
-					s.lim.Fail(ip)
-				}
+		// The anonymous auth endpoints get bounded, fully-read JSON: the body
+		// (≤16 KiB) is read exactly once here so the strict handler cannot be
+		// fed trailing garbage after the first JSON value, and so both
+		// bootstrap and login are rate limited BEFORE any expensive work
+		// (review P0-02 and round-2 remainder).
+		if !safeMethod(req.Method) && strings.HasPrefix(req.URL.Path, "/api/auth/") && req.ContentLength != 0 {
+			ip := s.clientIP(req)
+			if !s.lim.Allow(ip) {
+				writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
 				return
 			}
+			if _, ok := s.readWholeJSON(w, req); !ok {
+				return // response already written
+			}
+			lw := &loginAttemptWriter{ResponseWriter: w}
+			next.ServeHTTP(lw, req)
+			switch lw.status {
+			case http.StatusOK, http.StatusCreated:
+				s.lim.Reset(ip)
+			case http.StatusUnauthorized, http.StatusBadRequest, http.StatusForbidden:
+				s.lim.Fail(ip)
+			}
+			return
+		}
+
+		if anonymousAPI[req.Method][req.URL.Path] {
 			next.ServeHTTP(w, req)
 			return
 		}
@@ -273,6 +298,36 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ctxSessionRaw, raw)
 		next.ServeHTTP(w, req.WithContext(ctx))
 	})
+}
+
+// readWholeJSON reads the (already size-capped) request body completely and
+// verifies it is exactly one JSON value, then rewires the body for downstream
+// decoding. Failures write the error response and return false.
+func (s *Server) readWholeJSON(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
+	raw, err := io.ReadAll(req.Body)
+	req.Body.Close()
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errorsAs(err, &mbe) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large",
+				"request body exceeds the allowed size")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
+		}
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(new(json.RawMessage)); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		return nil, false
+	}
+	if dec.More() {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON value")
+		return nil, false
+	}
+	req.Body = io.NopCloser(bytes.NewReader(raw))
+	req.ContentLength = int64(len(raw))
+	return raw, true
 }
 
 // loginAttemptWriter records the status code so the guard can credit or debit

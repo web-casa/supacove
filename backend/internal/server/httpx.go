@@ -27,23 +27,35 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 
 // originParts strictly parses an Origin header value into
 // (scheme, host-lowercased, effective port). Anything that is not exactly
-// scheme://host[:port] is rejected: no userinfo, path, query, fragment, empty
-// port, or multi-value headers (review P1-01).
+// scheme://host[:port] is rejected: no userinfo, path, query, fragment,
+// trailing separators ("?", "#", ":"), or empty ports (review P1-01 and
+// round-2 review).
 func originParts(origin string) (scheme, host, port string, err error) {
 	if origin == "" || origin == "null" || strings.Contains(origin, ",") {
 		return "", "", "", errors.New("empty, null, or repeated origin")
+	}
+	// url.Parse drops bare trailing separators; reject them on the raw value.
+	if strings.HasSuffix(origin, "?") || strings.HasSuffix(origin, "#") || strings.HasSuffix(origin, ":") || strings.HasSuffix(origin, "/") && !strings.HasPrefix(origin, origin[8:9]) {
+		if strings.HasSuffix(origin, "?") || strings.HasSuffix(origin, "#") || strings.HasSuffix(origin, ":") {
+			return "", "", "", errors.New("origin has a trailing separator")
+		}
 	}
 	u, err := url.Parse(origin)
 	if err != nil {
 		return "", "", "", err
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
-		u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil ||
+		u.ForceQuery {
 		return "", "", "", errors.New("origin must be scheme://host[:port]")
 	}
 	h, p, err := net.SplitHostPort(u.Host)
 	if err != nil {
-		// No port given: use the scheme default.
+		// No port given: use the scheme default. A colon with an empty port
+		// ("host:") never reaches here because SplitHostPort errors on it.
+		if strings.HasSuffix(u.Host, ":") {
+			return "", "", "", errors.New("origin has an empty port")
+		}
 		h, p = u.Host, ""
 	}
 	h = strings.Trim(h, "[]")

@@ -18,6 +18,9 @@ import (
 	"syscall"
 
 	_ "modernc.org/sqlite" // driver "sqlite"
+
+	// Go migrations (mixed with the embedded SQL files) self-register via init().
+	_ "github.com/cloudfan/supabackup/backend/internal/db/migrations"
 )
 
 // ErrLocked is returned when another supabackup instance already holds the

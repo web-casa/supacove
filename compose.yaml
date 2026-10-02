@@ -9,6 +9,7 @@ services:
   app:
     build:
       context: .
+      target: runtime
       args:
         VERSION: dev
     ports:

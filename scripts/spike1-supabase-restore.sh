@@ -106,10 +106,17 @@ if [ "${#CUSTOM_ROLES[@]}" -gt 0 ]; then
     role_args+=(--role "$r")
   done
   for r in "${CUSTOM_ROLES[@]}"; do
-    psql --dbname="$TARGET_DB_URL" -qc "DO \$\$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$r') THEN
-        CREATE ROLE \"$r\" NOLOGIN;
-      END IF; END \$\$;" || true
+    # Identifier names are bound as psql variables (stdin mode; -c does not
+    # interpolate) and quoted server-side with format('%I') — never
+    # interpolated into SQL text (review R2-P1-04).
+    stage_sql=$(printf "SELECT format('SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %%L) THEN \'-- exists\' ELSE format(\'CREATE ROLE %%I NOLOGIN\', %%L) END', :'role', :'role');" \
+      | psql --dbname="$TARGET_DB_URL" -At -v role="$r") || { echo "role quoting failed for: $r" >&2; exit 1; }
+    [ -n "$stage_sql" ] || { echo "role quoting empty for: $r" >&2; exit 1; }
+    if [ "$stage_sql" = "-- exists" ]; then
+      echo "role already present: $r" >&2
+    else
+      psql --dbname="$TARGET_DB_URL" -qc "$stage_sql" || { echo "role create failed for: $r" >&2; exit 1; }
+    fi
   done
 fi
 
@@ -164,15 +171,20 @@ count_rows() { # $1=url $2=outfile
 : > "$OUT/src-counts.txt"
 : > "$OUT/tgt-counts.txt"
 for s in "${USER_SCHEMAS[@]}"; do
-  while IFS='|' read -r tbl; do
+  # Table list: schema name bound as a psql variable, quoted server-side.
+  while IFS= read -r tbl; do
     [ -n "$tbl" ] || continue
-    src_n=$(psql --dbname="$SOURCE_DB_URL" -At -c "SELECT count(*) FROM \"$s\".\"$tbl\"" 2>>"$OUT/count-errors.log")
-    tgt_n=$(psql --dbname="$TARGET_DB_URL" -At -c "SELECT count(*) FROM \"$s\".\"$tbl\"" 2>>"$OUT/count-errors.log")
+    count_sql=$(printf "SELECT format('SELECT count(*) FROM %%I.%%I', :'sch', :'tbl');" \
+      | psql --dbname="$SOURCE_DB_URL" -At -v sch="$s" -v tbl="$tbl") \
+      || { echo "quote generation failed: $s.$tbl" >&2; exit 1; }
+    src_n=$(psql --dbname="$SOURCE_DB_URL" -At -c "$count_sql" 2>>"$OUT/count-errors.log") \
+      || { echo "source count FAILED: $s.$tbl (recorded as FAIL)"; src_n="FAIL"; }
+    tgt_n=$(psql --dbname="$TARGET_DB_URL" -At -c "$count_sql" 2>>"$OUT/count-errors.log") \
+      || { echo "target count FAILED: $s.$tbl (recorded as FAIL)"; tgt_n="FAIL"; }
     echo "$s.$tbl:$src_n" >> "$OUT/src-counts.txt"
     echo "$s.$tbl:$tgt_n" >> "$OUT/tgt-counts.txt"
-  done < <(psql --dbname="$SOURCE_DB_URL" -At -c \
-    "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = '$s' AND c.relkind = 'r' ORDER BY 1")
+  done < <(printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
+    | psql --dbname="$SOURCE_DB_URL" -At -v sch="$s")
 done
 if diff -u "$OUT/src-counts.txt" "$OUT/tgt-counts.txt"; then
   echo "exact row counts match"

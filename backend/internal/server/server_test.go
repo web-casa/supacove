@@ -357,12 +357,20 @@ func TestAuthBodyLimitAndValidation(t *testing.T) {
 		t.Fatalf("oversized body: want 413 payload_too_large, got %d %v", code, body)
 	}
 
-	code, body = postJSON(t, env, "/api/auth/login", "{ malformed")
+	code, body = do(t, env.client, http.MethodPost, env.base+"/api/auth/login", "{ malformed",
+		map[string]string{"Content-Type": "application/json"})
 	if code != http.StatusBadRequest || body["code"] != "invalid_request" {
 		t.Fatalf("malformed JSON: want 400 invalid_request, got %d %v", code, body)
 	}
+	// Trailing garbage after one JSON value is rejected, not silently decoded.
+	code, body = do(t, env.client, http.MethodPost, env.base+"/api/auth/login",
+		`{"username":"admin","password":"long-enough-password"} trailing`,
+		map[string]string{"Content-Type": "application/json"})
+	if code != http.StatusBadRequest || body["code"] != "invalid_request" {
+		t.Fatalf("trailing JSON garbage: want 400 invalid_request, got %d %v", code, body)
+	}
 
-	code, body = postJSON(t, env, "/api/auth/login", "{}")
+	code, body = postJSON(t, env, "/api/auth/login", map[string]string{})
 	if code != http.StatusBadRequest || body["code"] != "invalid_request" {
 		t.Fatalf("missing required fields: want 400, got %d %v", code, body)
 	}
