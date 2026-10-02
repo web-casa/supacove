@@ -1,0 +1,246 @@
+openapi: 3.0.3
+info:
+  title: supabackup API
+  version: 0.1.0
+  description: |
+    supabackup control-plane API (Phase 1 scope: health, bootstrap, auth).
+
+    Contract-first: this file is the single source of truth. Server types are
+    generated with oapi-codegen (strict server), frontend types with
+    openapi-typescript. CI fails if committed generated files drift from this
+    contract. Generated types do NOT replace server-side runtime validation.
+servers:
+  - url: /api
+    description: All routes are served under the /api base path by the server.
+security:
+  - cookieAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness (process alive). Anonymous and information-free.
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /ready:
+    get:
+      operationId: getReady
+      summary: "Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data."
+      security: []
+      responses:
+        "200":
+          description: Ready to serve.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Not ready (starting up, migration pending, or DB error).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /health/details:
+    get:
+      operationId: getHealthDetails
+      summary: Detailed runtime diagnostics. Requires authentication.
+      responses:
+        "200":
+          description: Runtime details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthDetails"
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/bootstrap:
+    post:
+      operationId: postAuthBootstrap
+      summary: Create the initial admin using a one-time token from the local CLI.
+      description: |
+        Fails with 403 if the token is unknown, used or expired; 409 if any
+        admin user already exists. This endpoint can never be used by a
+        public first visitor without the locally printed token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BootstrapRequest"
+      responses:
+        "201":
+          description: Admin created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Invalid, used or expired bootstrap token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Already initialized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/login:
+    post:
+      operationId: postAuthLogin
+      summary: Log in with username and password.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in; session and CSRF cookies are set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Bad credentials (indistinguishable unknown-user vs wrong-password).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limited (too many attempts or consecutive failures).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/logout:
+    post:
+      operationId: postAuthLogout
+      summary: Revoke the current session.
+      responses:
+        "204":
+          description: Logged out.
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/me:
+    get:
+      operationId: getAuthMe
+      summary: Current authenticated user.
+      responses:
+        "200":
+          description: The current user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sb_session
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+    HealthDetails:
+      type: object
+      required: [version, commit, goVersion, uptimeSeconds]
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+        goVersion:
+          type: string
+        uptimeSeconds:
+          type: integer
+          format: int64
+        sqliteOpenConns:
+          type: integer
+    User:
+      type: object
+      required: [id, username, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix seconds.
+    BootstrapRequest:
+      type: object
+      required: [token, username, password]
+      properties:
+        token:
+          type: string
+          description: One-time token printed by `supabackup bootstrap`.
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 12
+          format: password
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable error class.
+        message:
+          type: string
+          description: Human-readable, credential-free.

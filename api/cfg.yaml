@@ -1,0 +1,8 @@
+# oapi-codegen configuration: strict server + models from api/openapi.yaml.
+# Regenerate: make api-gen ; CI regenerates and fails on drift.
+package: api
+output: ../backend/internal/api/api.gen.go
+generate:
+  models: true
+  chi-server: true
+  strict-server: true

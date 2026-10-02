@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+      - name: gofmt
+        run: test -z "$(gofmt -l backend | grep -v api.gen.go)" || { gofmt -l backend; exit 1; }
+      - name: vet
+        run: go vet ./...
+      - name: test (race)
+        run: go test -race ./...
+      - name: build
+        run: CGO_ENABLED=0 go build ./...
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+      - name: Install oapi-codegen
+        run: go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
+      - name: Regenerate server types
+        run: $(go env GOPATH)/bin/oapi-codegen -config api/cfg.yaml api/openapi.yaml
+      - name: Fail on drift
+        run: git diff --exit-code -- backend/internal/api || { echo "::error::api.gen.go drifted from api/openapi.yaml"; exit 1; }
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-fund --no-audit
+      - name: Regenerate API types
+        working-directory: frontend
+        run: npm run gen:api
+      - name: Fail on drift
+        run: git diff --exit-code -- frontend/src/api/schema.d.ts || { echo "::error::schema.d.ts drifted from api/openapi.yaml"; exit 1; }
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Build
+        working-directory: frontend
+        run: npm run build

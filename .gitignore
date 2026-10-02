@@ -1,0 +1,23 @@
+# Build artifacts
+bin/
+frontend/dist/
+frontend/node_modules/
+
+# Embedded SPA build output (a placeholder index.html stays committed for
+# pre-frontend builds); real builds are never committed.
+backend/internal/web/dist/*
+!backend/internal/web/dist/index.html
+
+# Runtime data
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local env
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+*.swp
