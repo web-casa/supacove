@@ -1,9 +1,11 @@
 package db
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,16 +15,22 @@ const preMigrateKeep = 5
 // BackupNow writes a consistent snapshot of the store to
 // <dataDir>/backups/<name>.db via VACUUM INTO (SQLite online-consistent
 // copy; copying the .db file alone under WAL is not safe — dev-plan P0-08).
-func (s *Store) BackupNow(name string) (string, error) {
+func (s *Store) BackupNow(ctx context.Context, name string) (string, error) {
+	// The name is generated internally; refuse anything that is not a plain
+	// basename so it can never escape the backups directory.
+	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid backup name %q", name)
+	}
 	dir := filepath.Join(s.dataDir, backupDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create backup dir: %w", err)
 	}
 	dest := filepath.Join(dir, name+".db")
-	// VACUUM INTO fails if the target exists and cannot run inside a transaction;
-	// the name is generated internally, so quoting is safe.
-	if _, err := s.DB.Exec(fmt.Sprintf("VACUUM INTO %q", dest)); err != nil {
-		return "", fmt.Errorf("vacuum into %s: %w", dest, err)
+	// VACUUM INTO fails if the target exists and cannot run inside a
+	// transaction; the target path is passed as a bound parameter so path
+	// characters cannot alter the statement (review P1-07).
+	if _, err := s.DB.ExecContext(ctx, "VACUUM INTO ?", dest); err != nil {
+		return "", fmt.Errorf("vacuum into backup snapshot: %w", err)
 	}
 	if err := os.Chmod(dest, 0o600); err != nil {
 		return "", err
@@ -38,7 +46,10 @@ func (s *Store) prunePreMigrateBackups() {
 	}
 	// Glob returns sorted names; the timestamp format keeps that chronological.
 	for _, old := range entries[:len(entries)-preMigrateKeep] {
-		os.Remove(old)
+		if rmErr := os.Remove(old); rmErr != nil {
+			// Pruning failures must be observable but never block a migration.
+			fmt.Fprintf(os.Stderr, "warning: removing old pre-migration backup %s: %v\n", old, rmErr)
+		}
 	}
 }
 
@@ -53,12 +64,14 @@ func (s *Store) IsFresh() (bool, error) {
 	return n == 0, nil
 }
 
-// backupBeforeMigrate snapshots the store ahead of a schema migration unless
-// the database is fresh. A failure here must abort the migration: the store
-// may contain the only copy of scheduling state and key references
-// (dev-plan P0-08: migrate with an automatic consistent backup, refuse write
-// service when the backup fails — we fail startup entirely).
-func (s *Store) backupBeforeMigrate() error {
+// backupBeforeMigrate snapshots the store ahead of an actual schema upgrade.
+// It is only called when goose reports pending migrations (review P1-08), so
+// plain restarts never churn or prune the upgrade rollback point. A failure
+// here aborts the migration: the store may contain the only copy of scheduling
+// state and key references (dev-plan P0-08).
+func (s *Store) backupBeforeMigrate(ctx context.Context) error {
+	// A never-migrated database has nothing to roll back to: skip the
+	// snapshot and let fresh installs migrate directly (review P1-08).
 	fresh, err := s.IsFresh()
 	if err != nil {
 		return fmt.Errorf("check schema state: %w", err)
@@ -67,7 +80,7 @@ func (s *Store) backupBeforeMigrate() error {
 		return nil
 	}
 	name := "pre-migrate-" + time.Now().UTC().Format("20060102T150405.000000000")
-	if _, err := s.BackupNow(name); err != nil {
+	if _, err := s.BackupNow(ctx, name); err != nil {
 		return fmt.Errorf("pre-migration backup failed, refusing to migrate: %w", err)
 	}
 	s.prunePreMigrateBackups()

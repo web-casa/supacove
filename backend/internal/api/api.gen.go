@@ -72,6 +72,21 @@ type User struct {
 	Username  string `json:"username"`
 }
 
+// Internal defines model for Internal.
+type Internal = Error
+
+// Overloaded defines model for Overloaded.
+type Overloaded = Error
+
+// PayloadTooLarge defines model for PayloadTooLarge.
+type PayloadTooLarge = Error
+
+// RateLimited defines model for RateLimited.
+type RateLimited = Error
+
+// UnsupportedMediaType defines model for UnsupportedMediaType.
+type UnsupportedMediaType = Error
+
 // PostAuthBootstrapJSONRequestBody defines body for PostAuthBootstrap for application/json ContentType.
 type PostAuthBootstrapJSONRequestBody = BootstrapRequest
 
@@ -412,6 +427,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	return r
 }
 
+type InternalJSONResponse Error
+
+type OverloadedJSONResponse Error
+
+type PayloadTooLargeJSONResponse Error
+
+type RateLimitedJSONResponse Error
+
+type UnsupportedMediaTypeJSONResponse Error
+
 type PostAuthBootstrapRequestObject struct {
 	Body *PostAuthBootstrapJSONRequestBody
 }
@@ -456,6 +481,44 @@ func (response PostAuthBootstrap409JSONResponse) VisitPostAuthBootstrapResponse(
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PostAuthBootstrap413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response PostAuthBootstrap413JSONResponse) VisitPostAuthBootstrapResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthBootstrap415JSONResponse struct {
+	UnsupportedMediaTypeJSONResponse
+}
+
+func (response PostAuthBootstrap415JSONResponse) VisitPostAuthBootstrapResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(415)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthBootstrap429JSONResponse struct{ RateLimitedJSONResponse }
+
+func (response PostAuthBootstrap429JSONResponse) VisitPostAuthBootstrapResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthBootstrap500JSONResponse struct{ InternalJSONResponse }
+
+func (response PostAuthBootstrap500JSONResponse) VisitPostAuthBootstrapResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type PostAuthLoginRequestObject struct {
 	Body *PostAuthLoginJSONRequestBody
 }
@@ -491,11 +554,49 @@ func (response PostAuthLogin401JSONResponse) VisitPostAuthLoginResponse(w http.R
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PostAuthLogin413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response PostAuthLogin413JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthLogin415JSONResponse struct {
+	UnsupportedMediaTypeJSONResponse
+}
+
+func (response PostAuthLogin415JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(415)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type PostAuthLogin429JSONResponse Error
 
 func (response PostAuthLogin429JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(429)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthLogin500JSONResponse struct{ InternalJSONResponse }
+
+func (response PostAuthLogin500JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthLogin503JSONResponse struct{ OverloadedJSONResponse }
+
+func (response PostAuthLogin503JSONResponse) VisitPostAuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -524,6 +625,24 @@ func (response PostAuthLogout401JSONResponse) VisitPostAuthLogoutResponse(w http
 	return json.NewEncoder(w).Encode(response)
 }
 
+type PostAuthLogout403JSONResponse Error
+
+func (response PostAuthLogout403JSONResponse) VisitPostAuthLogoutResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostAuthLogout500JSONResponse struct{ InternalJSONResponse }
+
+func (response PostAuthLogout500JSONResponse) VisitPostAuthLogoutResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetAuthMeRequestObject struct {
 }
 
@@ -545,6 +664,15 @@ type GetAuthMe401JSONResponse Error
 func (response GetAuthMe401JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAuthMe500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetAuthMe500JSONResponse) VisitGetAuthMeResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
 
 	return json.NewEncoder(w).Encode(response)
 }

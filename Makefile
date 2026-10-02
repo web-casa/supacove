@@ -7,6 +7,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.bui
 OAPI := $(shell go env GOPATH)/bin/oapi-codegen
 
 .PHONY: help build backend frontend api-gen api-check dev test lint check clean
+.NOTPARALLEL:
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -19,12 +20,14 @@ frontend: ## Build the SPA and copy it into the Go embed directory
 	rm -rf backend/internal/web/dist
 	cp -r frontend/dist backend/internal/web/dist
 
+build: frontend backend ## Build everything: SPA first, then the Go binary embedding it
+
 api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
-	$(OAPI) -config api/cfg.yaml api/openapi.yaml
+		$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 
 api-check: ## Fail if generated code drifted from the OpenAPI contract
-	$(OAPI) -config api/cfg.yaml api/openapi.yaml
+		$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 	git diff --exit-code -- backend/internal/api api frontend/src/api/schema.d.ts || \
 		(echo "ERROR: generated code drifted from api/openapi.yaml — run 'make api-gen' and commit" && exit 1)
@@ -33,14 +36,15 @@ dev: ## Start the full dev environment (app + PostgreSQL + MinIO)
 	docker compose up --build
 
 test: ## Run backend tests with the race detector
-	go test -race ./...
+	go test -race ./backend/...
 
 lint: ## gofmt + go vet
 	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
-	go vet ./...
+	go vet ./backend/...
 
 check: lint api-check test ## Everything CI runs
 	cd frontend && npm ci && npm run lint && npm run build
+	$(MAKE) build
 
 clean:
 	rm -rf bin frontend/dist frontend/node_modules

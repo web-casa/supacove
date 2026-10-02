@@ -12,6 +12,7 @@ const (
 	maxPerWindow  = 10
 	lockoutAfter  = 5 // consecutive failures
 	lockoutPeriod = time.Minute
+	maxKeys       = 10_000
 )
 
 // Limiter is safe for concurrent use.
@@ -23,6 +24,7 @@ type Limiter struct {
 
 type attempt struct {
 	windowStart time.Time
+	lastSeen    time.Time
 	count       int
 	failures    int
 	lockedUntil time.Time
@@ -49,6 +51,7 @@ func (l *Limiter) Allow(key string) bool {
 		return false
 	}
 	a.count++
+	a.lastSeen = now
 	return true
 }
 
@@ -57,9 +60,10 @@ func (l *Limiter) Fail(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	a := l.get(key)
+	a.lastSeen = l.now()
 	a.failures++
 	if a.failures >= lockoutAfter {
-		a.lockedUntil = l.now().Add(lockoutPeriod)
+		a.lockedUntil = a.lastSeen.Add(lockoutPeriod)
 		a.failures = 0
 		return true
 	}
@@ -76,20 +80,46 @@ func (l *Limiter) Reset(key string) {
 	}
 }
 
+// get returns the entry for key, creating one if capacity allows. Cleanup
+// runs BEFORE insertion (review P2-03: a just-created entry with a zero time
+// must never be its own cleanup victim), and a full table recycles its oldest
+// slot so accounting stays bounded instead of silently dropping a new key.
 func (l *Limiter) get(key string) *attempt {
-	a, ok := l.attempts[key]
-	if !ok {
-		a = &attempt{}
-		l.attempts[key] = a
+	now := l.now()
+	if a, ok := l.attempts[key]; ok {
+		return a
 	}
-	// Opportunistic cleanup to bound memory.
-	if len(l.attempts) > 10_000 {
-		now := l.now()
-		for k, v := range l.attempts {
-			if now.Sub(v.windowStart) > 10*window && now.After(v.lockedUntil) {
-				delete(l.attempts, k)
-			}
+	if len(l.attempts) >= maxKeys {
+		l.evict(now)
+		if len(l.attempts) >= maxKeys {
+			l.evictOldest()
 		}
 	}
+	a := &attempt{windowStart: now, lastSeen: now}
+	l.attempts[key] = a
 	return a
+}
+
+// evict drops entries idle for ten windows. Called with the lock held.
+func (l *Limiter) evict(now time.Time) {
+	for k, v := range l.attempts {
+		if now.Sub(v.lastSeen) > 10*window && now.After(v.lockedUntil) {
+			delete(l.attempts, k)
+		}
+	}
+}
+
+// evictOldest unconditionally recycles the least recently used slot.
+func (l *Limiter) evictOldest() {
+	var oldestKey string
+	var oldest time.Time
+	first := true
+	for k, v := range l.attempts {
+		if first || v.lastSeen.Before(oldest) {
+			oldestKey, oldest, first = k, v.lastSeen, false
+		}
+	}
+	if !first {
+		delete(l.attempts, oldestKey)
+	}
 }

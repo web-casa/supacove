@@ -99,15 +99,33 @@ func openStore(cfg *config.Config, log *slog.Logger) *db.Store {
 	return store
 }
 
-// openStoreCLI opens the store for CLI utility commands (bootstrap,
-// reset-password) which must work while the server is running; see
-// db.OpenForCLI for the locking rationale.
-func openStoreCLI(cfg *config.Config, log *slog.Logger) *db.Store {
-	store, err := db.OpenForCLI(cfg.DataDir)
-	if err != nil {
-		fatal(log, err)
+// openStoreCLIWithSchema opens the store for a CLI utility command. If the
+// exclusive lock is free (server not running), it migrates the schema under
+// the lock; otherwise it attaches lockless and only verifies the schema is
+// already migrated — CLI commands never migrate beside a running server
+// (review P1-06).
+func openStoreCLIWithSchema(cfg *config.Config, log *slog.Logger) (*db.Store, error) {
+	store, err := db.Open(cfg.DataDir)
+	if err == nil {
+		// We hold the lock: safe to migrate.
+		if err := store.Migrate(context.Background()); err != nil {
+			store.Close()
+			return nil, err
+		}
+		return store, nil
 	}
-	return store
+	if !errors.Is(err, db.ErrLocked) {
+		return nil, err
+	}
+	store, err = db.OpenForCLI(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.EnsureFreshSchemaForCLI(context.Background()); err != nil {
+		store.Close()
+		return nil, fmt.Errorf("cannot run beside an initializing server: %w", err)
+	}
+	return store, nil
 }
 
 func fatal(log *slog.Logger, err error) {
@@ -119,6 +137,11 @@ func runServe() error {
 	log := newLogger()
 	cfg := mustLoadConfig(log)
 
+	// Lock first, then create the secret: two concurrent first starts would
+	// otherwise race to write different keys (review P1-04).
+	store := openStore(cfg, log)
+	defer store.Close()
+
 	// Protocol B: the application master secret encrypts stored credentials
 	// (used from Phase 2). Losing it never affects backup-file recoverability.
 	key, err := config.LoadOrCreateSecret(cfg.SecretFile)
@@ -128,9 +151,6 @@ func runServe() error {
 	fingerprint := sha256.Sum256(key)
 	log.Info("master secret loaded", "fingerprint", fmt.Sprintf("%x", fingerprint[:6]))
 
-	store := openStore(cfg, log)
-	defer store.Close()
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -139,7 +159,7 @@ func runServe() error {
 	}
 
 	authStore := auth.NewStore(store.DB)
-	srv := server.New(store, authStore, cfg, limiter.New(), log, server.BuildInfo{
+	srv := server.New(store, authStore, cfg, key, limiter.New(), log, server.BuildInfo{
 		Version: version, Commit: commit, BuildDate: buildDate,
 	})
 
@@ -192,13 +212,13 @@ func runServe() error {
 func runBootstrap() error {
 	log := newLogger()
 	cfg := mustLoadConfig(log)
-	store := openStoreCLI(cfg, log)
+	store, err := openStoreCLIWithSchema(cfg, log)
+	if err != nil {
+		return err
+	}
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
 	authStore := auth.NewStore(store.DB)
 	if has, err := authStore.HasUser(ctx); err != nil {
 		return err
@@ -217,13 +237,13 @@ func runBootstrap() error {
 func runResetPassword(username string) error {
 	log := newLogger()
 	cfg := mustLoadConfig(log)
-	store := openStoreCLI(cfg, log)
+	store, err := openStoreCLIWithSchema(cfg, log)
+	if err != nil {
+		return err
+	}
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.Migrate(ctx); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
 	newPass, err := auth.NewStore(store.DB).ResetPassword(ctx, username)
 	if err != nil {
 		return err

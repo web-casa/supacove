@@ -1,0 +1,19 @@
+# Build context filter: keep host state out of image builds (review P1-15).
+.git
+.github
+**/node_modules
+frontend/dist
+frontend/*.tsbuildinfo
+backend/internal/web/dist
+backend/internal/web/dist/**
+bin
+data
+docs
+e2e
+scripts
+*.db
+*.db-wal
+*.db-shm
+.env*
+*.md
+!README.md

@@ -3,10 +3,14 @@ bin/
 frontend/dist/
 frontend/node_modules/
 
-# Embedded SPA build output (a placeholder index.html stays committed for
-# pre-frontend builds); real builds are never committed.
+# Embedded SPA build output: only the .gitkeep marker is committed; real
+# builds are never committed. go:embed is satisfied by the marker, and the
+# server answers 503 with a hint when index.html is missing.
 backend/internal/web/dist/*
-!backend/internal/web/dist/index.html
+!backend/internal/web/dist/.gitkeep
+
+# TypeScript incremental build info
+*.tsbuildinfo
 
 # Runtime data
 data/

@@ -13,6 +13,8 @@ RUN npm run build
 
 FROM golang:${GO_VERSION}-bookworm AS backend
 ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY backend/ ./backend/
@@ -20,10 +22,10 @@ COPY api/ ./api/
 # The Go build embeds the SPA; provide it at the embed location.
 COPY --from=frontend /src/dist ./backend/internal/web/dist
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w -X main.version=${VERSION}" \
+    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
     -o /out/supabackup ./backend/cmd/supabackup
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runtime
 # PostgreSQL clients come from PGDG (bookworm's own repo tops out below 18).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
@@ -45,8 +47,7 @@ RUN apt-get update \
 # Pre-create the volume mountpoint with the right owner: Docker creates
 # anonymous volumes as root:root, which the runtime user could not write.
 RUN useradd --uid 10001 --user-group --no-create-home supabackup \
-    && mkdir -p /app/data \
-    && chown 10001:10001 /app/data
+    && install -d -o 10001 -g 10001 -m 0700 /app/data
 WORKDIR /app
 COPY --from=backend /out/supabackup /app/supabackup
 
@@ -61,3 +62,13 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
 
 ENTRYPOINT ["/app/supabackup"]
 CMD ["serve"]
+
+# Runtime-shape verification target for Spike 2 (ADR-004): the release runtime
+# plus PostgreSQL server binaries, same non-root UID 10001, for the
+# embedded-verifier feasibility experiment. Not used by releases.
+FROM runtime AS runtime-spike
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-18 postgresql-client-18 procps \
+    && rm -rf /var/lib/apt/lists/*
+USER 10001:10001

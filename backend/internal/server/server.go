@@ -5,9 +5,15 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -22,10 +28,27 @@ import (
 )
 
 const (
-	sessionCookie = "sb_session"
-	csrfCookie    = "sb_csrf"
-	csrfHeader    = "X-CSRF-Token"
+	csrfHeader = "X-CSRF-Token"
+	// Body cap for the JSON control-plane endpoints reviewed in Phase 1.
+	// Streaming backup endpoints (later phases) configure their own limits.
+	apiBodyLimit = 16 << 10
 )
+
+// Cookie names. Production (Secure cookies) uses the __Host- prefix, which
+// browsers pin to Path=/, no Domain, HTTPS only (review P2-01).
+func (s *Server) sessionCookieName() string {
+	if s.cfg.InsecureCookie {
+		return "sb_session"
+	}
+	return "__Host-sb_session"
+}
+
+func (s *Server) csrfCookieName() string {
+	if s.cfg.InsecureCookie {
+		return "sb_csrf"
+	}
+	return "__Host-sb_csrf"
+}
 
 // BuildInfo is injected at link time.
 type BuildInfo struct {
@@ -38,15 +61,16 @@ type Server struct {
 	store   *db.Store
 	auth    *auth.Store
 	cfg     *config.Config
+	key     []byte // application master secret; CSRF tokens are HMAC-bound to sessions with it
 	lim     *limiter.Limiter
 	log     *slog.Logger
 	build   BuildInfo
 	started time.Time
 }
 
-func New(store *db.Store, authStore *auth.Store, cfg *config.Config, lim *limiter.Limiter, log *slog.Logger, build BuildInfo) *Server {
+func New(store *db.Store, authStore *auth.Store, cfg *config.Config, key []byte, lim *limiter.Limiter, log *slog.Logger, build BuildInfo) *Server {
 	return &Server{
-		store: store, auth: authStore, cfg: cfg, lim: lim,
+		store: store, auth: authStore, cfg: cfg, key: key, lim: lim,
 		log: log, build: build, started: time.Now(),
 	}
 }
@@ -54,7 +78,17 @@ func New(store *db.Store, authStore *auth.Store, cfg *config.Config, lim *limite
 // Router assembles the full HTTP handler.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(chimw.RequestID, chimw.RealIP, s.requestLogger, chimw.Recoverer, s.secureHeaders)
+	r.Use(chimw.RequestID, s.requestLogger, s.recoverer, s.secureHeaders)
+	// Only trust X-Forwarded-For from explicitly configured proxy ranges
+	// (review P0-01: unconditional RealIP let any client rotate spoofed
+	// headers to bypass login rate limiting).
+	if cidrs, err := s.cfg.TrustedProxyCIDRs(); err == nil && len(cidrs) > 0 {
+		prefixes := make([]string, 0, len(cidrs))
+		for _, c := range cidrs {
+			prefixes = append(prefixes, c.String())
+		}
+		r.Use(chimw.ClientIPFromXFF(prefixes...))
+	}
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -62,7 +96,25 @@ func (s *Server) Router() http.Handler {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	})
 
-	apiHandler := api.HandlerFromMux(api.NewStrictHandler(&apiService{srv: s}, nil), chi.NewRouter())
+	strictOpts := api.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+			// Decode failures must use the contract Error shape; an
+			// oversized body is 413, everything else is a 400.
+			var mbe *http.MaxBytesError
+			if errorsAs(err, &mbe) {
+				writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large",
+					"request body exceeds the allowed size")
+				return
+			}
+			writeError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		},
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+			s.log.Error("handler error", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal", "unexpected internal error")
+		},
+	}
+	apiHandler := api.HandlerFromMux(
+		api.NewStrictHandlerWithOptions(&apiService{srv: s}, nil, strictOpts), chi.NewRouter())
 	if mux, ok := apiHandler.(*chi.Mux); ok {
 		mux.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -76,7 +128,7 @@ func (s *Server) Router() http.Handler {
 	// root wildcard node.
 	r.Group(func(g chi.Router) {
 		g.Use(s.cookieJar) // lets strict handlers set cookies before the response is written
-		g.Use(s.guard)     // auth + CSRF + origin + API hygiene
+		g.Use(s.guard)     // auth + CSRF + origin + API hygiene (default-deny)
 		g.Mount("/api", apiHandler)
 	})
 
@@ -103,6 +155,23 @@ func (s *Server) requestLogger(next http.Handler) http.Handler {
 	})
 }
 
+// recoverer converts handler panics into the contract Error shape.
+func (s *Server) recoverer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		defer func() {
+			if rv := recover(); rv != nil {
+				s.log.Error("panic recovered", "panic", fmt.Sprint(rv), "stack", string(debug.Stack()))
+				if strings.HasPrefix(req.URL.Path, "/api") {
+					writeError(w, http.StatusInternalServerError, "internal", "unexpected internal error")
+				} else {
+					http.Error(w, "internal server error", http.StatusInternalServerError)
+				}
+			}
+		}()
+		next.ServeHTTP(w, req)
+	})
+}
+
 // secureHeaders applies baseline hardening to every response.
 func (s *Server) secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -118,16 +187,28 @@ func (s *Server) secureHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// paths that require an authenticated session (spec: cookieAuth security).
-var sessionRequired = map[string]bool{
-	"/api/auth/me":        true,
-	"/api/auth/logout":    true,
-	"/api/health/details": true,
+// anonymousAPI lists the (method, path) pairs reachable without a session.
+// Everything else under /api requires authentication — default deny, so a
+// future protected operation cannot become anonymous by forgetting to add it
+// to a table (review P2-01).
+var anonymousAPI = map[string]map[string]bool{
+	http.MethodGet: {
+		"/api/healthz": true,
+		"/api/ready":   true,
+	},
+	http.MethodPost: {
+		"/api/auth/bootstrap": true,
+		"/api/auth/login":     true,
+	},
 }
 
-// guard enforces, for /api/*: no-store, same-origin on state changes,
-// sessions on protected paths, and double-submit CSRF on protected mutations.
-// Login/bootstrap stay reachable anonymously but are still origin-checked.
+// loginPath is rate limited before request-body decoding (review P0-02).
+const loginPath = "/api/auth/login"
+
+// guard enforces, for /api/*: no-store, body cap, same-origin on state
+// changes, session requirement (default deny), and session-bound CSRF on
+// protected mutations. Login rate limiting happens here, before any body
+// decoding or password hashing.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if !strings.HasPrefix(req.URL.Path, "/api") {
@@ -135,30 +216,87 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-API", "supabackup")
 
+		// Cap JSON body size before any decoding or hashing work.
+		if req.Body != nil {
+			req.Body = http.MaxBytesReader(w, req.Body, apiBodyLimit)
+		}
+		// JSON media type is required for bodies the contract declares as JSON.
+		if !safeMethod(req.Method) && req.Body != nil && req.ContentLength != 0 {
+			if ct := req.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+				writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+					"Content-Type must be application/json")
+				return
+			}
+		}
 		if !safeMethod(req.Method) && !s.sameOrigin(req) {
 			writeError(w, http.StatusForbidden, "cross_origin", "cross-origin state changes are rejected")
 			return
 		}
-		if !sessionRequired[req.URL.Path] {
+
+		if anonymousAPI[req.Method][req.URL.Path] {
+			if req.URL.Path == loginPath {
+				ip := s.clientIP(req)
+				if !s.lim.Allow(ip) {
+					writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+					return
+				}
+				lw := &loginAttemptWriter{ResponseWriter: w}
+				next.ServeHTTP(lw, req)
+				switch lw.status {
+				case http.StatusOK, http.StatusCreated:
+					s.lim.Reset(ip)
+				case http.StatusUnauthorized, http.StatusBadRequest:
+					s.lim.Fail(ip)
+				}
+				return
+			}
 			next.ServeHTTP(w, req)
 			return
 		}
-		user := s.sessionUser(req)
+
+		user, raw, err := s.session(req)
+		if err != nil {
+			s.log.Error("session lookup", "err", err)
+			writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "session store unavailable")
+			return
+		}
 		if user == nil {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "login required")
 			return
 		}
-		if !safeMethod(req.Method) && !s.csrfValid(req) {
+		if !safeMethod(req.Method) && !s.csrfValid(raw, req) {
 			writeError(w, http.StatusForbidden, "csrf", "missing or invalid CSRF token")
 			return
 		}
-		raw, _ := req.Cookie(sessionCookie)
 		ctx := withUser(req.Context(), user)
-		ctx = context.WithValue(ctx, ctxSessionRaw, raw.Value)
+		ctx = context.WithValue(ctx, ctxSessionRaw, raw)
 		next.ServeHTTP(w, req.WithContext(ctx))
 	})
+}
+
+// loginAttemptWriter records the status code so the guard can credit or debit
+// the rate limiter after the handler ran.
+type loginAttemptWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (l *loginAttemptWriter) WriteHeader(code int) {
+	if !l.wroteHeader {
+		l.status = code
+		l.wroteHeader = true
+	}
+	l.ResponseWriter.WriteHeader(code)
+}
+
+func (l *loginAttemptWriter) Write(b []byte) (int, error) {
+	if !l.wroteHeader {
+		l.status = http.StatusOK
+		l.wroteHeader = true
+	}
+	return l.ResponseWriter.Write(b)
 }
 
 func safeMethod(m string) bool {
@@ -169,36 +307,78 @@ func safeMethod(m string) bool {
 	return false
 }
 
-// sameOrigin verifies the Origin header (when present) targets this server.
+// sameOrigin verifies the Origin header (when present) targets this server:
+// scheme, host and effective port must all match (review P1-01). With
+// SB_PUBLIC_ORIGIN configured, only that exact origin passes — the mechanism
+// for TLS-terminating proxies, instead of trusting client-sent headers.
 func (s *Server) sameOrigin(req *http.Request) bool {
 	origin := req.Header.Get("Origin")
 	if origin == "" {
-		return true // non-browser clients; session-based protection still applies
+		return true // non-browser clients; session + CSRF checks still apply
 	}
-	_, host := schemeAndHost(origin)
-	return host != "" && subtleHostEqual(host, req.Host)
-}
-
-// sessionUser resolves the session cookie to a user, or nil.
-func (s *Server) sessionUser(req *http.Request) *auth.User {
-	c, err := req.Cookie(sessionCookie)
-	if err != nil || c.Value == "" {
-		return nil
-	}
-	u, err := s.auth.UserForSession(req.Context(), c.Value)
+	oScheme, oHost, oPort, err := originParts(origin)
 	if err != nil {
-		s.log.Error("session lookup", "err", err)
-		return nil
-	}
-	return u
-}
-
-func (s *Server) csrfValid(req *http.Request) bool {
-	c, err := req.Cookie(csrfCookie)
-	if err != nil || c.Value == "" {
 		return false
 	}
-	return auth.SecureEqual(c.Value, req.Header.Get(csrfHeader))
+	var eScheme, eHost, ePort string
+	if s.cfg.PublicOrigin != "" {
+		eScheme, eHost, ePort, err = originParts(s.cfg.PublicOrigin)
+		if err != nil {
+			return false // misconfiguration fails closed
+		}
+	} else {
+		eScheme = requestScheme(req)
+		eHost, ePort, err = hostPort(eScheme, req.Host)
+		if err != nil {
+			return false
+		}
+	}
+	return oScheme == eScheme && oHost == eHost && oPort == ePort
+}
+
+func hostPort(scheme, hostport string) (string, string, error) {
+	h, p, err := net.SplitHostPort(hostport)
+	if err != nil {
+		h, p = hostport, ""
+	}
+	h = strings.ToLower(strings.Trim(h, "[]"))
+	if h == "" {
+		return "", "", errors.New("empty host")
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		h = ip.String()
+	}
+	return h, effectivePort(scheme, h, p), nil
+}
+
+// session resolves the session cookie: (user, rawID, nil) valid; (nil, "", nil)
+// no/invalid session; (nil, "", err) storage failure.
+func (s *Server) session(req *http.Request) (*auth.User, string, error) {
+	c, err := req.Cookie(s.sessionCookieName())
+	if err != nil || c.Value == "" {
+		return nil, "", nil
+	}
+	u, err := s.auth.UserForSession(req.Context(), c.Value)
+	if err != nil || u == nil {
+		return nil, "", err
+	}
+	return u, c.Value, nil
+}
+
+// csrfValid checks the header against an HMAC bound to the current session id
+// and the master secret (review P2-01): a stolen CSRF cookie alone is useless
+// without the session, and values are not client-chosen.
+func (s *Server) csrfValid(sessionRaw string, req *http.Request) bool {
+	if sessionRaw == "" {
+		return false
+	}
+	return auth.SecureEqual(s.csrfToken(sessionRaw), req.Header.Get(csrfHeader))
+}
+
+func (s *Server) csrfToken(sessionRaw string) string {
+	mac := hmac.New(sha256.New, s.key)
+	mac.Write([]byte("csrf:" + sessionRaw))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // context plumbing for session user + cookie jar.
@@ -208,6 +388,8 @@ type ctxKey int
 const (
 	ctxUser ctxKey = iota
 	ctxCookies
+	ctxSessionRaw
+	ctxClientIP
 )
 
 func withUser(ctx context.Context, u *auth.User) context.Context {
@@ -225,7 +407,7 @@ func (s *Server) cookieJar(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		jar := &cookieJar{w: w}
 		ctx := context.WithValue(req.Context(), ctxCookies, jar)
-		ctx = context.WithValue(ctx, ctxClientIP, clientIP(req))
+		ctx = context.WithValue(ctx, ctxClientIP, s.clientIP(req))
 		next.ServeHTTP(w, req.WithContext(ctx))
 	})
 }
@@ -243,38 +425,49 @@ func jarFrom(ctx context.Context) *cookieJar {
 	return jar
 }
 
-func (s *Server) newSessionCookies(sessionRaw string) []*http.Cookie {
+// clientIP returns the connection peer, or the X-Forwarded-For result when the
+// peer itself is a trusted proxy (chi ClientIPFromXFF has already evaluated
+// that and stashed it in the context).
+func (s *Server) clientIP(req *http.Request) string {
+	if ip := chimw.GetClientIP(req.Context()); ip != "" {
+		return ip
+	}
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
+}
+
+func (s *Server) newSessionCookies(sessionRaw string, ttl time.Duration) []*http.Cookie {
+	secure := !s.cfg.InsecureCookie
 	return []*http.Cookie{
 		{
-			Name:     sessionCookie,
-			Value:    sessionRaw,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   !s.cfg.InsecureCookie,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   int(s.cfg.SessionTTL / time.Second),
+			Name: s.sessionCookieName(), Value: sessionRaw, Path: "/",
+			HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode,
+			MaxAge: int(ttl / time.Second),
 		},
 		{
-			Name:     csrfCookie,
-			Value:    newCSRFToken(),
-			Path:     "/",
-			HttpOnly: false, // double-submit: the SPA must read it to echo the header
-			Secure:   !s.cfg.InsecureCookie,
-			SameSite: http.SameSiteStrictMode,
-			MaxAge:   int(s.cfg.SessionTTL / time.Second),
+			Name: s.csrfCookieName(), Value: s.csrfToken(sessionRaw), Path: "/",
+			HttpOnly: false, // double submit: the SPA must read it to echo the header
+			Secure:   secure, SameSite: http.SameSiteStrictMode,
+			MaxAge: int(ttl / time.Second),
 		},
 	}
 }
 
 func (s *Server) clearAuthCookies() []*http.Cookie {
+	secure := !s.cfg.InsecureCookie
 	return []*http.Cookie{
-		{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, Secure: !s.cfg.InsecureCookie, SameSite: http.SameSiteStrictMode, MaxAge: -1},
-		{Name: csrfCookie, Value: "", Path: "/", Secure: !s.cfg.InsecureCookie, SameSite: http.SameSiteStrictMode, MaxAge: -1},
+		{Name: s.sessionCookieName(), Value: "", Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1},
+		{Name: s.csrfCookieName(), Value: "", Path: "/", Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1},
 	}
 }
 
 // staticHandler serves the embedded SPA with SPA fallback and sane caching:
-// index.html is no-store; hashed assets are immutable.
+// index.html is no-store; hashed assets are immutable. When the frontend has
+// never been built (dist contains no index.html) it answers 503 with a clear
+// hint instead of an empty page.
 func (s *Server) staticHandler() http.Handler {
 	dist, err := fsSub(web.Dist, "dist")
 	if err != nil {
@@ -293,6 +486,11 @@ func (s *Server) staticHandler() http.Handler {
 		if st, err := fsStat(dist, path); err == nil && !st.IsDir() && !strings.HasSuffix(path, ".html") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			fileServer.ServeHTTP(w, req)
+			return
+		}
+		if _, err := fsStat(dist, "index.html"); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "frontend_not_built",
+				"web UI is not built into this binary; run `make build`")
 			return
 		}
 		// SPA fallback: client-side routing paths and index itself.

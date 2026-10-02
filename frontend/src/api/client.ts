@@ -19,8 +19,14 @@ export class ApiError extends Error {
 }
 
 function csrfToken(): string {
-  const match = document.cookie.match(/(?:^|;\s*)sb_csrf=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : "";
+  // Production uses the __Host- prefix; plain-HTTP dev uses the bare name.
+  for (const name of ["__Host-sb_csrf", "sb_csrf"]) {
+    const match = document.cookie.match(
+      new RegExp(`(?:^|;\\s*)${name}=([^;]*)`),
+    );
+    if (match) return decodeURIComponent(match[1]);
+  }
+  return "";
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -42,7 +48,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => request<User>("/api/auth/me"),
+  // me() resolves to null on 401 so stale cached users never keep the UI in
+  // an authenticated state after logout or session expiry (review P1-11).
+  me: async (): Promise<User | null> => {
+    try {
+      return await request<User>("/api/auth/me");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) return null;
+      throw e;
+    }
+  },
   login: (username: string, password: string) =>
     request<User>("/api/auth/login", {
       method: "POST",

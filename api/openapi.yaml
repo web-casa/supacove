@@ -102,6 +102,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
   /auth/login:
     post:
       operationId: postAuthLogin
@@ -132,12 +140,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
         "429":
           description: Rate limited (too many attempts or consecutive failures).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/Overloaded"
   /auth/logout:
     post:
       operationId: postAuthLogout
@@ -151,6 +167,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: CSRF token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
   /auth/me:
     get:
       operationId: getAuthMe
@@ -168,12 +192,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
 components:
+  responses:
+    PayloadTooLarge:
+      description: Request body exceeds the allowed size.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedMediaType:
+      description: Content-Type must be application/json.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: Rate limited; retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Internal:
+      description: Unexpected internal error (nothing persisted, no state change reported as success).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Overloaded:
+      description: Temporary overload (e.g. password-hashing budget exhausted); retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   securitySchemes:
     cookieAuth:
       type: apiKey
       in: cookie
       name: sb_session
+      description: >-
+        Server-side session. The cookie name is `sb_session` in plain-HTTP dev
+        mode and `__Host-sb_session` when Secure cookies are enabled (production).
+        State-changing requests additionally require the `X-CSRF-Token` header
+        echoing the session-bound CSRF cookie.
   schemas:
     HealthStatus:
       type: object

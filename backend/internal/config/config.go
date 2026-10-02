@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +34,14 @@ type Config struct {
 	BootstrapTokenTTL time.Duration
 	// SessionTTL is the fixed session lifetime.
 	SessionTTL time.Duration
+	// PublicOrigin is the exact external origin (scheme://host[:port]) users
+	// browse. When set, Origin headers must equal it strictly; when empty the
+	// request's own scheme+host is used (direct, non-proxied deployments).
+	PublicOrigin string
+	// TrustedProxies is a comma-separated CIDR list allowed to set
+	// X-Forwarded-For. Empty means no proxy is trusted and client IPs are
+	// taken from the socket address only (review P0-01).
+	TrustedProxies string
 	// Version metadata, wired at build time.
 	Version, Commit, BuildDate string
 }
@@ -43,6 +53,8 @@ func Load() (*Config, error) {
 		Addr:              envOr("SB_ADDR", ":8080"),
 		SecretFile:        os.Getenv("SB_SECRET_FILE"),
 		InsecureCookie:    envBool("SB_INSECURE_COOKIE"),
+		PublicOrigin:      os.Getenv("SB_PUBLIC_ORIGIN"),
+		TrustedProxies:    os.Getenv("SB_TRUSTED_PROXIES"),
 		BootstrapTokenTTL: 15 * time.Minute,
 		SessionTTL:        7 * 24 * time.Hour,
 	}
@@ -54,17 +66,55 @@ func Load() (*Config, error) {
 	if c.Addr == "" || strings.HasPrefix(c.Addr, "-") {
 		return nil, fmt.Errorf("invalid SB_ADDR %q", c.Addr)
 	}
+	if c.PublicOrigin != "" {
+		u, err := url.Parse(c.PublicOrigin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			return nil, fmt.Errorf("invalid SB_PUBLIC_ORIGIN %q: must be scheme://host[:port] only", c.PublicOrigin)
+		}
+	}
+	if _, err := c.TrustedProxyCIDRs(); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
+// TrustedProxyCIDRs parses SB_TRUSTED_PROXIES into CIDR ranges.
+func (c *Config) TrustedProxyCIDRs() ([]*net.IPNet, error) {
+	if c.TrustedProxies == "" {
+		return nil, nil
+	}
+	var out []*net.IPNet
+	for _, part := range strings.Split(c.TrustedProxies, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		_, cidr, err := net.ParseCIDR(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid SB_TRUSTED_PROXIES entry %q: %w", part, err)
+		}
+		out = append(out, cidr)
+	}
+	return out, nil
+}
+
 // LoadOrCreateSecret returns the 32-byte master secret, creating a random one
-// on first run with 0600 permissions. Losing this file makes stored encrypted
-// credentials unreadable (recorded credentials must be re-entered); it never
-// affects the recoverability of backup files (see protocol B).
+// on first run. Creation is atomic (O_EXCL + fsync) so concurrent first
+// starts converge on exactly one key; an existing file must be a regular file
+// with 0600 permissions. Losing this file makes stored encrypted credentials
+// unreadable (recorded credentials must be re-entered); it never affects the
+// recoverability of backup files (protocol B).
 func LoadOrCreateSecret(path string) ([]byte, error) {
-	if st, err := os.Stat(path); err == nil {
-		if st.IsDir() {
-			return nil, fmt.Errorf("secret path %s is a directory", path)
+	if st, err := os.Lstat(path); err == nil {
+		if st.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("secret path %s is a symlink; refusing", path)
+		}
+		if !st.Mode().IsRegular() {
+			return nil, fmt.Errorf("secret path %s is not a regular file", path)
+		}
+		if st.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("secret file %s has permissive mode %04o; want 0600", path, st.Mode().Perm())
 		}
 		key, err := os.ReadFile(path)
 		if err != nil {
@@ -86,8 +136,25 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	// Hex-encoded for human inspectability; permissions are the security boundary.
-	if err := os.WriteFile(path, []byte(hex.EncodeToString(key)), 0o600); err != nil {
+	// Hex-encoded for human inspectability; permissions are the security
+	// boundary. O_EXCL makes concurrent first starts pick exactly one winner;
+	// losers re-read the winner's key.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return LoadOrCreateSecret(path)
+		}
+		return nil, err
+	}
+	if _, err := f.Write([]byte(hex.EncodeToString(key))); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
 		return nil, err
 	}
 	return key, nil
