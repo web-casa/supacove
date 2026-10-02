@@ -263,7 +263,7 @@ func TestCrossOriginStateChangeRejected(t *testing.T) {
 		"username": "admin", "password": "long-enough-password",
 	}, origin); code != http.StatusUnauthorized {
 		// User does not exist in this env: 401 proves the origin gate passed (a cross-origin
-	// request would have been rejected with 403 before reaching auth).
+		// request would have been rejected with 403 before reaching auth).
 		t.Fatalf("same-origin login passed the origin gate but got unexpected %d", code)
 	}
 }
