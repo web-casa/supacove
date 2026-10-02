@@ -148,11 +148,11 @@ while IFS= read -r -d '' arg; do exclude_platform+=("$arg"); done < <(
 
 pg_dump --dbname="$SOURCE_DB_URL" -Fc --schema-only "${exclude_platform[@]}" \
   -f "$OUT/schema.dump" && echo "P-A schema dump: OK" || echo "P-A schema dump: FAILED"
-if restore "$TARGET_DB_URL" "$OUT/schema.dump" --no-owner; then
+if restore_stderr="$OUT/restore-P-A-schema.log" restore "$TARGET_DB_URL" "$OUT/schema.dump" --no-owner; then
   echo "P-A schema RESULT: PASS"
   PASSED_CANDIDATES=$((PASSED_CANDIDATES+1))
 else
-  echo "P-A schema RESULT: FAIL (stderr: $OUT/last-restore-error.log)"
+  echo "P-A schema RESULT: FAIL (stderr: $OUT/restore-P-A-schema.log)"
   FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
 fi
 
