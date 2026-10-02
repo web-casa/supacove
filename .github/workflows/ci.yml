@@ -86,15 +86,24 @@ jobs:
           cleanup() { docker rm -f sb-ci >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           test "$(docker exec sb-ci id -u)" = "10001"
+          # The container may still be migrating/starting when `docker run -d`
+          # returns: wait for HTTP readiness BEFORE any functional assertion
+          # (review round 6, R6-P1-01).
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:18080/api/healthz 2>/dev/null | grep -q '"status":"ok"' && break
+            sleep 1
+          done
           curl -fsS http://127.0.0.1:18080/api/healthz | grep -q '"status":"ok"'
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/auth/bootstrap -H 'Content-Type: application/json' -d '{"token":"x","username":"nope","password":"nope-pass-123"}')
           test "$code" -ge 400
           docker exec sb-ci /app/supabackup bootstrap | grep -q "One-time bootstrap token"
           # The embedded SPA's hashed assets must actually be served, not just
           # an index referencing missing files (round-5 R5-P1-01).
-          ASSET=$(curl -fsS http://127.0.0.1:18080/ | grep -oE '/assets/[^"]+\.js' | head -1)
-          [ -n "$ASSET" ]
-          curl -fsS -o /dev/null -w '%{content_type}\n' "http://127.0.0.1:18080$ASSET" | grep -q javascript
+          for EXT in js css; do
+            ASSET=$(curl -fsS http://127.0.0.1:18080/ | grep -oE "/assets/[^"]+\.$EXT" | head -1)
+            [ -n "$ASSET" ]
+            curl -fsS -o /dev/null -w '%{content_type}\n' "http://127.0.0.1:18080$ASSET" | grep -q "$EXT"
+          done
           # Docker health becomes healthy on its own schedule: poll, never
           # race a fixed sleep (review round 5, R5-P1-01).
           for _ in $(seq 1 30); do

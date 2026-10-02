@@ -21,10 +21,12 @@ PASSED_CANDIDATES=0
 step() { printf '\n=== %s ===\n' "$*"; }
 
 # Restore with the mandatory --dbname form; returns pg_restore's exit code.
+# Each candidate's stderr goes to its own file when restore_stderr is set.
 restore() { # $1=target url  $2=archive  rest=extra flags
   local target="$1" archive="$2"
   shift 2
-  pg_restore --dbname="$target" --exit-on-error "$@" "$archive" 2>"$OUT/last-restore-error.log"
+  local err="${restore_stderr:-$OUT/restore-unspecified.log}"
+  pg_restore --dbname="$target" --exit-on-error "$@" "$archive" 2>"$err"
 }
 
 step "0. connectivity + versions"
@@ -40,25 +42,21 @@ psql --dbname="$SOURCE_DB_URL" -tAc "SELECT extname FROM pg_extension ORDER BY 1
 
 # User schemas (everything except platform/Postgres namespaces), read into a
 # NUL-separated array so spaces and quotes survive (review P1-18).
-mapfile -d '' USER_SCHEMAS < <(psql --dbname="$SOURCE_DB_URL" -At -z -c \
+psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -0 -c \
   "SELECT nspname FROM pg_namespace
    WHERE nspname NOT LIKE 'pg\_%'
      AND nspname NOT IN ('information_schema','auth','storage','realtime','vault',
                          'supabase_functions','extensions','graphql','graphql_public',
                          'pgbouncer','net','pgsodium','pgsodium_masks','pgtle',
                          'supabase_storage','supabase_db_org_0000')
-   ORDER BY 1" | tr '\n' '\0')
+   ORDER BY 1" > "$OUT/schemas.nul" \
+  || { echo "FATAL: schema enumeration failed" >&2; exit 1; }
+mapfile -d '' USER_SCHEMAS < "$OUT/schemas.nul"
 echo "user schemas: ${USER_SCHEMAS[*]-none}" >&2
 if [ "${#USER_SCHEMAS[@]}" -eq 0 ]; then
   echo "FATAL: no user schemas found — wrong source project?" >&2
   exit 1
 fi
-for s in "${USER_SCHEMAS[@]}"; do
-  case "$s" in *$'\n'*)
-    echo "FATAL: schema name contains a newline; this spike cannot carry it through psql record boundaries: $s" >&2
-    exit 1 ;;
-  esac
-done
 
 # pg_dump -n/-N take psql patterns (case folding, *, ?, regex chars) — not
 # LIKE. Double-quoting a pattern makes it literal; inner quotes double
@@ -79,11 +77,11 @@ schema_flags() { # $1 = -n or -N
 
 step "P-B: single plain -Fc dump (control baseline; expected to FAIL)"
 pg_dump --dbname="$SOURCE_DB_URL" -Fc -f "$OUT/plain.dump"
-if restore "$TARGET_DB_URL" "$OUT/plain.dump"; then
+if restore_stderr="$OUT/restore-P-B.log" restore "$TARGET_DB_URL" "$OUT/plain.dump"; then
   echo "P-B RESULT: PASS (unexpected — investigate)"
   PASSED_CANDIDATES=$((PASSED_CANDIDATES+1))
 else
-  echo "P-B RESULT: FAIL (expected; stderr in $OUT/last-restore-error.log)"
+  echo "P-B RESULT: FAIL (expected; stderr in $OUT/restore-P-B.log)"
 fi
 
 step "P-C: application-schemas-only dump (candidate 1)"
@@ -92,23 +90,25 @@ while IFS= read -r -d '' arg; do dump_args+=("$arg"); done < <(schema_flags -n)
 pg_dump --dbname="$SOURCE_DB_URL" -Fc "${dump_args[@]}" -f "$OUT/app.dump" \
   && echo "P-C dump: OK ($(du -h "$OUT/app.dump" | cut -f1))" \
   || { echo "P-C dump: FAILED"; FAILED_CANDIDATES=$((FAILED_CANDIDATES+1)); }
-if restore "$TARGET_DB_URL" "$OUT/app.dump" --no-owner; then
+if restore_stderr="$OUT/restore-P-C.log" restore "$TARGET_DB_URL" "$OUT/app.dump" --no-owner; then
   echo "P-C RESULT: PASS"
   PASSED_CANDIDATES=$((PASSED_CANDIDATES+1))
 else
-  echo "P-C RESULT: FAIL (stderr: $OUT/last-restore-error.log)"
+  echo "P-C RESULT: FAIL (stderr: $OUT/restore-P-C.log)"
   FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
 fi
 
 step "P-A: official three-part dump (candidate 2)"
 # Custom roles (not Supabase-reserved), exported with pg_dumpall --dbname.
-mapfile -t CUSTOM_ROLES < <(psql --dbname="$SOURCE_DB_URL" -At -c \
+psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -0 -c \
   "SELECT rolname FROM pg_roles
    WHERE rolname NOT LIKE 'pg\_%'
      AND rolname NOT IN ('postgres','anon','authenticated','service_role','authenticator',
                          'supabase_auth_admin','supabase_storage_admin','storage_admin',
                          'dashboard_user','supabase_admin','supabase_read_only_user',
-                         'supabase_realtime_admin','pgbouncer','pg_database_owner')")
+                         'supabase_realtime_admin','pgbouncer','pg_database_owner')" \
+  > "$OUT/roles.nul" || { echo "FATAL: role enumeration failed" >&2; exit 1; }
+mapfile -d '' CUSTOM_ROLES < "$OUT/roles.nul"
 if [ "${#CUSTOM_ROLES[@]}" -gt 0 ]; then
   echo "custom roles: ${CUSTOM_ROLES[*]}" >&2
   pg_dumpall --dbname="$SOURCE_DB_URL" --roles-only > "$OUT/roles.sql" 2>/dev/null \
@@ -160,11 +160,11 @@ dump_args=()
 while IFS= read -r -d '' arg; do dump_args+=("$arg"); done < <(schema_flags -n)
 pg_dump --dbname="$SOURCE_DB_URL" -Fc --data-only "${dump_args[@]}" \
   -f "$OUT/data.dump" && echo "P-A data dump: OK" || echo "P-A data dump: FAILED"
-if restore "$TARGET_DB_URL" "$OUT/data.dump" --no-owner --disable-triggers; then
+if restore_stderr="$OUT/restore-P-A-data.log" restore "$TARGET_DB_URL" "$OUT/data.dump" --no-owner --disable-triggers; then
   echo "P-A data RESULT: PASS"
   PASSED_CANDIDATES=$((PASSED_CANDIDATES+1))
 else
-  echo "P-A data RESULT: FAIL (stderr: $OUT/last-restore-error.log)"
+  echo "P-A data RESULT: FAIL (stderr: $OUT/restore-P-A-data.log)"
   FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
 fi
 

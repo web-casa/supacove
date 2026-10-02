@@ -4,7 +4,15 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(DATE)
 
-OAPI := $(shell go env GOPATH)/bin/oapi-codegen
+# Respect GOBIN when set — installing and probing must target the same path
+# (review round 4, P1-14). `go env GOBIN` is empty when unset.
+GOBIN_DIR := $(shell go env GOBIN 2>/dev/null)
+ifeq ($(GOBIN_DIR),)
+GOBIN_DIR := $(shell go env GOPATH)/bin
+else
+GOBIN_DIR := $(GOBIN_DIR)
+endif
+OAPI := $(GOBIN_DIR)/oapi-codegen
 
 .PHONY: help build backend frontend api-gen api-check dev test lint check clean
 .NOTPARALLEL:
@@ -24,12 +32,12 @@ frontend: ## Build the SPA and copy it into the Go embed directory
 build: frontend backend ## Build everything: SPA first, then the Go binary embedding it
 
 api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
-	@test -x "$(OAPI)" || go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
+	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
 	$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 
 api-check: ## Fail if generated code drifted from the OpenAPI contract
-	@test -x "$(OAPI)" || go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
+	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
 	$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 	git diff --exit-code -- backend/internal/api api frontend/src/api/schema.d.ts || \

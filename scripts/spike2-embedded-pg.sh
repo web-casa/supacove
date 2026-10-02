@@ -29,9 +29,21 @@ export PATH="/usr/lib/postgresql/18/bin:$PATH"
 echo "identity: $(id -u):$(id -g)"
 
 mkdir -p /tmp/pgdata /tmp/pgsock
+CLEANUP_ERROR=/tmp/cleanup-error.log
+: > "$CLEANUP_ERROR"
+# Cleanup failures are RECORDED, not swallowed: the final assertions fail the
+# spike if stop/removal ever errored (review round 6, P1-19).
 cleanup() {
-  pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null 2>&1 || true
-  rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump /tmp/pg.log
+  local rc=0
+  # Only attempt a stop when a server is actually registered: the happy path
+  # already stopped explicitly, and "no server running" is not an error.
+  if [ -f /tmp/pgdata/postmaster.pid ]; then
+    pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null 2>>"$CLEANUP_ERROR" || rc=1
+  fi
+  rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump /tmp/pg.log 2>>"$CLEANUP_ERROR" || rc=1
+  [ $rc -eq 0 ] || echo "cleanup reported errors (see $CLEANUP_ERROR)" >> "$CLEANUP_ERROR"
+  trap - EXIT
+  exit $rc
 }
 trap cleanup EXIT
 T0=$(date +%s)
@@ -117,6 +129,13 @@ INNER
 case "$ROWS" in ""|*[!0-9]*) echo "ROWS must be an integer" >&2; exit 1 ;; esac
 sed -i "3i ROWS_INT=$ROWS" "$OUT/inner.sh"
 grep -q "^ROWS_INT=$ROWS$" "$OUT/inner.sh" || { echo "internal error: ROWS_INT injection failed" >&2; exit 1; }
+# Permissions are set AFTER all files exist, explicitly, because the
+# container's UID 10001 is not the file owner and a strict host umask can
+# leave 0600 scripts unreadable (review round 6, R6-P2-01).
+# 777: the container UID 10001 must BOTH traverse and write evidence files
+# here; scripts stay 644 and are never written from inside the container.
+chmod 777 "$OUT" || { echo "cannot open artifact dir to the container UID" >&2; exit 1; }
+chmod 644 "$OUT/inner.sh" || { echo "cannot make inner.sh readable" >&2; exit 1; }
 
 echo "Running embedded-PG spike in [$IMAGE] as UID 10001..."
 docker run --rm --entrypoint bash \
@@ -131,12 +150,20 @@ if ! setpriv --reuid 10001 --regid 10001 --clear-groups true 2>/dev/null; then
   echo "INCOMPLETE: setpriv unavailable — canary NOT verified" >&2
   exit 7
 fi
-if setpriv --reuid 10001 --regid 10001 --clear-groups cat /tmp/canary >/dev/null 2>&1; then
-  echo "BOUNDARY VIOLATION: uid 10001 read root 0600 file" >&2
-  exit 4
-fi
-echo "root 0600 canary unreadable by UID 10001: OK"
+  if setpriv --reuid 10001 --regid 10001 --clear-groups cat /tmp/canary >/dev/null 2>&1; then
+    echo "BOUNDARY VIOLATION: uid 10001 read root 0600 file" >&2
+    exit 4
+  fi
+  echo "root 0600 canary unreadable by UID 10001: OK"
+  # The honest other side of the boundary: a file owned BY uid 10001 IS
+  # reachable by a same-UID verifier — this is exactly why untrusted dumps
+  # are out of scope (ADR-004), asserted here as repeatable evidence.
+  echo "app-owned-secret" > /tmp/app-owned && chmod 600 /tmp/app-owned && chown 10001:10001 /tmp/app-owned
+  setpriv --reuid 10001 --regid 10001 --clear-groups cat /tmp/app-owned >/dev/null 2>&1 \
+    || { echo "same-UID read unexpectedly failed" >&2; exit 8; }
+  echo "same-UID 0600 file IS readable by the verifier: OK (documented boundary)"
 CANARY
+chmod 644 "$OUT/canary.sh" || { echo "cannot make canary.sh readable" >&2; exit 1; }
 if ! docker run --rm --user 0:0 --entrypoint bash -v "$OUT:/spike-out" \
     "$IMAGE" "/spike-out/canary.sh"; then
   # Any canary failure (violation OR inability to verify) makes the spike
