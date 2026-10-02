@@ -38,6 +38,7 @@ api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
 
 api-check: ## Fail if generated code drifted from the OpenAPI contract
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
+	@test -x frontend/node_modules/.bin/openapi-typescript || (cd frontend && npm ci --no-fund --no-audit)
 	$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 	git diff --exit-code -- backend/internal/api api frontend/src/api/schema.d.ts || \

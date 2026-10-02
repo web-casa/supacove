@@ -34,16 +34,25 @@ CLEANUP_ERROR=/tmp/cleanup-error.log
 # Cleanup failures are RECORDED, not swallowed: the final assertions fail the
 # spike if stop/removal ever errored (review round 6, P1-19).
 cleanup() {
-  local rc=0
-  # Only attempt a stop when a server is actually registered: the happy path
-  # already stopped explicitly, and "no server running" is not an error.
+  # The ORIGINAL task status must survive cleanup: a failed initdb/restore/
+  # assertion can never be laundered into success by a clean shutdown
+  # (review round 7, R7-P1-03). Original non-zero wins; cleanup failure
+  # (when the task succeeded) also fails the run.
+  local original=$?
+  local cleanup_rc=0
   if [ -f /tmp/pgdata/postmaster.pid ]; then
-    pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null 2>>"$CLEANUP_ERROR" || rc=1
+    pg_ctl -D /tmp/pgdata -m fast -w stop >/dev/null 2>>"$CLEANUP_ERROR" || cleanup_rc=1
   fi
-  rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump /tmp/pg.log 2>>"$CLEANUP_ERROR" || rc=1
-  [ $rc -eq 0 ] || echo "cleanup reported errors (see $CLEANUP_ERROR)" >> "$CLEANUP_ERROR"
+  rm -rf /tmp/pgdata /tmp/pgsock /tmp/dump.dump /tmp/truncated.dump /tmp/pg.log 2>>"$CLEANUP_ERROR" || cleanup_rc=1
+  if [ -s "$CLEANUP_ERROR" ]; then
+    cp "$CLEANUP_ERROR" /spike-out/cleanup-error.log 2>/dev/null || true
+    cleanup_rc=1
+  fi
   trap - EXIT
-  exit $rc
+  if [ "$original" -ne 0 ]; then
+    exit "$original"
+  fi
+  exit "$cleanup_rc"
 }
 trap cleanup EXIT
 T0=$(date +%s)

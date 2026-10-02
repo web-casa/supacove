@@ -181,9 +181,9 @@ for s in "${USER_SCHEMAS[@]}"; do
   # Enumeration failure is an error, never an empty-but-successful result
   # (review round 4, P1-18).
   printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
-    | psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -v sch="$s" > "$OUT/tables-$SCHEMA_IDX.txt" \
+    | psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -0 -v sch="$s" > "$OUT/tables-$SCHEMA_IDX.nul" \
     || { echo "FATAL: table enumeration failed for schema $s" >&2; exit 1; }
-  mapfile -t TABLES < "$OUT/tables-$SCHEMA_IDX.txt"
+  mapfile -d '' TABLES < "$OUT/tables-$SCHEMA_IDX.nul"
   if [ "${#TABLES[@]}" -eq 0 ]; then
     echo "note: schema $s has no tables" >&2
     continue

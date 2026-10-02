@@ -99,10 +99,23 @@ jobs:
           docker exec sb-ci /app/supabackup bootstrap | grep -q "One-time bootstrap token"
           # The embedded SPA's hashed assets must actually be served, not just
           # an index referencing missing files (round-5 R5-P1-01).
-          for EXT in js css; do
-            ASSET=$(curl -fsS http://127.0.0.1:18080/ | grep -oE "/assets/[^"]+\.$EXT" | head -1)
+          # JS may be served as text/javascript or application/javascript
+          # (optionally with charset); CSS as text/css. A JSON MIME must NOT
+          # pass (review round 7, R7-P1-02).
+          for ASSETS_TYPE in 'js|text/javascript|application/javascript' 'css|text/css'; do
+            EXT="${ASSETS_TYPE%%|*}"
+            ALLOWED="${ASSETS_TYPE#*|}"
+            ASSET=$(curl -fsS http://127.0.0.1:18080/ | grep -oE '/assets/[^"]+\.'"$EXT" | head -1)
             [ -n "$ASSET" ]
-            curl -fsS -o /dev/null -w '%{content_type}\n' "http://127.0.0.1:18080$ASSET" | grep -q "$EXT"
+            MIME=$(curl -fsS -o /dev/null -w '%{content_type}' "http://127.0.0.1:18080$ASSET")
+            case "$MIME" in
+              text/css*|application/javascript*|text/javascript*) ;; # allowed
+              *) echo "unexpected MIME for $ASSET: $MIME" >&2; exit 1 ;;
+            esac
+            case "$EXT" in
+              js) case "$MIME" in text/css*) echo "js asset served as css" >&2; exit 1 ;; esac ;;
+              css) case "$MIME" in text/css*) ;; *) echo "css asset wrong MIME: $MIME" >&2; exit 1 ;; esac ;;
+            esac
           done
           # Docker health becomes healthy on its own schedule: poll, never
           # race a fixed sleep (review round 5, R5-P1-01).
@@ -115,5 +128,25 @@ jobs:
           test "$(docker inspect --format '{{.State.Health.Status}}' sb-ci)" = "healthy"
           docker stop -t 15 sb-ci >/dev/null
           test "$(docker inspect --format '{{.State.ExitCode}}' sb-ci)" = "0"
-      - name: "Workflow file is valid YAML"
-        run: python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"
+      - name: "Workflow file is valid YAML with valid Bash"
+        run: |
+          python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"
+          python3 - <<'PYEOF'
+          import yaml, subprocess, sys, tempfile, os
+          wf = yaml.safe_load(open('.github/workflows/ci.yml'))
+          failed = False
+          for jobname, job in wf.get('jobs', {}).items():
+              for i, step in enumerate(job.get('steps', [])):
+                  run = step.get('run')
+                  if not run or step.get('uses'):
+                      continue
+                  with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as f:
+                      f.write(run)
+                      path = f.name
+                  r = subprocess.run(['bash', '-n', path], capture_output=True, text=True)
+                  os.unlink(path)
+                  if r.returncode != 0:
+                      print(f'bash -n failed for {jobname} step {i}:', r.stderr)
+                      failed = True
+          sys.exit(1 if failed else 0)
+          PYEOF
