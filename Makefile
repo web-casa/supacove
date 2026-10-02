@@ -24,11 +24,13 @@ frontend: ## Build the SPA and copy it into the Go embed directory
 build: frontend backend ## Build everything: SPA first, then the Go binary embedding it
 
 api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
-		$(OAPI) -config api/cfg.yaml api/openapi.yaml
+	@test -x "$(OAPI)" || go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
+	$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 
 api-check: ## Fail if generated code drifted from the OpenAPI contract
-		$(OAPI) -config api/cfg.yaml api/openapi.yaml
+	@test -x "$(OAPI)" || go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
+	$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 	git diff --exit-code -- backend/internal/api api frontend/src/api/schema.d.ts || \
 		(echo "ERROR: generated code drifted from api/openapi.yaml — run 'make api-gen' and commit" && exit 1)
@@ -43,7 +45,9 @@ lint: ## gofmt + go vet
 	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
 	go vet ./backend/...
 
-check: lint test frontend api-check ## Everything CI runs (deps are set up by the frontend target first)
+check: lint frontend api-check test ## Everything CI runs; frontend sets up deps before api-check
+	cd frontend && npm run lint
+	$(MAKE) build
 
 clean:
 	rm -rf bin frontend/dist frontend/node_modules

@@ -53,20 +53,26 @@ if [ "${#USER_SCHEMAS[@]}" -eq 0 ]; then
   echo "FATAL: no user schemas found — wrong source project?" >&2
   exit 1
 fi
+for s in "${USER_SCHEMAS[@]}"; do
+  case "$s" in *$'\n'*)
+    echo "FATAL: schema name contains a newline; this spike cannot carry it through psql record boundaries: $s" >&2
+    exit 1 ;;
+  esac
+done
 
-# pg_dump -n/-N take LIKE-style patterns; escape the metacharacters so a
-# schema name containing _ or % matches exactly (review round 2, P1-18).
-escape_pattern() { # stdin: name  stdout: escaped pattern
-  sed -e 's/\\/\\\\/g' -e 's/%/\\%/g' -e 's/_/\\_/g'
+# pg_dump -n/-N take psql patterns (case folding, *, ?, regex chars) — not
+# LIKE. Double-quoting a pattern makes it literal; inner quotes double
+# (review round 2 P1-18, corrected in round 5 per psql PATTERNS docs).
+pattern_literal() { # $1 = exact name -> quoted psql pattern
+  local q="${1//\"/\"\"}"
+  printf '"%s"' "$q"
 }
 
 schema_flags() { # $1 = -n or -N
   local flag="$1"
   local args=()
-  local esc
   for s in "${USER_SCHEMAS[@]}"; do
-    esc=$(printf '%s' "$s" | escape_pattern)
-    args+=("$flag" "$esc")
+    args+=("$flag" "$(pattern_literal "$s")")
   done
   printf '%s\0' "${args[@]}"
 }
@@ -168,13 +174,16 @@ step "verification: exact row counts of user tables (source vs target)"
 : > "$OUT/src-counts.txt"
 : > "$OUT/tgt-counts.txt"
 COUNT_ERROR=0
+SCHEMA_IDX=0
 for s in "${USER_SCHEMAS[@]}"; do
+  SCHEMA_IDX=$((SCHEMA_IDX+1))
   # Table list: schema name bound as a psql variable, quoted server-side.
   # Enumeration failure is an error, never an empty-but-successful result
   # (review round 4, P1-18).
-  mapfile -t TABLES < <(printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
-    | psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -v sch="$s") \
+  printf "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = :'sch' AND c.relkind = 'r' ORDER BY 1;" \
+    | psql --dbname="$SOURCE_DB_URL" --set=ON_ERROR_STOP=1 -At -v sch="$s" > "$OUT/tables-$SCHEMA_IDX.txt" \
     || { echo "FATAL: table enumeration failed for schema $s" >&2; exit 1; }
+  mapfile -t TABLES < "$OUT/tables-$SCHEMA_IDX.txt"
   if [ "${#TABLES[@]}" -eq 0 ]; then
     echo "note: schema $s has no tables" >&2
     continue

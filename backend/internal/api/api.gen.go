@@ -767,6 +767,15 @@ func (response GetHealthDetails401JSONResponse) VisitGetHealthDetailsResponse(w 
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetHealthDetails503JSONResponse Error
+
+func (response GetHealthDetails503JSONResponse) VisitGetHealthDetailsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetHealthzRequestObject struct {
 }
 

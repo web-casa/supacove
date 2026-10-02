@@ -79,19 +79,32 @@ jobs:
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.head_commit.timestamp || 'unknown' }}
           tags: supabackup:ci
-      - name: "Image smoke: non-root, healthz, takeover, healthcheck"
+      - name: "Image smoke: non-root, healthz, takeover, healthcheck, assets, SIGTERM"
         run: |
+          set -euo pipefail
           docker run -d --name sb-ci -p 18080:8080 supabackup:ci
-          sleep 3
+          cleanup() { docker rm -f sb-ci >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
           test "$(docker exec sb-ci id -u)" = "10001"
           curl -fsS http://127.0.0.1:18080/api/healthz | grep -q '"status":"ok"'
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/auth/bootstrap -H 'Content-Type: application/json' -d '{"token":"x","username":"nope","password":"nope-pass-123"}')
           test "$code" -ge 400
           docker exec sb-ci /app/supabackup bootstrap | grep -q "One-time bootstrap token"
+          # The embedded SPA's hashed assets must actually be served, not just
+          # an index referencing missing files (round-5 R5-P1-01).
+          ASSET=$(curl -fsS http://127.0.0.1:18080/ | grep -oE '/assets/[^"]+\.js' | head -1)
+          [ -n "$ASSET" ]
+          curl -fsS -o /dev/null -w '%{content_type}\n' "http://127.0.0.1:18080$ASSET" | grep -q javascript
+          # Docker health becomes healthy on its own schedule: poll, never
+          # race a fixed sleep (review round 5, R5-P1-01).
+          for _ in $(seq 1 30); do
+            st=$(docker inspect --format '{{.State.Health.Status}}' sb-ci)
+            [ "$st" = "healthy" ] && break
+            [ "$st" = "unhealthy" ] && { echo "container unhealthy"; exit 1; }
+            sleep 2
+          done
           test "$(docker inspect --format '{{.State.Health.Status}}' sb-ci)" = "healthy"
-          curl -fsS http://127.0.0.1:18080/ | grep -q supabackup
           docker stop -t 15 sb-ci >/dev/null
           test "$(docker inspect --format '{{.State.ExitCode}}' sb-ci)" = "0"
-          docker rm -f sb-ci >/dev/null
       - name: "Workflow file is valid YAML"
         run: python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"

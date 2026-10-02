@@ -50,6 +50,12 @@ paths:
       operationId: getHealthDetails
       summary: Detailed runtime diagnostics. Requires authentication.
       responses:
+        "503":
+          description: Session storage temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "200":
           description: Runtime details.
           content:

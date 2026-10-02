@@ -111,9 +111,11 @@ func (s *Store) prunePreMigrateBackups() {
 			keep[sn.path] = true
 		}
 	}
-	// Never delete anything we cannot classify.
+	// Unclassifiable (legacy) files are ALWAYS preserved: their source
+	// version is unknown, so deletion can never be proven safe. They do not
+	// consume version-batch quota (review round 5, P1-08 remainder).
 	for _, lg := range legacy {
-		keep[lg.path] = len(unique) > 0 && keep[lg.path]
+		keep[lg.path] = true
 	}
 	for _, e := range entries {
 		if !keep[e] {
