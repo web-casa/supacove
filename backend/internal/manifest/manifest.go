@@ -17,14 +17,15 @@ type Manifest struct {
 	// DumpStartedAt is when the pg_dump EXECUTION started — not the moment
 	// the server snapshot was taken (that instant is not observable through
 	// pg_dump and is honestly unknown; round-1 review P1-10).
-	DumpStartedAt time.Time `json:"dumpStartedAt"`
-	FinishedAt    time.Time `json:"finishedAt"` // artifact committed
-	Database      Database  `json:"database"`
-	Source        Source    `json:"source"`
-	Backup        Backup    `json:"backup"`
-	Selection     Selection `json:"selection"`
-	Dependencies  Deps      `json:"dependencies"`
-	Archive       Archive   `json:"archive"`
+	DumpStartedAt time.Time    `json:"dumpStartedAt"`
+	FinishedAt    time.Time    `json:"finishedAt"` // artifact committed
+	Database      Database     `json:"database"`
+	Source        Source       `json:"source"`
+	Backup        Backup       `json:"backup"`
+	Selection     Selection    `json:"selection"`
+	Verification  Verification `json:"verification"`
+	Dependencies  Deps         `json:"dependencies"`
+	Archive       Archive      `json:"archive"`
 }
 
 type Database struct {
@@ -53,6 +54,12 @@ type Backup struct {
 	ToolVersions ToolVersions `json:"toolVersions"`
 	// RestoreNote states the verified/unsupported restore targets verbatim.
 	RestoreNote string `json:"restoreNote"`
+}
+
+// Verification is honest about what has NOT been done (protocol E v1).
+type Verification struct {
+	RestoreVerified bool   `json:"restoreVerified"`
+	Note            string `json:"note"`
 }
 
 type Selection struct {

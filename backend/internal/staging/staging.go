@@ -4,6 +4,7 @@
 package staging
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,12 +53,11 @@ func (s *Staging) FreeBytes() (uint64, error) {
 	return st.Bavail * uint64(st.Bsize), nil
 }
 
-// OrphanCleanup removes staging leftovers that belong to no live job:
-// .inprogress files (a crash mid-dump) and job-creds-* directories. Called
-// at startup while no worker is running. Committed artifacts are NEVER
-// removed here — they are the product; their lifecycle is retention's
-// business (Phase 3), not orphan cleanup's.
-func (s *Staging) OrphanCleanup(liveJobIDs map[int64]bool) (removed []string, err error) {
+// OrphanCleanupStartup removes staging leftovers at startup — BEFORE the
+// worker exists, so there are no live references to protect; the signature
+// is intentionally exclusive about that (round-2 review P2-03). Committed
+// artifacts are NEVER removed here. Per-item removal errors propagate.
+func (s *Staging) OrphanCleanupStartup() (removed []string, err error) {
 	if err := s.Ensure(); err != nil {
 		return nil, err
 	}
@@ -65,21 +65,27 @@ func (s *Staging) OrphanCleanup(liveJobIDs map[int64]bool) (removed []string, er
 	if err != nil {
 		return nil, err
 	}
+	var errs []error
 	for _, e := range entries {
 		name := e.Name()
 		full := filepath.Join(s.Dir, name)
 		switch {
 		case strings.HasSuffix(name, ".inprogress"):
-			_ = os.Remove(full)
+			if rerr := os.Remove(full); rerr != nil {
+				errs = append(errs, fmt.Errorf("remove %s: %w", name, rerr))
+				continue
+			}
 			removed = append(removed, name)
 		case strings.HasPrefix(name, "job-creds-"):
-			_ = os.RemoveAll(full)
+			if rerr := os.RemoveAll(full); rerr != nil {
+				errs = append(errs, fmt.Errorf("remove credential dir %s: %w", name, rerr))
+				continue
+			}
 			removed = append(removed, name)
 		case artifactRe.MatchString(name):
-			// Committed artifact of some job — live ones keep it.
-			// (Retention in Phase 3; orphan logic never touches these.)
+			// Committed artifact of some job — retention's business, not
+			// orphan cleanup's (Phase 3).
 		}
 	}
-	_ = liveJobIDs
-	return removed, nil
+	return removed, errors.Join(errs...)
 }

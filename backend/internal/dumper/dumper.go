@@ -161,16 +161,14 @@ func probeVersion(bin string) (major int, version string, err error) {
 }
 
 // sanitize masks credential-bearing patterns in stderr before storage or
-// logging. It REMOVES the value context, not just labels it (round-2
-// review P1-02).
+// logging. The VALUE is removed, not just the key labeled (round-2 review
+// P1-02: `password=[REDACTED]<value>` still leaks the value).
 func sanitize(s string) string {
-	r := strings.NewReplacer(
-		"password=", "password=[REDACTED]",
-		"PASSWORD=", "PASSWORD=[REDACTED]",
-		"postgres://", "postgres-uri://[REDACTED]",
-		"postgresql://", "postgres-uri://[REDACTED]",
-	)
-	return r.Replace(s)
+	pwRe := regexp.MustCompile(`(?i)(password=)[^\s'";,]*`)
+	s = pwRe.ReplaceAllString(s, "$1[REDACTED]")
+	uriRe := regexp.MustCompile(`(?i)(postgres(?:ql)?://)[^\s'";,]*`)
+	s = uriRe.ReplaceAllString(s, "$1[REDACTED]")
+	return s
 }
 
 // RedactKnownSecrets removes every occurrence of the actual secret values
@@ -364,6 +362,14 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 			// Consumer failure: make sure no process-group member keeps the
 			// pipe open past this point.
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			return
+		}
+		// Hard quota enforcement at the writer (round-2 review P1-13): the
+		// periodic scanner is too slow for a fast stream, so the counter
+		// itself cancels the run the moment the budget is breached.
+		if c.QuotaBytes > 0 && counter.n > c.QuotaBytes {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			cancelRun()
 		}
 		// On SUCCESS: no kill. pg_dump closed its stdout and is finishing
 		// its shutdown; killing here would turn a clean dump into
@@ -413,12 +419,13 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 		}
 	}
 
-	if runCtx.Err() != nil && ctx.Err() == nil {
+	if ctx.Err() != nil {
+		// Outer cancellation: either the user or instance shutdown.
+		return nil, &Classified{Class: pgclient.ClassUnknown, Err: ctx.Err()}
+	}
+	if runCtx.Err() != nil {
 		return nil, &Classified{Class: pgclient.ClassDisk,
 			Err: fmt.Errorf("%w (staging budget exceeded mid-dump)", ErrStagingFull)}
-	}
-	if ctx.Err() != nil {
-		return nil, &Classified{Class: pgclient.ClassUnknown, Err: ctx.Err()}
 	}
 	stderrMu.Lock()
 	excerpt := sanitize(string(stderrData))

@@ -98,7 +98,10 @@ type Database struct {
 	Name          string           `json:"name"`
 	Platform      DatabasePlatform `json:"platform"`
 	ServerVersion string           `json:"serverVersion"`
-	UpdatedAt     int64            `json:"updatedAt"`
+
+	// SslMode Persisted TLS mode for this target (round-1 review P1-09 —持续可见).
+	SslMode   string `json:"sslMode"`
+	UpdatedAt int64  `json:"updatedAt"`
 }
 
 // DatabasePlatform defines model for Database.Platform.

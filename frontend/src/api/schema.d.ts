@@ -323,6 +323,8 @@ export interface components {
             platform: "supabase" | "neon" | "railway" | "generic";
             envTag: string;
             serverVersion: string;
+            /** @description Persisted TLS mode for this target (round-1 review P1-09 —持续可见). */
+            sslMode: string;
             lastTask?: components["schemas"]["Task"];
             /** Format: int64 */
             createdAt: number;

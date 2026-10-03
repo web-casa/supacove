@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"io"
@@ -126,12 +127,13 @@ func seedTestTable(t *testing.T, uri string, rows int) {
 func countRows(t *testing.T, uri string) int {
 	t.Helper()
 	ci := mustConn(t, uri)
-	res, err := pgclient.Test(context.Background(), ci)
-	if err != nil {
+	if _, err := pgclient.Test(context.Background(), ci); err != nil {
 		t.Fatalf("connect for count: %v", err)
 	}
-	_ = res
-	out, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres", "-d", "appdb",
+	// The TARGET database name comes from the URI — never a hardcoded source
+	// db (round-2 review P1-14: the previous version verified the SOURCE).
+	out, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
+		"-d", ci.DBName,
 		"-At", "-c", "SELECT count(*) FROM m1test").CombinedOutput()
 	if err != nil {
 		t.Fatalf("count: %v: %s", err, out)
@@ -141,6 +143,35 @@ func countRows(t *testing.T, uri string) int {
 		t.Fatalf("parse count %q: %v", out, err)
 	}
 	return n
+}
+
+// verifyRestoredContent checks actual payload values in the restored db
+// (round-2 review P1-14: count alone is a false positive).
+func verifyRestoredContent(t *testing.T, verifyURI string) {
+	t.Helper()
+	out, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
+		"-d", mustConn(t, verifyURI).DBName,
+		"-At", "-c",
+		"SELECT id, payload FROM m1test WHERE id IN (1, 250, 500) ORDER BY id").CombinedOutput()
+	if err != nil {
+		t.Fatalf("content probe: %v: %s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("content probe returned %d lines, want 3", len(lines))
+	}
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) != 2 {
+			t.Fatalf("malformed probe row: %q", line)
+		}
+		var id int
+		fmt.Sscanf(parts[0], "%d", &id)
+		want := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%d", id))))
+		if parts[1] != want {
+			t.Fatalf("content mismatch at id %d: got %q want %q", id, parts[1], want)
+		}
+	}
 }
 
 // TestM1_FullKernelChain is the M1 gate: register → backup → take ONLY the
@@ -275,6 +306,7 @@ func TestM1_FullKernelChain(t *testing.T) {
 	if gotRows != wantRows {
 		t.Fatalf("restored rows = %d, want %d", gotRows, wantRows)
 	}
+	verifyRestoredContent(t, verifyURI)
 
 	// Manifest sanity (protocol E): key ID, versions, no secrets.
 	mb, err := os.ReadFile(filepath.Join(stagingDir, fmt.Sprintf("backup-job%d.dump.age.manifest.json", jobID)))

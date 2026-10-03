@@ -198,13 +198,15 @@ func runServe() error {
 	if err := stg.Ensure(); err != nil {
 		return fmt.Errorf("prepare staging: %w", err)
 	}
-	if removed, err := stg.OrphanCleanup(nil); err != nil {
-		log.Error("staging orphan cleanup", "err", err)
+	if removed, err := stg.OrphanCleanupStartup(); err != nil {
+		// A credential dir that cannot be removed is a security finding.
+		log.Error("staging orphan cleanup incomplete", "removed", removed, "err", err)
 	} else if len(removed) > 0 {
 		log.Info("staging orphans removed", "count", len(removed))
 	}
 	runner := jobs.NewRunner(store, key, stg.Dir,
 		func(ctx context.Context) (string, error) { return srv.RecipientFor(ctx) }, log)
+	runner.SetQuota(cfg.StagingQuotaBytes)
 	srv.SetRunner(runner)
 	if n, err := runner.RecoverInterrupted(ctx); err != nil {
 		return fmt.Errorf("recover interrupted jobs: %w", err)

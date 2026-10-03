@@ -584,7 +584,7 @@ components:
           description: age recipient string (age1…).
     Database:
       type: object
-      required: [id, name, platform, envTag, serverVersion, createdAt, updatedAt]
+      required: [id, name, platform, envTag, serverVersion, sslMode, createdAt, updatedAt]
       properties:
         id:
           type: integer
@@ -598,6 +598,9 @@ components:
           type: string
         serverVersion:
           type: string
+        sslMode:
+          type: string
+          description: Persisted TLS mode for this target (round-1 review P1-09 —持续可见).
         lastTask:
           $ref: "#/components/schemas/Task"
         createdAt:

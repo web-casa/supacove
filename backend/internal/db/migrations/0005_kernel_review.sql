@@ -4,6 +4,19 @@
 --   P1-12  artifact states     → jobs.artifact_state tracks the commit pipeline
 --   P2-05  error model         → jobs.error_code + jobs.retryable
 -- +goose Up
+-- Converge duplicate active rows that older versions (without the unique
+-- index) could produce: keep the OLDEST active job per database as pending,
+-- demote the rest to interrupted with an explanatory class. Deleting audit
+-- history is not an option (round-2 review R2-P1-02).
+UPDATE jobs SET status = 'interrupted',
+    error_class = 'unknown',
+    error_message = 'superseded: duplicate active job collapsed during upgrade to the no-overlap guarantee',
+    finished_at = strftime('%s','now')
+WHERE status IN ('pending','running')
+  AND id NOT IN (
+    SELECT MIN(id) FROM jobs WHERE status IN ('pending','running') GROUP BY database_id
+  );
+
 CREATE UNIQUE INDEX idx_jobs_active_per_database
     ON jobs(database_id) WHERE status IN ('pending','running');
 

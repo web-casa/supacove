@@ -34,6 +34,9 @@ type Config struct {
 	BootstrapTokenTTL time.Duration
 	// SessionTTL is the fixed session lifetime.
 	SessionTTL time.Duration
+	// StagingQuotaBytes is the hard per-run cap on ciphertext written to the
+	// staging area (0 = only the filesystem free-space floor applies).
+	StagingQuotaBytes int64
 	// PublicOrigin is the exact external origin (scheme://host[:port]) users
 	// browse. When set, Origin headers must equal it strictly; when empty the
 	// request's own scheme+host is used (direct, non-proxied deployments).
@@ -48,8 +51,15 @@ type Config struct {
 
 // Load reads configuration from the environment with defaults.
 func Load() (*Config, error) {
+	quota := int64(0)
+	if v := os.Getenv("SB_STAGING_QUOTA_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
+			quota = n
+		}
+	}
 	c := &Config{
 		DataDir:           envOr("SB_DATA_DIR", "./data"),
+		StagingQuotaBytes: quota,
 		Addr:              envOr("SB_ADDR", ":8080"),
 		SecretFile:        os.Getenv("SB_SECRET_FILE"),
 		InsecureCookie:    envBool("SB_INSECURE_COOKIE"),

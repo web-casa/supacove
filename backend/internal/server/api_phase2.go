@@ -254,6 +254,7 @@ func (a *apiService) dbToAPI(d *jobs.Database) api.Database {
 		Platform:      api.DatabasePlatform(d.Platform),
 		EnvTag:        d.EnvTag,
 		ServerVersion: d.ServerVersion,
+		SslMode:       d.SSLMode,
 		CreatedAt:     d.CreatedAt,
 		UpdatedAt:     d.UpdatedAt,
 	}

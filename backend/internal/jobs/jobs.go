@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -159,15 +158,43 @@ func (r *Runner) signalWake() {
 // (test hook for fault-injecting fakes).
 func (r *Runner) SetClientOverride(dir string) { r.cfg.BinDirOverride = dir }
 
+// SetQuota wires the staging hard budget into the dumper (round-1 review
+// P1-13: the quota must actually reach the kernel, not just the config).
+func (r *Runner) SetQuota(bytes int64) { r.cfg.QuotaBytes = bytes }
+
 // Stop terminates the worker.
 func (r *Runner) Stop() {
+	r.mu.Lock()
+	if r.stopped {
+		r.mu.Unlock()
+		return
+	}
+	r.stopped = true
+	r.mu.Unlock()
+	if r.lifeCancel != nil {
+		r.lifeCancel()
+	}
+	r.wg.Wait()
 }
 
-// Cancel requests cancellation of a pending or running job.
+// Cancel requests cancellation of a pending or running job. A PENDING job
+// transitions to `canceled` atomically right here; a RUNNING job is flipped
+// to canceled at its final update if cancellation wins the race (round-2
+// review P1-04).
 func (r *Runner) Cancel(jobID int64) error {
 	res, err := r.authDB.Exec(
+		`UPDATE jobs SET status = 'canceled', cancel_requested = 1,
+		    finished_at = strftime('%s','now')
+		 WHERE id = ? AND status = 'pending'`, jobID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 1 {
+		return nil // pending job settled without ever running
+	}
+	res, err = r.authDB.Exec(
 		`UPDATE jobs SET cancel_requested = 1
-		 WHERE id = ? AND status IN ('pending','running')`, jobID)
+		 WHERE id = ? AND status = 'running'`, jobID)
 	if err != nil {
 		return err
 	}
@@ -177,9 +204,18 @@ func (r *Runner) Cancel(jobID int64) error {
 	r.mu.Lock()
 	if fn, ok := r.cancelFns[jobID]; ok {
 		fn()
+	} else {
+		// Claim/registration handshake window: the runner re-checks the flag
+		// right after registering, so this settles shortly.
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			r.mu.Lock()
+			if fn, ok := r.cancelFns[jobID]; ok {
+				fn()
+			}
+			r.mu.Unlock()
+		}()
 	}
-	r.mu.Unlock()
-	r.signalWake()
 	return nil
 }
 
@@ -310,31 +346,66 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 
 	// 3) Dump + encrypt + atomic commit (protocol A).
+	// (A user cancel that lands mid-dump is finalized as `canceled` below;
+	// instance shutdown is finalized as `interrupted` by startup recovery.)
+	dumpStart := time.Now().UTC()
 	result, err := r.cfg.Run(ctx, jobID, dumper.Target{
 		Conn: ci, ServerMajor: test.ServerMajor, Recipient: recipient,
 	})
 	if err != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			// User cancel won mid-run: honor it as canceled (round-1 P1-04).
+			if _, uerr := r.authDB.Exec(`
+				UPDATE jobs SET status = 'canceled', finished_at = strftime('%s','now')
+				WHERE id = ? AND status = 'running' AND cancel_requested = 1`, jobID); uerr != nil {
+				r.log.Error("cancel finalization failed", "job", jobID, "err", uerr)
+			}
+			return
+		}
 		r.fail(jobID, classify(err), err.Error())
 		return
 	}
 
-	// 4) Manifest (protocol E) — self-describing restore payload.
+	// The ciphertext is COMMITTED (protocol A done). Persist its reference
+	// immediately, before anything else can fail (round-1 review P1-12):
+	// a later manifest/db failure leaves a traceable, restorable artifact.
+	manifestPath := result.ArtifactPath + ".manifest.json"
+	if _, err := r.authDB.Exec(`
+		UPDATE jobs SET artifact_path = ?, artifact_sha256 = ?, artifact_size = ?,
+		  artifact_state = 'committed'
+		WHERE id = ?`, result.ArtifactPath, result.SHA256, result.SizeBytes, jobID); err != nil {
+		r.fail(jobID, ClassDisk, "artifact reference could not be persisted: "+err.Error())
+		return
+	}
+
+	// 4) Manifest (protocol E) — self-describing restore payload. Fields are
+	// honest about what v1 does NOT verify (round-1 review P1-10).
 	now := time.Now().UTC()
 	m := &manifest.Manifest{
-		BackupID:   fmt.Sprintf("job-%d", jobID),
-		FinishedAt: now,
-		Database:   manifest.Database{Name: name, Platform: platform, EnvTag: envTag},
-		Source:     manifest.Source{Host: ci.Host, Port: ci.Port, DBName: ci.DBName, ServerVersion: test.ServerVersion},
+		BackupID:      fmt.Sprintf("job-%d", jobID),
+		DumpStartedAt: dumpStart,
+		FinishedAt:    now,
+		Database:      manifest.Database{Name: name, Platform: platform, EnvTag: envTag},
+		Source:        manifest.Source{Host: ci.Host, Port: ci.Port, DBName: ci.DBName, ServerVersion: test.ServerVersion},
 		Backup: manifest.Backup{
-			Mode: "full", Format: "pg_dump custom (-Fc)", Compression: "zlib (custom-format default)",
+			Mode: "full", Format: "pg_dump custom (-Fc)",
+			Compression:  "zlib/gzip (custom-format default; algorithm set by the pg_dump build)",
 			ToolVersions: manifest.ToolVersions{PGDump: result.DumpToolVer, ClientMajor: result.ClientMajor, Age: "filippo.io/age"},
+			RestoreNote: fmt.Sprintf(
+				"restore into PostgreSQL >= %d; restoring into OLDER majors than the dumping client major (%d) is NOT guaranteed by PostgreSQL and has NOT been verified by this tool",
+				result.ClientMajor, result.ClientMajor),
 		},
-		Selection: manifest.Selection{Rule: "entire database (all user schemas), no exclusions"},
+		Selection: manifest.Selection{Rule: "entire database (all user schemas); foreign-table DATA is NOT included (definitions only); large objects included"},
 		Dependencies: manifest.Deps{
 			Extensions:       toManifestExts(deps.Extensions),
 			Roles:            deps.Roles,
 			HasLargeObjects:  deps.HasLargeObjects,
 			HasForeignTables: deps.HasForeignTables,
+			ServerEncoding:   deps.ServerEncoding,
+		},
+		Verification: manifest.Verification{
+			RestoreVerified: false,
+			Note:            "this backup has NOT been restore-verified yet; use the recovery kit and record the drill result",
 		},
 		Archive: manifest.Archive{
 			FileName:   filepath.Base(result.ArtifactPath),
@@ -343,36 +414,76 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 			Encryption: manifest.Encryption{Type: "age", KeyID: result.EncryptedTo, Recipient: recipient},
 		},
 	}
-	manifestPath := result.ArtifactPath + ".manifest.json"
 	mb, err := manifest.Marshal(m)
 	if err == nil {
-		err = writeAtomic(manifestPath, mb)
+		err = durableWriteFile(manifestPath, mb)
 	}
 	if err != nil {
-		// The artifact is committed but its manifest failed: this is a
-		// protocol-E violation — mark failed, do NOT report success.
-		r.fail(jobID, ClassDisk, "manifest write failed: "+err.Error())
+		// The artifact is committed but its manifest failed: keep the
+		// artifact reference (it is restorable manually), flag the state,
+		// and mark the job failed — never report success (round-1 P1-12).
+		if _, uerr := r.authDB.Exec(`
+			UPDATE jobs SET artifact_state = 'committed_no_manifest' WHERE id = ?`, jobID); uerr != nil {
+			r.log.Error("artifact state update failed", "job", jobID, "err", uerr)
+		}
+		r.fail(jobID, ClassDisk,
+			"manifest write failed; the CIPHERTEXT IS committed and restorable manually (artifact reference retained), but this job is marked failed: "+err.Error())
 		return
 	}
 
-	// 5) Success record — the only path that reaches 'succeeded'.
-	if _, err := r.authDB.Exec(`
+	// 5) Success record — the only path that reaches 'succeeded'. The final
+	// update is conditional (cancellation arbitration) and checks
+	// RowsAffected (round-1 reviews P1-12/P1-04).
+	successSQL := `
 		UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
 		  artifact_path = ?, artifact_sha256 = ?, artifact_size = ?, manifest_path = ?
-		WHERE id = ?`,
-		result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath, jobID); err != nil {
-		r.log.Error("job success update failed", "job", jobID, "err", err)
+		WHERE id = ? AND status = 'running' AND cancel_requested = 0`
+	res, err := r.authDB.Exec(successSQL,
+		result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath, jobID)
+	if err != nil {
+		// SQLITE_BUSY/ENOSPC here would leave a committed artifact with a
+		// 'running' job — bounded retry, then a loud failure record.
+		time.Sleep(500 * time.Millisecond)
+		res, err = r.authDB.Exec(successSQL,
+			result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath, jobID)
+	}
+	if err != nil {
+		r.log.Error("job success update failed twice", "job", jobID, "err", err)
+		r.fail(jobID, ClassDisk, "backup completed but the success record could not be written: "+err.Error())
+		return
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		// Cancellation won the race: the committed ciphertext stays, but the
+		// job is honored as canceled, NOT succeeded.
+		if _, uerr := r.authDB.Exec(`
+			UPDATE jobs SET status = 'canceled', finished_at = strftime('%s','now')
+			WHERE id = ? AND status = 'running' AND cancel_requested = 1`, jobID); uerr != nil {
+			r.log.Error("cancel finalization failed", "job", jobID, "err", uerr)
+		}
+		r.log.Info("job canceled after commit; artifact retained", "job", jobID)
 		return
 	}
 	r.log.Info("backup succeeded", "job", jobID, "database", name,
-		"bytes", result.SizeBytes, "sha256", result.SHA256[:16], "stderr_excerpt", result.StdErrExcerpt)
+		"bytes", result.SizeBytes, "sha256", result.SHA256[:16])
 }
 
 func (r *Runner) loadDatabase(ctx context.Context, dbID int64) (name, platform, envTag, connEnc string, err error) {
 	err = r.authDB.QueryRowContext(ctx,
-		`SELECT name, platform, env_tag, conn_encrypted FROM databases WHERE id = ?`, dbID).
+		`SELECT name, platform, env_tag, conn_encrypted FROM databases
+		 WHERE id = ? AND deleted_at IS NULL`, dbID).
 		Scan(&name, &platform, &envTag, &connEnc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", "", "", ErrDatabaseNotFound
+	}
 	return
+}
+
+// ranToCancellation reports whether this context died from a user cancel
+// (cancel_requested set) as opposed to instance shutdown.
+func (r *Runner) ranToCancellation(jobID int64) bool {
+	var flag int
+	_ = r.authDB.QueryRow(`SELECT cancel_requested FROM jobs WHERE id = ?`, jobID).Scan(&flag)
+	return flag == 1
 }
 
 func (r *Runner) fail(jobID int64, class, msg string) {
@@ -404,14 +515,6 @@ func classify(err error) string {
 		return string(dc.Class)
 	}
 	return ClassUnknown
-}
-
-func writeAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 func toManifestExts(in []pgclient.Extension) []manifest.PgExtension {
