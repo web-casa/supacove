@@ -18,11 +18,67 @@ const (
 	CookieAuthScopes = "cookieAuth.Scopes"
 )
 
+// Defines values for DatabasePlatform.
+const (
+	DatabasePlatformGeneric  DatabasePlatform = "generic"
+	DatabasePlatformNeon     DatabasePlatform = "neon"
+	DatabasePlatformRailway  DatabasePlatform = "railway"
+	DatabasePlatformSupabase DatabasePlatform = "supabase"
+)
+
+// Defines values for DatabaseCreatePlatform.
+const (
+	DatabaseCreatePlatformGeneric  DatabaseCreatePlatform = "generic"
+	DatabaseCreatePlatformNeon     DatabaseCreatePlatform = "neon"
+	DatabaseCreatePlatformRailway  DatabaseCreatePlatform = "railway"
+	DatabaseCreatePlatformSupabase DatabaseCreatePlatform = "supabase"
+)
+
 // Defines values for HealthStatusStatus.
 const (
 	Ok          HealthStatusStatus = "ok"
 	Unavailable HealthStatusStatus = "unavailable"
 )
+
+// Defines values for TaskErrorClass.
+const (
+	Auth          TaskErrorClass = "auth"
+	ClientVersion TaskErrorClass = "client_version"
+	Disk          TaskErrorClass = "disk"
+	Empty         TaskErrorClass = ""
+	Network       TaskErrorClass = "network"
+	Permission    TaskErrorClass = "permission"
+	StorageUpload TaskErrorClass = "storage_upload"
+	Unknown       TaskErrorClass = "unknown"
+	Verification  TaskErrorClass = "verification"
+)
+
+// Defines values for TaskStatus.
+const (
+	Canceled    TaskStatus = "canceled"
+	Failed      TaskStatus = "failed"
+	Interrupted TaskStatus = "interrupted"
+	Pending     TaskStatus = "pending"
+	Running     TaskStatus = "running"
+	Succeeded   TaskStatus = "succeeded"
+)
+
+// AgeRecipientRequest defines model for AgeRecipientRequest.
+type AgeRecipientRequest struct {
+	// Recipient age recipient string (age1…).
+	Recipient string `json:"recipient"`
+}
+
+// AgeStatus defines model for AgeStatus.
+type AgeStatus struct {
+	Configured bool `json:"configured"`
+
+	// KeyId Recipient fingerprint (protocol B).
+	KeyId *string `json:"keyId,omitempty"`
+
+	// Recipient Public age recipient (empty when not configured).
+	Recipient *string `json:"recipient,omitempty"`
+}
 
 // BootstrapRequest defines model for BootstrapRequest.
 type BootstrapRequest struct {
@@ -31,6 +87,38 @@ type BootstrapRequest struct {
 	// Token One-time token printed by `supabackup bootstrap`.
 	Token    string `json:"token"`
 	Username string `json:"username"`
+}
+
+// Database defines model for Database.
+type Database struct {
+	CreatedAt     int64            `json:"createdAt"`
+	EnvTag        string           `json:"envTag"`
+	Id            int64            `json:"id"`
+	LastTask      *Task            `json:"lastTask,omitempty"`
+	Name          string           `json:"name"`
+	Platform      DatabasePlatform `json:"platform"`
+	ServerVersion string           `json:"serverVersion"`
+	UpdatedAt     int64            `json:"updatedAt"`
+}
+
+// DatabasePlatform defines model for Database.Platform.
+type DatabasePlatform string
+
+// DatabaseCreate defines model for DatabaseCreate.
+type DatabaseCreate struct {
+	// ConnectionUri postgres:// URI; stored AES-GCM-encrypted, never returned.
+	ConnectionUri string                  `json:"connectionUri"`
+	EnvTag        *string                 `json:"envTag,omitempty"`
+	Name          string                  `json:"name"`
+	Platform      *DatabaseCreatePlatform `json:"platform,omitempty"`
+}
+
+// DatabaseCreatePlatform defines model for DatabaseCreate.Platform.
+type DatabaseCreatePlatform string
+
+// DatabaseList defines model for DatabaseList.
+type DatabaseList struct {
+	Databases []Database `json:"databases"`
 }
 
 // Error defines model for Error.
@@ -65,6 +153,34 @@ type LoginRequest struct {
 	Username string `json:"username"`
 }
 
+// Task defines model for Task.
+type Task struct {
+	ArtifactSha256  *string         `json:"artifactSha256,omitempty"`
+	ArtifactSize    *int64          `json:"artifactSize,omitempty"`
+	Attempt         int             `json:"attempt"`
+	CancelRequested *bool           `json:"cancelRequested,omitempty"`
+	DatabaseId      int64           `json:"databaseId"`
+	ErrorClass      *TaskErrorClass `json:"errorClass,omitempty"`
+	ErrorMessage    *string         `json:"errorMessage,omitempty"`
+	FinishedAt      *int64          `json:"finishedAt"`
+	HasManifest     *bool           `json:"hasManifest,omitempty"`
+	Id              int64           `json:"id"`
+	ScheduledAt     *int64          `json:"scheduledAt,omitempty"`
+	StartedAt       *int64          `json:"startedAt"`
+	Status          TaskStatus      `json:"status"`
+}
+
+// TaskErrorClass defines model for Task.ErrorClass.
+type TaskErrorClass string
+
+// TaskStatus defines model for Task.Status.
+type TaskStatus string
+
+// TaskList defines model for TaskList.
+type TaskList struct {
+	Tasks []Task `json:"tasks"`
+}
+
 // User defines model for User.
 type User struct {
 	// CreatedAt Unix seconds.
@@ -94,14 +210,26 @@ type PostAuthLogoutParams struct {
 	XCSRFToken string `json:"X-CSRF-Token"`
 }
 
+// PutAgeRecipientJSONRequestBody defines body for PutAgeRecipient for application/json ContentType.
+type PutAgeRecipientJSONRequestBody = AgeRecipientRequest
+
 // PostAuthBootstrapJSONRequestBody defines body for PostAuthBootstrap for application/json ContentType.
 type PostAuthBootstrapJSONRequestBody = BootstrapRequest
 
 // PostAuthLoginJSONRequestBody defines body for PostAuthLogin for application/json ContentType.
 type PostAuthLoginJSONRequestBody = LoginRequest
 
+// CreateDatabaseJSONRequestBody defines body for CreateDatabase for application/json ContentType.
+type CreateDatabaseJSONRequestBody = DatabaseCreate
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Set the age recipient (public key) used to encrypt backups.
+	// (PUT /age/recipient)
+	PutAgeRecipient(w http.ResponseWriter, r *http.Request)
+	// age encryption configuration (protocol B). Recipient is public.
+	// (GET /age/status)
+	GetAgeStatus(w http.ResponseWriter, r *http.Request)
 	// Create the initial admin using a one-time token from the local CLI.
 	// (POST /auth/bootstrap)
 	PostAuthBootstrap(w http.ResponseWriter, r *http.Request)
@@ -114,6 +242,21 @@ type ServerInterface interface {
 	// Current authenticated user.
 	// (GET /auth/me)
 	GetAuthMe(w http.ResponseWriter, r *http.Request)
+	// Registered backup targets (no secrets).
+	// (GET /databases)
+	ListDatabases(w http.ResponseWriter, r *http.Request)
+	// Register a database after a live connection test.
+	// (POST /databases)
+	CreateDatabase(w http.ResponseWriter, r *http.Request)
+	// Remove the registration. Committed artifacts are kept.
+	// (DELETE /databases/{id})
+	DeleteDatabase(w http.ResponseWriter, r *http.Request, id int64)
+	// One database with its latest job summary.
+	// (GET /databases/{id})
+	GetDatabase(w http.ResponseWriter, r *http.Request, id int64)
+	// Enqueue a backup job for this database (returns immediately).
+	// (POST /databases/{id}/backups)
+	TriggerBackup(w http.ResponseWriter, r *http.Request, id int64)
 	// Detailed runtime diagnostics. Requires authentication.
 	// (GET /health/details)
 	GetHealthDetails(w http.ResponseWriter, r *http.Request)
@@ -123,11 +266,32 @@ type ServerInterface interface {
 	// Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 	// (GET /ready)
 	GetReady(w http.ResponseWriter, r *http.Request)
+	// Recent jobs across all databases (newest first).
+	// (GET /tasks)
+	ListTasks(w http.ResponseWriter, r *http.Request)
+	// One job with artifact and manifest details.
+	// (GET /tasks/{id})
+	GetTask(w http.ResponseWriter, r *http.Request, id int64)
+	// Request cancellation of a pending or running job.
+	// (POST /tasks/{id}/cancel)
+	CancelTask(w http.ResponseWriter, r *http.Request, id int64)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// Set the age recipient (public key) used to encrypt backups.
+// (PUT /age/recipient)
+func (_ Unimplemented) PutAgeRecipient(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// age encryption configuration (protocol B). Recipient is public.
+// (GET /age/status)
+func (_ Unimplemented) GetAgeStatus(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Create the initial admin using a one-time token from the local CLI.
 // (POST /auth/bootstrap)
@@ -153,6 +317,36 @@ func (_ Unimplemented) GetAuthMe(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Registered backup targets (no secrets).
+// (GET /databases)
+func (_ Unimplemented) ListDatabases(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Register a database after a live connection test.
+// (POST /databases)
+func (_ Unimplemented) CreateDatabase(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Remove the registration. Committed artifacts are kept.
+// (DELETE /databases/{id})
+func (_ Unimplemented) DeleteDatabase(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// One database with its latest job summary.
+// (GET /databases/{id})
+func (_ Unimplemented) GetDatabase(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Enqueue a backup job for this database (returns immediately).
+// (POST /databases/{id}/backups)
+func (_ Unimplemented) TriggerBackup(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Detailed runtime diagnostics. Requires authentication.
 // (GET /health/details)
 func (_ Unimplemented) GetHealthDetails(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +365,24 @@ func (_ Unimplemented) GetReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Recent jobs across all databases (newest first).
+// (GET /tasks)
+func (_ Unimplemented) ListTasks(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// One job with artifact and manifest details.
+// (GET /tasks/{id})
+func (_ Unimplemented) GetTask(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Request cancellation of a pending or running job.
+// (POST /tasks/{id}/cancel)
+func (_ Unimplemented) CancelTask(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -179,6 +391,46 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// PutAgeRecipient operation middleware
+func (siw *ServerInterfaceWrapper) PutAgeRecipient(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutAgeRecipient(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgeStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetAgeStatus(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgeStatus(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // PostAuthBootstrap operation middleware
 func (siw *ServerInterfaceWrapper) PostAuthBootstrap(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +530,139 @@ func (siw *ServerInterfaceWrapper) GetAuthMe(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListDatabases operation middleware
+func (siw *ServerInterfaceWrapper) ListDatabases(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDatabases(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDatabase operation middleware
+func (siw *ServerInterfaceWrapper) CreateDatabase(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDatabase(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDatabase operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDatabase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDatabase(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDatabase operation middleware
+func (siw *ServerInterfaceWrapper) GetDatabase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDatabase(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TriggerBackup operation middleware
+func (siw *ServerInterfaceWrapper) TriggerBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TriggerBackup(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealthDetails operation middleware
 func (siw *ServerInterfaceWrapper) GetHealthDetails(w http.ResponseWriter, r *http.Request) {
 
@@ -317,6 +702,88 @@ func (siw *ServerInterfaceWrapper) GetReady(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetReady(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTasks operation middleware
+func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTasks(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTask operation middleware
+func (siw *ServerInterfaceWrapper) GetTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTask(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelTask operation middleware
+func (siw *ServerInterfaceWrapper) CancelTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelTask(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -440,6 +907,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/age/recipient", wrapper.PutAgeRecipient)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/age/status", wrapper.GetAgeStatus)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/bootstrap", wrapper.PostAuthBootstrap)
 	})
 	r.Group(func(r chi.Router) {
@@ -452,6 +925,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/auth/me", wrapper.GetAuthMe)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases", wrapper.CreateDatabase)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/databases/{id}", wrapper.DeleteDatabase)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/databases/{id}", wrapper.GetDatabase)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases/{id}/backups", wrapper.TriggerBackup)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/health/details", wrapper.GetHealthDetails)
 	})
 	r.Group(func(r chi.Router) {
@@ -459,6 +947,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/ready", wrapper.GetReady)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tasks", wrapper.ListTasks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tasks/{id}", wrapper.GetTask)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/tasks/{id}/cancel", wrapper.CancelTask)
 	})
 
 	return r
@@ -473,6 +970,66 @@ type PayloadTooLargeJSONResponse Error
 type RateLimitedJSONResponse Error
 
 type UnsupportedMediaTypeJSONResponse Error
+
+type PutAgeRecipientRequestObject struct {
+	Body *PutAgeRecipientJSONRequestBody
+}
+
+type PutAgeRecipientResponseObject interface {
+	VisitPutAgeRecipientResponse(w http.ResponseWriter) error
+}
+
+type PutAgeRecipient200JSONResponse AgeStatus
+
+func (response PutAgeRecipient200JSONResponse) VisitPutAgeRecipientResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutAgeRecipient400JSONResponse Error
+
+func (response PutAgeRecipient400JSONResponse) VisitPutAgeRecipientResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutAgeRecipient500JSONResponse struct{ InternalJSONResponse }
+
+func (response PutAgeRecipient500JSONResponse) VisitPutAgeRecipientResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgeStatusRequestObject struct {
+}
+
+type GetAgeStatusResponseObject interface {
+	VisitGetAgeStatusResponse(w http.ResponseWriter) error
+}
+
+type GetAgeStatus200JSONResponse AgeStatus
+
+func (response GetAgeStatus200JSONResponse) VisitGetAgeStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetAgeStatus500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetAgeStatus500JSONResponse) VisitGetAgeStatusResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
 
 type PostAuthBootstrapRequestObject struct {
 	Body *PostAuthBootstrapJSONRequestBody
@@ -742,6 +1299,206 @@ func (response GetAuthMe503JSONResponse) VisitGetAuthMeResponse(w http.ResponseW
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListDatabasesRequestObject struct {
+}
+
+type ListDatabasesResponseObject interface {
+	VisitListDatabasesResponse(w http.ResponseWriter) error
+}
+
+type ListDatabases200JSONResponse DatabaseList
+
+func (response ListDatabases200JSONResponse) VisitListDatabasesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListDatabases500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListDatabases500JSONResponse) VisitListDatabasesResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDatabaseRequestObject struct {
+	Body *CreateDatabaseJSONRequestBody
+}
+
+type CreateDatabaseResponseObject interface {
+	VisitCreateDatabaseResponse(w http.ResponseWriter) error
+}
+
+type CreateDatabase201JSONResponse Database
+
+func (response CreateDatabase201JSONResponse) VisitCreateDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDatabase400JSONResponse Error
+
+func (response CreateDatabase400JSONResponse) VisitCreateDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDatabase409JSONResponse Error
+
+func (response CreateDatabase409JSONResponse) VisitCreateDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDatabase422JSONResponse Error
+
+func (response CreateDatabase422JSONResponse) VisitCreateDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDatabase500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateDatabase500JSONResponse) VisitCreateDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteDatabaseRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DeleteDatabaseResponseObject interface {
+	VisitDeleteDatabaseResponse(w http.ResponseWriter) error
+}
+
+type DeleteDatabase204Response struct {
+}
+
+func (response DeleteDatabase204Response) VisitDeleteDatabaseResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteDatabase404JSONResponse Error
+
+func (response DeleteDatabase404JSONResponse) VisitDeleteDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteDatabase409JSONResponse Error
+
+func (response DeleteDatabase409JSONResponse) VisitDeleteDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteDatabase500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteDatabase500JSONResponse) VisitDeleteDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDatabaseRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type GetDatabaseResponseObject interface {
+	VisitGetDatabaseResponse(w http.ResponseWriter) error
+}
+
+type GetDatabase200JSONResponse Database
+
+func (response GetDatabase200JSONResponse) VisitGetDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDatabase404JSONResponse Error
+
+func (response GetDatabase404JSONResponse) VisitGetDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDatabase500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetDatabase500JSONResponse) VisitGetDatabaseResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerBackupRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type TriggerBackupResponseObject interface {
+	VisitTriggerBackupResponse(w http.ResponseWriter) error
+}
+
+type TriggerBackup202JSONResponse Task
+
+func (response TriggerBackup202JSONResponse) VisitTriggerBackupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerBackup404JSONResponse Error
+
+func (response TriggerBackup404JSONResponse) VisitTriggerBackupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerBackup409JSONResponse Error
+
+func (response TriggerBackup409JSONResponse) VisitTriggerBackupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TriggerBackup500JSONResponse struct{ InternalJSONResponse }
+
+func (response TriggerBackup500JSONResponse) VisitTriggerBackupResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetHealthDetailsRequestObject struct {
 }
 
@@ -817,8 +1574,109 @@ func (response GetReady503JSONResponse) VisitGetReadyResponse(w http.ResponseWri
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListTasksRequestObject struct {
+}
+
+type ListTasksResponseObject interface {
+	VisitListTasksResponse(w http.ResponseWriter) error
+}
+
+type ListTasks200JSONResponse TaskList
+
+func (response ListTasks200JSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListTasks500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListTasks500JSONResponse) VisitListTasksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTaskRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type GetTaskResponseObject interface {
+	VisitGetTaskResponse(w http.ResponseWriter) error
+}
+
+type GetTask200JSONResponse Task
+
+func (response GetTask200JSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTask404JSONResponse Error
+
+func (response GetTask404JSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTask500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetTask500JSONResponse) VisitGetTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelTaskRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type CancelTaskResponseObject interface {
+	VisitCancelTaskResponse(w http.ResponseWriter) error
+}
+
+type CancelTask202JSONResponse Task
+
+func (response CancelTask202JSONResponse) VisitCancelTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelTask409JSONResponse Error
+
+func (response CancelTask409JSONResponse) VisitCancelTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CancelTask500JSONResponse struct{ InternalJSONResponse }
+
+func (response CancelTask500JSONResponse) VisitCancelTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Set the age recipient (public key) used to encrypt backups.
+	// (PUT /age/recipient)
+	PutAgeRecipient(ctx context.Context, request PutAgeRecipientRequestObject) (PutAgeRecipientResponseObject, error)
+	// age encryption configuration (protocol B). Recipient is public.
+	// (GET /age/status)
+	GetAgeStatus(ctx context.Context, request GetAgeStatusRequestObject) (GetAgeStatusResponseObject, error)
 	// Create the initial admin using a one-time token from the local CLI.
 	// (POST /auth/bootstrap)
 	PostAuthBootstrap(ctx context.Context, request PostAuthBootstrapRequestObject) (PostAuthBootstrapResponseObject, error)
@@ -831,6 +1689,21 @@ type StrictServerInterface interface {
 	// Current authenticated user.
 	// (GET /auth/me)
 	GetAuthMe(ctx context.Context, request GetAuthMeRequestObject) (GetAuthMeResponseObject, error)
+	// Registered backup targets (no secrets).
+	// (GET /databases)
+	ListDatabases(ctx context.Context, request ListDatabasesRequestObject) (ListDatabasesResponseObject, error)
+	// Register a database after a live connection test.
+	// (POST /databases)
+	CreateDatabase(ctx context.Context, request CreateDatabaseRequestObject) (CreateDatabaseResponseObject, error)
+	// Remove the registration. Committed artifacts are kept.
+	// (DELETE /databases/{id})
+	DeleteDatabase(ctx context.Context, request DeleteDatabaseRequestObject) (DeleteDatabaseResponseObject, error)
+	// One database with its latest job summary.
+	// (GET /databases/{id})
+	GetDatabase(ctx context.Context, request GetDatabaseRequestObject) (GetDatabaseResponseObject, error)
+	// Enqueue a backup job for this database (returns immediately).
+	// (POST /databases/{id}/backups)
+	TriggerBackup(ctx context.Context, request TriggerBackupRequestObject) (TriggerBackupResponseObject, error)
 	// Detailed runtime diagnostics. Requires authentication.
 	// (GET /health/details)
 	GetHealthDetails(ctx context.Context, request GetHealthDetailsRequestObject) (GetHealthDetailsResponseObject, error)
@@ -840,6 +1713,15 @@ type StrictServerInterface interface {
 	// Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 	// (GET /ready)
 	GetReady(ctx context.Context, request GetReadyRequestObject) (GetReadyResponseObject, error)
+	// Recent jobs across all databases (newest first).
+	// (GET /tasks)
+	ListTasks(ctx context.Context, request ListTasksRequestObject) (ListTasksResponseObject, error)
+	// One job with artifact and manifest details.
+	// (GET /tasks/{id})
+	GetTask(ctx context.Context, request GetTaskRequestObject) (GetTaskResponseObject, error)
+	// Request cancellation of a pending or running job.
+	// (POST /tasks/{id}/cancel)
+	CancelTask(ctx context.Context, request CancelTaskRequestObject) (CancelTaskResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -869,6 +1751,61 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// PutAgeRecipient operation middleware
+func (sh *strictHandler) PutAgeRecipient(w http.ResponseWriter, r *http.Request) {
+	var request PutAgeRecipientRequestObject
+
+	var body PutAgeRecipientJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutAgeRecipient(ctx, request.(PutAgeRecipientRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutAgeRecipient")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutAgeRecipientResponseObject); ok {
+		if err := validResponse.VisitPutAgeRecipientResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAgeStatus operation middleware
+func (sh *strictHandler) GetAgeStatus(w http.ResponseWriter, r *http.Request) {
+	var request GetAgeStatusRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAgeStatus(ctx, request.(GetAgeStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAgeStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAgeStatusResponseObject); ok {
+		if err := validResponse.VisitGetAgeStatusResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // PostAuthBootstrap operation middleware
@@ -983,6 +1920,139 @@ func (sh *strictHandler) GetAuthMe(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListDatabases operation middleware
+func (sh *strictHandler) ListDatabases(w http.ResponseWriter, r *http.Request) {
+	var request ListDatabasesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDatabases(ctx, request.(ListDatabasesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDatabases")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDatabasesResponseObject); ok {
+		if err := validResponse.VisitListDatabasesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateDatabase operation middleware
+func (sh *strictHandler) CreateDatabase(w http.ResponseWriter, r *http.Request) {
+	var request CreateDatabaseRequestObject
+
+	var body CreateDatabaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDatabase(ctx, request.(CreateDatabaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDatabase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDatabaseResponseObject); ok {
+		if err := validResponse.VisitCreateDatabaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteDatabase operation middleware
+func (sh *strictHandler) DeleteDatabase(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DeleteDatabaseRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteDatabase(ctx, request.(DeleteDatabaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteDatabase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteDatabaseResponseObject); ok {
+		if err := validResponse.VisitDeleteDatabaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetDatabase operation middleware
+func (sh *strictHandler) GetDatabase(w http.ResponseWriter, r *http.Request, id int64) {
+	var request GetDatabaseRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDatabase(ctx, request.(GetDatabaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDatabase")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDatabaseResponseObject); ok {
+		if err := validResponse.VisitGetDatabaseResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TriggerBackup operation middleware
+func (sh *strictHandler) TriggerBackup(w http.ResponseWriter, r *http.Request, id int64) {
+	var request TriggerBackupRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TriggerBackup(ctx, request.(TriggerBackupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TriggerBackup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TriggerBackupResponseObject); ok {
+		if err := validResponse.VisitTriggerBackupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealthDetails operation middleware
 func (sh *strictHandler) GetHealthDetails(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthDetailsRequestObject
@@ -1048,6 +2118,82 @@ func (sh *strictHandler) GetReady(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReadyResponseObject); ok {
 		if err := validResponse.VisitGetReadyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTasks operation middleware
+func (sh *strictHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
+	var request ListTasksRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTasks(ctx, request.(ListTasksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTasks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTasksResponseObject); ok {
+		if err := validResponse.VisitListTasksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTask operation middleware
+func (sh *strictHandler) GetTask(w http.ResponseWriter, r *http.Request, id int64) {
+	var request GetTaskRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTask(ctx, request.(GetTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTaskResponseObject); ok {
+		if err := validResponse.VisitGetTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CancelTask operation middleware
+func (sh *strictHandler) CancelTask(w http.ResponseWriter, r *http.Request, id int64) {
+	var request CancelTaskRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CancelTask(ctx, request.(CancelTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CancelTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CancelTaskResponseObject); ok {
+		if err := validResponse.VisitCancelTaskResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

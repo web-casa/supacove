@@ -1,0 +1,89 @@
+// Package manifest implements protocol E (dev-plan §0.5): every backup
+// ships a self-describing manifest sufficient to restore WITHOUT this
+// application — source/tool versions, selection rules, archive hashes and
+// the age key ID. Manifests never contain passwords or private keys.
+package manifest
+
+import (
+	"encoding/json"
+	"time"
+)
+
+const FormatVersion = 1
+
+type Manifest struct {
+	FormatVersion int       `json:"formatVersion"`
+	BackupID      string    `json:"backupId"`
+	CreatedAt     time.Time `json:"createdAt"`  // export snapshot START (freshness anchor, dev-plan P1-13)
+	FinishedAt    time.Time `json:"finishedAt"` // artifact committed
+	Database      Database  `json:"database"`
+	Source        Source    `json:"source"`
+	Backup        Backup    `json:"backup"`
+	Selection     Selection `json:"selection"`
+	Dependencies  Deps      `json:"dependencies"`
+	Archive       Archive   `json:"archive"`
+}
+
+type Database struct {
+	Name     string `json:"name"`
+	Platform string `json:"platform"`
+	EnvTag   string `json:"envTag,omitempty"`
+}
+
+type Source struct {
+	Host          string `json:"host"`
+	Port          string `json:"port,omitempty"`
+	DBName        string `json:"dbname"`
+	ServerVersion string `json:"serverVersion"`
+}
+
+type ToolVersions struct {
+	PGDump      string `json:"pgDump"`
+	ClientMajor int    `json:"clientMajor"`
+	Age         string `json:"age"`
+}
+
+type Backup struct {
+	Mode         string       `json:"mode"`        // "full" (v1)
+	Format       string       `json:"format"`      // "pg_dump custom (-Fc)"
+	Compression  string       `json:"compression"` // zlib (custom-format default)
+	ToolVersions ToolVersions `json:"toolVersions"`
+}
+
+type Selection struct {
+	Schemas        []string `json:"schemas,omitempty"`
+	ExcludeSchemas []string `json:"excludeSchemas,omitempty"`
+	Rule           string   `json:"rule"` // human-readable selection statement
+}
+
+type Deps struct {
+	Extensions       []PgExtension `json:"extensions"`
+	Roles            []string      `json:"roles"`
+	HasLargeObjects  bool          `json:"hasLargeObjects"`
+	HasForeignTables bool          `json:"hasForeignTables"`
+}
+
+// PgExtension mirrors pgclient.Extension without importing it here.
+type PgExtension struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type Encryption struct {
+	Type      string `json:"type"`      // "age"
+	KeyID     string `json:"keyId"`     // recipient fingerprint (protocol B)
+	Recipient string `json:"recipient"` // public — safe to store
+}
+
+type Archive struct {
+	FileName   string     `json:"fileName"`
+	SHA256     string     `json:"sha256"` // over the full CIPHERTEXT (protocol C.1)
+	SizeBytes  int64      `json:"sizeBytes"`
+	Encryption Encryption `json:"encryption"`
+}
+
+// Writer produces the canonical JSON bytes for a manifest.
+func Marshal(m *Manifest) ([]byte, error) {
+	m.FormatVersion = FormatVersion
+	return json.MarshalIndent(m, "", "  ")
+}

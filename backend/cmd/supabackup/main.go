@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,15 +17,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"crypto/sha256"
+	"github.com/cloudfan/supabackup/backend/internal/agekey"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
 	"github.com/cloudfan/supabackup/backend/internal/config"
 	"github.com/cloudfan/supabackup/backend/internal/db"
+	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/limiter"
 	"github.com/cloudfan/supabackup/backend/internal/server"
+	"github.com/cloudfan/supabackup/backend/internal/staging"
 )
 
 var (
@@ -52,6 +57,12 @@ func main() {
 		err = runResetPassword(os.Args[2])
 	case "healthcheck":
 		err = runHealthcheck()
+	case "age":
+		if len(os.Args) < 3 {
+			err = errors.New("usage: supabackup age [init|show|verify --identity-file <path>]")
+			break
+		}
+		err = runAge(os.Args[2], os.Args[3:])
 	case "version":
 		fmt.Printf("supabackup %s (commit %s, built %s)\n", version, commit, buildDate)
 	case "help", "-h", "--help":
@@ -171,6 +182,27 @@ func runServe() error {
 		Version: version, Commit: commit, BuildDate: buildDate,
 	})
 
+	// Backup kernel (Phase 2): staging orphans → interrupted recovery → worker.
+	stg := staging.New(cfg.DataDir)
+	if err := stg.Ensure(); err != nil {
+		return fmt.Errorf("prepare staging: %w", err)
+	}
+	if removed, err := stg.OrphanCleanup(nil); err != nil {
+		log.Error("staging orphan cleanup", "err", err)
+	} else if len(removed) > 0 {
+		log.Info("staging orphans removed", "count", len(removed))
+	}
+	runner := jobs.NewRunner(store, key, stg.Dir,
+		func(ctx context.Context) (string, error) { return srv.RecipientFor(ctx) }, log)
+	srv.SetRunner(runner)
+	if n, err := runner.RecoverInterrupted(ctx); err != nil {
+		return fmt.Errorf("recover interrupted jobs: %w", err)
+	} else if n > 0 {
+		log.Warn("jobs interrupted by previous shutdown", "count", n)
+	}
+	runner.Start(ctx)
+	defer runner.Stop()
+
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           srv.Router(),
@@ -262,6 +294,121 @@ func runResetPassword(username string) error {
 	fmt.Printf("New password for %s (all existing sessions were revoked):\n\n  %s\n\nStore it in your password manager; it will not be shown again.\n",
 		username, newPass)
 	return nil
+}
+
+// runAge implements the protocol-B key lifecycle:
+//   - init: generate a keypair, store ONLY the recipient, print the private
+//     key exactly once with explicit loss warnings;
+//   - show: print the stored recipient and its fingerprint;
+//   - verify: round-trip a canary through encrypt(recipient)/decrypt(identity)
+//     to prove the offline identity matches before the first real backup.
+func runAge(action string, args []string) error {
+	log := newLogger()
+	cfg := mustLoadConfig(log)
+
+	switch action {
+	case "init":
+		store, err := db.OpenForCLI(cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		ctx := context.Background()
+		if err := store.EnsureFreshSchemaForCLI(ctx); err != nil {
+			return err
+		}
+		var existing string
+		_ = store.DB.QueryRow(`SELECT value FROM settings WHERE key = 'age_recipient'`).Scan(&existing)
+		if existing != "" {
+			return fmt.Errorf("age recipient already configured (key id %s); rotating requires a deliberate decision", agekey.Fingerprint(existing))
+		}
+		identity, recipient, err := agekey.Generate()
+		if err != nil {
+			return err
+		}
+		if _, err := store.DB.Exec(
+			`INSERT INTO settings (key, value) VALUES ('age_recipient', ?), ('age_key_id', ?)`,
+			recipient, agekey.Fingerprint(recipient)); err != nil {
+			return err
+		}
+		fmt.Printf(`age keypair generated.
+
+The PRIVATE identity below is the ONLY way to decrypt every backup
+created from now on. Save it NOW, offline (password manager, printed
+paper). It is NOT stored by supabackup and will never be shown again.
+
+If you lose it, your backups become permanently unreadable.
+
+-----BEGIN AGE IDENTITY-----
+%s
+-----END AGE IDENTITY-----
+
+Recipient (public, stored in supabackup): %s
+Key ID: %s
+`, identity, recipient, agekey.Fingerprint(recipient))
+		return nil
+
+	case "show":
+		store, err := db.OpenForCLI(cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		var recipient, keyID string
+		err = store.DB.QueryRow(`SELECT value FROM settings WHERE key = 'age_recipient'`).Scan(&recipient)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("age is not configured yet; run `supabackup age init`")
+		}
+		if err != nil {
+			return err
+		}
+		_ = store.DB.QueryRow(`SELECT value FROM settings WHERE key = 'age_key_id'`).Scan(&keyID)
+		fmt.Printf("recipient: %s\nkey id:    %s\n", recipient, keyID)
+		return nil
+
+	case "verify":
+		var identityFile string
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "--identity-file" {
+				identityFile = args[i+1]
+			}
+		}
+		if identityFile == "" {
+			return errors.New("usage: supabackup age verify --identity-file <path>")
+		}
+		raw, err := os.ReadFile(identityFile)
+		if err != nil {
+			return err
+		}
+		store, err := db.OpenForCLI(cfg.DataDir)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		var recipient string
+		if err := store.DB.QueryRow(`SELECT value FROM settings WHERE key = 'age_recipient'`).Scan(&recipient); err != nil {
+			return errors.New("age is not configured yet; run `supabackup age init`")
+		}
+		canary := fmt.Sprintf("supabackup canary %d", time.Now().UnixNano())
+		var enc strings.Builder
+		if err := agekey.EncryptStream(recipient, strings.NewReader(canary), &enc); err != nil {
+			return fmt.Errorf("encrypt canary: %w", err)
+		}
+		var dec strings.Builder
+		if err := agekey.DecryptStream(string(raw), strings.NewReader(enc.String()), &dec); err != nil {
+			return fmt.Errorf("DECRYPT FAILED — this identity does not match the stored recipient: %w", err)
+		}
+		if dec.String() != canary {
+			return errors.New("round-trip mismatch after decryption")
+		}
+		id, _ := agekey.ParseIdentity(string(raw))
+		fmt.Printf("OK: identity matches recipient %s (key id %s)\n", recipient, agekey.Fingerprint(recipient))
+		_ = id
+		return nil
+
+	default:
+		return fmt.Errorf("unknown age action %q", action)
+	}
 }
 
 // runHealthcheck is used by the container HEALTHCHECK: probe this instance's

@@ -200,6 +200,233 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /age/status:
+    get:
+      operationId: getAgeStatus
+      summary: age encryption configuration (protocol B). Recipient is public.
+      responses:
+        "200":
+          description: Recipient configured or not.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgeStatus"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /age/recipient:
+    put:
+      operationId: putAgeRecipient
+      summary: Set the age recipient (public key) used to encrypt backups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgeRecipientRequest"
+      responses:
+        "200":
+          description: Recipient stored with its fingerprint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgeStatus"
+        "400":
+          description: Invalid recipient.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases:
+    get:
+      operationId: listDatabases
+      summary: Registered backup targets (no secrets).
+      responses:
+        "200":
+          description: All databases.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseList"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createDatabase
+      summary: Register a database after a live connection test.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatabaseCreate"
+      responses:
+        "201":
+          description: Created; the connection was tested live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Database"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A database with this name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Connection test failed (error class in body).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases/{id}:
+    get:
+      operationId: getDatabase
+      summary: One database with its latest job summary.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The database.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Database"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteDatabase
+      summary: Remove the registration. Committed artifacts are kept.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Removed.
+        "409":
+          description: A job is pending or running for this database.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases/{id}/backups:
+    post:
+      operationId: triggerBackup
+      summary: Enqueue a backup job for this database (returns immediately).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "202":
+          description: Job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A job is already pending or running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: Recent jobs across all databases (newest first).
+      responses:
+        "200":
+          description: Job list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}:
+    get:
+      operationId: getTask
+      summary: One job with artifact and manifest details.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/cancel:
+    post:
+      operationId: cancelTask
+      summary: Request cancellation of a pending or running job.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "202":
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "409":
+          description: Job is not pending or running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
   /auth/me:
     get:
       operationId: getAuthMe
@@ -334,6 +561,128 @@ components:
           minLength: 12
           maxLength: 128
           format: password
+    AgeStatus:
+      type: object
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+        recipient:
+          type: string
+          description: Public age recipient (empty when not configured).
+        keyId:
+          type: string
+          description: Recipient fingerprint (protocol B).
+    AgeRecipientRequest:
+      type: object
+      required: [recipient]
+      properties:
+        recipient:
+          type: string
+          minLength: 20
+          maxLength: 200
+          description: age recipient string (age1…).
+    Database:
+      type: object
+      required: [id, name, platform, envTag, serverVersion, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+        envTag:
+          type: string
+        serverVersion:
+          type: string
+        lastTask:
+          $ref: "#/components/schemas/Task"
+        createdAt:
+          type: integer
+          format: int64
+        updatedAt:
+          type: integer
+          format: int64
+    DatabaseList:
+      type: object
+      required: [databases]
+      properties:
+        databases:
+          type: array
+          items:
+            $ref: "#/components/schemas/Database"
+    DatabaseCreate:
+      type: object
+      required: [name, connectionUri]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+          default: generic
+        envTag:
+          type: string
+          maxLength: 64
+        connectionUri:
+          type: string
+          minLength: 20
+          maxLength: 500
+          format: password
+          description: postgres:// URI; stored AES-GCM-encrypted, never returned.
+    Task:
+      type: object
+      required: [id, databaseId, status, attempt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        databaseId:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed, canceled, interrupted]
+        attempt:
+          type: integer
+        errorClass:
+          type: string
+          enum: ["", network, auth, permission, client_version, disk, storage_upload, verification, unknown]
+        errorMessage:
+          type: string
+        artifactSha256:
+          type: string
+        artifactSize:
+          type: integer
+          format: int64
+        hasManifest:
+          type: boolean
+        cancelRequested:
+          type: boolean
+        scheduledAt:
+          type: integer
+          format: int64
+        startedAt:
+          type: integer
+          format: int64
+          nullable: true
+        finishedAt:
+          type: integer
+          format: int64
+          nullable: true
+    TaskList:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
     Error:
       type: object
       required: [code, message]

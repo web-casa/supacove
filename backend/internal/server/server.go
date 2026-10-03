@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,9 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"github.com/cloudfan/supabackup/backend/internal/agekey"
+	"github.com/cloudfan/supabackup/backend/internal/jobs"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
@@ -69,7 +73,45 @@ type Server struct {
 	log     *slog.Logger
 	build   BuildInfo
 	started time.Time
+	runner  *jobs.Runner // backup kernel (Phase 2); may be nil in pure-API tests
 }
+
+// recipientFor reads the configured age recipient from settings (protocol B).
+func (s *Server) recipientFor(ctx context.Context) (string, error) {
+	var r string
+	err := s.store.DB.QueryRowContext(ctx,
+		`SELECT value FROM settings WHERE key = 'age_recipient'`).Scan(&r)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return r, err
+}
+
+// RecipientFor is the exported accessor used by the backup kernel.
+func (s *Server) RecipientFor(ctx context.Context) (string, error) {
+	return s.recipientFor(ctx)
+}
+
+// storeRecipient persists the age recipient with its fingerprint.
+func (s *Server) storeRecipient(ctx context.Context, recipient string) error {
+	_, err := s.store.DB.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES ('age_recipient', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, recipient)
+	if err != nil {
+		return err
+	}
+	_, err = s.store.DB.ExecContext(ctx,
+		`INSERT INTO settings (key, value) VALUES ('age_key_id', ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		agekey.Fingerprint(recipient))
+	return err
+}
+
+// SetRunner attaches the backup kernel after construction (main.go owns the
+// lifecycle: migrations → runner → server).
+func (s *Server) SetRunner(r *jobs.Runner) { s.runner = r }
+
+func (s *Server) Runner() *jobs.Runner { return s.runner }
 
 func New(store *db.Store, authStore *auth.Store, cfg *config.Config, key []byte, lim *limiter.Limiter, log *slog.Logger, build BuildInfo) *Server {
 	return &Server{
