@@ -199,8 +199,6 @@ func (p *phase3Runner) seedCommittedJob(t *testing.T, dbID, destID int64, status
 	var jobID int64
 	remoteState := "''" // SQL literal for the default (empty) state
 	uploadedAt := "NULL"
-	objKey := fmt.Sprintf("dest/databases/%d/backup-%%d.dump.age", dbID)
-	manKey := fmt.Sprintf("dest/databases/%d/backup-%%d.manifest.json", dbID)
 	if remote == "committed" {
 		remoteState = "'committed'"
 		uploadedAt = "strftime('%s','now')"
@@ -218,11 +216,12 @@ func (p *phase3Runner) seedCommittedJob(t *testing.T, dbID, destID int64, status
 		dbID, status, destID).Scan(&jobID); err != nil {
 		t.Fatal(err)
 	}
-	objKey = fmt.Sprintf(objKey, jobID)
-	manKey = fmt.Sprintf(manKey, jobID)
+	backupUUID := fmt.Sprintf("seed-%d-%s", jobID, strings.ToLower(strings.ReplaceAll(remote, "'", "")))
+	objKey := "dest/backups/" + backupUUID + ".dump.age"
+	manKey := "dest/backups/" + backupUUID + ".manifest.json"
 	if _, err := p.store.DB.Exec(
-		`UPDATE jobs SET remote_object_key = ?, remote_manifest_key = ? WHERE id = ?`,
-		objKey, manKey, jobID); err != nil {
+		`UPDATE jobs SET backup_uuid = ?, remote_object_key = ?, remote_manifest_key = ? WHERE id = ?`,
+		backupUUID, objKey, manKey, jobID); err != nil {
 		t.Fatal(err)
 	}
 	if remote == "committed" {
@@ -336,12 +335,18 @@ func TestUploadProtocolCCommittedPipeline(t *testing.T) {
 		t.Fatalf("uploadAndCommitRemote: %v", err)
 	}
 
-	// Remote objects exist under the destination's ACTUAL prefix.
-	objKey := destCfg.BackupKey(dbID, jobID)
-	if _, ok := p.backend.objects[objKey]; !ok {
-		t.Fatalf("ciphertext not uploaded")
+	// Remote objects exist under the destination prefix, keyed by the job's
+	// backup UUID.
+	var backupIDStr string
+	if err := p.store.DB.QueryRow(
+		`SELECT backup_uuid FROM jobs WHERE id = ?`, jobID).Scan(&backupIDStr); err != nil {
+		t.Fatal(err)
 	}
-	manKey := destCfg.ManifestKey(dbID, jobID)
+	objKey := destCfg.BackupKey(backupIDStr)
+	if _, ok := p.backend.objects[objKey]; !ok {
+		t.Fatalf("ciphertext not uploaded (key %s)", objKey)
+	}
+	manKey := destCfg.ManifestKey(backupIDStr)
 	if _, ok := p.backend.objects[manKey]; !ok {
 		t.Fatal("manifest not uploaded")
 	}
@@ -444,13 +449,9 @@ func TestRetentionPolicyKeepsAnchor(t *testing.T) {
 	}
 	p.runRemoteRetention(context.Background(), dest, p.backend, dbID)
 
-	if _, ok := p.backend.objects[fmt.Sprintf("dest/databases/%d/backup-N.dump.age", dbID)]; ok {
-		// all three jobs share the seeded object key pattern; count remote objects
-	}
 	remaining := 0
 	for k := range p.backend.objects {
-		if strings.HasPrefix(k, fmt.Sprintf("dest/databases/%d/", dbID)) &&
-			strings.Contains(k, "backup-") && strings.HasSuffix(k, ".dump.age") {
+		if strings.Contains(k, "backups/") && strings.HasSuffix(k, ".dump.age") {
 			remaining++
 		}
 	}
@@ -487,15 +488,18 @@ func TestReconcileClassification(t *testing.T) {
 	// a committed job whose remote object is MISSING: seeded with objects
 	// (committed mode) that are then removed from the fake
 	missing := p.seedCommittedJob(t, dbID, destID, "succeeded", "committed")
-	mk := fmt.Sprintf("dest/databases/%d/backup-%d.dump.age", dbID, missing)
-	mm := fmt.Sprintf("dest/databases/%d/backup-%d.manifest.json", dbID, missing)
+	mk := fmt.Sprintf("dest/backups/seed-%d-committed.dump.age", missing)
+	mm := fmt.Sprintf("dest/backups/seed-%d-committed.manifest.json", missing)
 	delete(p.backend.objects, mk)
 	delete(p.backend.objects, mm)
 
 	// an uploading job whose partial object exists remotely
 	uploading := p.seedCommittedJob(t, dbID, destID, "failed", "")
 	p.store.DB.Exec(`UPDATE jobs SET remote_state='uploading' WHERE id = ?`, uploading)
-	p.backend.objects[fmt.Sprintf("dest/databases/%d/backup-%d.dump.age", dbID, uploading)] = []byte("partial")
+	var uploadUUID string
+	p.store.DB.QueryRow(`SELECT backup_uuid FROM jobs WHERE id = ?`, uploading).Scan(&uploadUUID)
+	uploadKey := fmt.Sprintf("dest/backups/%s.dump.age", uploadUUID)
+	p.backend.objects[uploadKey] = []byte("partial")
 
 	// a foreign object under our prefix
 	p.backend.objects["dest/unknown-thing.bin"] = []byte("foreign")
