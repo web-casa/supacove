@@ -67,7 +67,8 @@ type Runner struct {
 	lifeCancel context.CancelFunc
 	wg         sync.WaitGroup
 	startOnce  sync.Once
-	stopped    bool
+	stopOnce   sync.Once
+	stopDone   chan struct{}
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
@@ -82,11 +83,14 @@ func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ct
 		cancelFns:  make(map[int64]context.CancelFunc),
 		perDB:      make(map[int64]bool),
 		wake:       make(chan struct{}, 1),
+		stopDone:   make(chan struct{}),
 	}
 }
 
 // RecoverInterrupted marks every running job as interrupted at startup —
-// never as succeeded, never re-run blindly (dev-plan P2 task 4).
+// never as succeeded, never re-run blindly (dev-plan P2 task 4) — then
+// reconciles committed artifacts against job references (round-1 review
+// P1-12): every ciphertext gets a traceable owner, temp files are cleaned.
 func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 	res, err := r.authDB.ExecContext(ctx,
 		`UPDATE jobs SET status = 'interrupted', finished_at = strftime('%s','now')
@@ -95,6 +99,21 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
+
+	// Interrupted jobs WITH a committed artifact keep it; those without one
+	// but showing an artifact path get the contradiction recorded.
+	if _, err := r.authDB.ExecContext(ctx, `
+		UPDATE jobs SET error_message = error_message ||
+		  ' [recovery: artifact committed before interruption — restore manually or re-run]'
+		WHERE status = 'interrupted' AND artifact_state IN ('committed','committed_no_manifest')`); err != nil {
+		return n, err
+	}
+	if _, err := r.authDB.ExecContext(ctx, `
+		UPDATE jobs SET artifact_path = '', artifact_sha256 = '', artifact_size = 0,
+		  manifest_path = ''
+		WHERE status = 'interrupted' AND artifact_state = '' AND artifact_path != ''`); err != nil {
+		return n, err
+	}
 	return n, nil
 }
 
@@ -164,17 +183,17 @@ func (r *Runner) SetQuota(bytes int64) { r.cfg.QuotaBytes = bytes }
 
 // Stop terminates the worker.
 func (r *Runner) Stop() {
-	r.mu.Lock()
-	if r.stopped {
-		r.mu.Unlock()
-		return
-	}
-	r.stopped = true
-	r.mu.Unlock()
-	if r.lifeCancel != nil {
-		r.lifeCancel()
-	}
-	r.wg.Wait()
+	// "Cancel once" and "every caller waits for completion" are two separate
+	// requirements (round-3 review R3-P2-01): concurrent Stops must all join
+	// before returning.
+	r.stopOnce.Do(func() {
+		if r.lifeCancel != nil {
+			r.lifeCancel()
+		}
+		r.wg.Wait()
+		close(r.stopDone)
+	})
+	<-r.stopDone
 }
 
 // Cancel requests cancellation of a pending or running job. A PENDING job
@@ -223,12 +242,27 @@ func (r *Runner) Cancel(jobID int64) error {
 // currently being processed (round-2 review P2-01: skip, never rekey).
 // Returns false when nothing was claimable.
 func (r *Runner) claimAndRun(ctx context.Context) bool {
-	var id, dbID int64
-	err := r.authDB.QueryRowContext(ctx, `
+	// Scan ALL pending candidates in order so a busy database does not block
+	// other runnable databases (round-2 review P2-01).
+	rows, err := r.authDB.QueryContext(ctx, `
 		SELECT j.id, j.database_id FROM jobs j
 		WHERE j.status = 'pending' AND j.cancel_requested = 0
-		ORDER BY j.id LIMIT 1`).Scan(&id, &dbID)
+		ORDER BY j.id LIMIT 50`)
 	if err != nil {
+		return false
+	}
+	type cand struct{ id, dbID int64 }
+	var candidates []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.id, &c.dbID); err != nil {
+			rows.Close()
+			return false
+		}
+		candidates = append(candidates, c)
+	}
+	rows.Close()
+	if len(candidates) == 0 {
 		// Nothing claimable — settle any cancel-requested pending jobs so
 		// `canceled` is actually reachable (round-1 review P1-04).
 		r.settleCanceledPending()
@@ -236,10 +270,16 @@ func (r *Runner) claimAndRun(ctx context.Context) bool {
 	}
 
 	r.mu.Lock()
-	if r.perDB[dbID] {
-		// Same-database job still finishing: SKIP this one (the job id and
-		// API address never change), keep scanning other databases; the
-		// safety poll picks it up once the slot frees (round-2 review P2-01).
+	var id, dbID int64
+	found := false
+	for _, c := range candidates {
+		if !r.perDB[c.dbID] {
+			id, dbID = c.id, c.dbID
+			found = true
+			break
+		}
+	}
+	if !found {
 		r.mu.Unlock()
 		return false
 	}
@@ -300,10 +340,17 @@ func (r *Runner) settleCanceledPending() {
 // runJob executes one backup end-to-end and records the outcome. It never
 // panics into the worker loop.
 func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
+	// Known secrets, populated once the credentials are decrypted; every
+	// failure path redacts them from stored/logged text (round-3 review
+	// P1-02 remainder — labeled-but-kept values still leak).
+	var knownSecrets []string
+	redact := func(msg string) string {
+		return pgclient.SanitizeMessage(dumper.RedactKnownSecrets(knownSecrets, msg))
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			r.log.Error("job panic", "job", jobID, "panic", rec)
-			r.fail(jobID, ClassUnknown, fmt.Sprintf("internal panic: %v", rec))
+			r.log.Error("job panic", "job", jobID, "panic", redact(fmt.Sprint(rec)))
+			r.fail(jobID, ClassUnknown, redact(fmt.Sprintf("internal panic: %v", rec)))
 		}
 	}()
 
@@ -324,24 +371,41 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		r.fail(jobID, ClassUnknown, "stored connection URI invalid: "+err.Error())
 		return
 	}
+	knownSecrets = append(knownSecrets, ci.Password)
 
 	recipient, err := r.recipient(ctx)
-	if err != nil || recipient == "" {
-		r.fail(jobID, ClassUnknown, "age recipient not configured; run `supabackup age init` first")
+	if err != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
+		r.fail(jobID, ClassUnknown, redact("age recipient lookup failed: "+err.Error()))
+		return
+	}
+	if recipient == "" {
+		r.fail(jobID, ClassUnknown, redact("age recipient not configured; run `supabackup age init` first"))
 		return
 	}
 
 	// 1) Connection test + version (pgx — same semantics as pg_dump).
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {
-		r.fail(jobID, classify(err), "connection test failed: "+err.Error())
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
+		r.fail(jobID, classify(err), redact("connection test failed: "+err.Error()))
 		return
 	}
 
 	// 2) Dependency collection (protocol E manifest payload).
 	deps, err := pgclient.CollectDependencies(ctx, ci)
 	if err != nil {
-		r.fail(jobID, classify(err), "dependency collection failed: "+err.Error())
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
+		r.fail(jobID, classify(err), redact("dependency collection failed: "+err.Error()))
 		return
 	}
 
@@ -354,15 +418,10 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	})
 	if err != nil {
 		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			// User cancel won mid-run: honor it as canceled (round-1 P1-04).
-			if _, uerr := r.authDB.Exec(`
-				UPDATE jobs SET status = 'canceled', finished_at = strftime('%s','now')
-				WHERE id = ? AND status = 'running' AND cancel_requested = 1`, jobID); uerr != nil {
-				r.log.Error("cancel finalization failed", "job", jobID, "err", uerr)
-			}
+			r.finalizeCanceled(jobID)
 			return
 		}
-		r.fail(jobID, classify(err), err.Error())
+		r.fail(jobID, classify(err), redact(err.Error()))
 		return
 	}
 
@@ -374,7 +433,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		UPDATE jobs SET artifact_path = ?, artifact_sha256 = ?, artifact_size = ?,
 		  artifact_state = 'committed'
 		WHERE id = ?`, result.ArtifactPath, result.SHA256, result.SizeBytes, jobID); err != nil {
-		r.fail(jobID, ClassDisk, "artifact reference could not be persisted: "+err.Error())
+		r.fail(jobID, ClassDisk, redact("artifact reference could not be persisted: "+err.Error()))
 		return
 	}
 
@@ -449,7 +508,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 	if err != nil {
 		r.log.Error("job success update failed twice", "job", jobID, "err", err)
-		r.fail(jobID, ClassDisk, "backup completed but the success record could not be written: "+err.Error())
+		r.fail(jobID, ClassDisk, redact("backup completed but the success record could not be written: "+err.Error()))
 		return
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
@@ -476,6 +535,16 @@ func (r *Runner) loadDatabase(ctx context.Context, dbID int64) (name, platform, 
 		return "", "", "", "", ErrDatabaseNotFound
 	}
 	return
+}
+
+// finalizeCanceled writes the `canceled` terminal state for a running job
+// whose context died from a user cancel (round-1 review P1-04).
+func (r *Runner) finalizeCanceled(jobID int64) {
+	if _, uerr := r.authDB.Exec(`
+		UPDATE jobs SET status = 'canceled', finished_at = strftime('%s','now')
+		WHERE id = ? AND status = 'running' AND cancel_requested = 1`, jobID); uerr != nil {
+		r.log.Error("cancel finalization failed", "job", jobID, "err", uerr)
+	}
 }
 
 // ranToCancellation reports whether this context died from a user cancel

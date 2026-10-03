@@ -23,6 +23,30 @@ CREATE UNIQUE INDEX idx_jobs_active_per_database
 ALTER TABLE databases ADD COLUMN deleted_at INTEGER;
 ALTER TABLE databases ADD COLUMN sslmode TEXT NOT NULL DEFAULT '';
 
+-- Name uniqueness applies to LIVE registrations only: soft-deleted names are
+-- free for reuse (round-2 review R2-P2-01). SQLite cannot drop a constraint,
+-- so the table is rebuilt without the table-wide UNIQUE, then a partial
+-- unique index enforces live-name uniqueness.
+CREATE TABLE databases_new (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT    NOT NULL,
+    platform       TEXT    NOT NULL DEFAULT 'generic',
+    env_tag        TEXT    NOT NULL DEFAULT '',
+    conn_encrypted TEXT    NOT NULL,
+    server_version TEXT    NOT NULL DEFAULT '',
+    sslmode        TEXT    NOT NULL DEFAULT '',
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL,
+    deleted_at     INTEGER
+);
+INSERT INTO databases_new (id, name, platform, env_tag, conn_encrypted, server_version, sslmode, created_at, updated_at, deleted_at)
+    SELECT id, name, platform, env_tag, conn_encrypted, server_version,
+           COALESCE(sslmode,''), created_at, updated_at, deleted_at FROM databases;
+DROP TABLE databases;
+ALTER TABLE databases_new RENAME TO databases;
+CREATE UNIQUE INDEX idx_databases_name_live
+    ON databases(name) WHERE deleted_at IS NULL;
+
 ALTER TABLE jobs ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN retryable INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN artifact_state TEXT NOT NULL DEFAULT '';

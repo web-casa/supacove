@@ -163,10 +163,17 @@ func probeVersion(bin string) (major int, version string, err error) {
 // sanitize masks credential-bearing patterns in stderr before storage or
 // logging. The VALUE is removed, not just the key labeled (round-2 review
 // P1-02: `password=[REDACTED]<value>` still leaks the value).
+var (
+	plainPwRe  = regexp.MustCompile(`(?i)(password=)[^\s'";,]*`)
+	quotedPwRe = regexp.MustCompile(`(?i)(password=')[^']*(')`)
+	uriRe      = regexp.MustCompile(`(?i)(postgres(?:ql)?://)[^\s'";,]*`)
+)
+
+// sanitize masks credential-bearing patterns in stderr: the VALUE is removed
+// for both bare and quoted forms (round-2 review P1-02 remainder).
 func sanitize(s string) string {
-	pwRe := regexp.MustCompile(`(?i)(password=)[^\s'";,]*`)
-	s = pwRe.ReplaceAllString(s, "$1[REDACTED]")
-	uriRe := regexp.MustCompile(`(?i)(postgres(?:ql)?://)[^\s'";,]*`)
+	s = quotedPwRe.ReplaceAllString(s, "$1[REDACTED]$2")
+	s = plainPwRe.ReplaceAllString(s, "$1[REDACTED]")
 	s = uriRe.ReplaceAllString(s, "$1[REDACTED]")
 	return s
 }
@@ -340,7 +347,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	}
 
 	hasher := sha256.New()
-	counter := &countingWriter{w: tmp}
+	counter := &countingWriter{w: tmp, quota: c.QuotaBytes}
 	encTarget := io.MultiWriter(counter, hasher)
 
 	if err := cmd.Start(); err != nil {
@@ -439,6 +446,10 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 		// committed artifact.
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_, _ = cmd.Process.Wait()
+		if errors.Is(encErr, errQuotaExceeded) {
+			return nil, &Classified{Class: pgclient.ClassDisk,
+				Err: fmt.Errorf("%w: ciphertext exceeded %d bytes mid-stream", ErrStagingFull, c.QuotaBytes)}
+		}
 		return nil, &Classified{Class: pgclient.ClassUnknown,
 			Err: fmt.Errorf("%w: %v", ErrEncrypt, encErr)}
 	}
@@ -489,14 +500,25 @@ func KillGroup(p *os.Process) {
 	}
 }
 
+// quotaBreached is set when the writer observes the budget exceeded; the
+// consumer goroutine turns it into an immediate cancel+kill (round-2 review
+// P1-13 remainder: the 500 ms scanner let 8 MiB through a 1 MiB budget).
+var errQuotaExceeded = errors.New("staging quota exceeded mid-stream")
+
 type countingWriter struct {
-	w io.Writer
-	n int64
+	w        io.Writer
+	n        int64
+	quota    int64
+	breached bool
 }
 
 func (c *countingWriter) Write(p []byte) (int, error) {
 	n, err := c.w.Write(p)
 	c.n += int64(n)
+	if c.quota > 0 && c.n > c.quota {
+		c.breached = true
+		return n, errQuotaExceeded
+	}
 	return n, err
 }
 
