@@ -170,14 +170,18 @@ func probeVersion(bin string) (major int, version string, err error) {
 // redact.Secrets as a final defense; it cannot recover values that were
 // percent-encoded or cut, so removal happens HERE where the raw password
 // is known.
-func excerptOf(retained []byte, password string) string {
+func excerptOf(retained []byte, retentionTruncated bool, password string) string {
 	s := string(retained)
-	// Drop the last incomplete line: the retention cap may have cut it
-	// mid-secret.
-	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	} else {
-		s = ""
+	// Drop the trailing partial line ONLY when retention actually cut the
+	// stream — an uncaptured tail could contain half a password value. A
+	// complete stderr keeps every line (round-12 review: the fixture without
+	// a cut was being emptied wholesale).
+	if retentionTruncated {
+		if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+			s = s[:i+1]
+		} else {
+			s = ""
+		}
 	}
 	s = removePasswordForms(s, password)
 	s = sanitize(s)
@@ -213,8 +217,10 @@ func removePasswordForms(s, pw string) string {
 		strings.ReplaceAll(pw, "\\", "\\\\"),
 		strings.ReplaceAll(pw, "'", "\\'"),
 	)
+	// The RAW password itself must be removed — skipping it (round-12
+	// review) left the primary form in the text.
 	for _, f := range forms {
-		if f != "" && f != pw {
+		if f != "" {
 			s = strings.ReplaceAll(s, f, "[REDACTED]")
 		}
 	}
@@ -428,22 +434,24 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 		// its shutdown; killing here would turn a clean dump into
 		// "signal: killed" (found by the M1 gate).
 	}()
+	stderrTruncated := false
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// Drain to EOF ALWAYS; keep only the first stderrKeep bytes.
+		// Drain to EOF ALWAYS; retain only the first stderrKeep bytes, and
+		// record whether retention cut the stream — the tail may end
+		// mid-line, possibly mid-password (excerptOf drops that line).
 		buf := make([]byte, 32<<10)
 		total := 0
 		for {
 			n, rerr := stderrPipe.Read(buf)
 			stderrMu.Lock()
-			if total < stderrKeep {
-				room := stderrKeep - total
-				if n > room {
-					n = room
-				}
+			total += n
+			if total <= stderrKeep {
 				stderrData = append(stderrData, buf[:n]...)
-				total += n
+			} else if total-n < stderrKeep {
+				stderrData = append(stderrData, buf[:stderrKeep-(total-n)]...)
+				stderrTruncated = true
 			}
 			stderrMu.Unlock()
 			if rerr != nil {
@@ -481,7 +489,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 			Err: fmt.Errorf("%w (staging budget exceeded mid-dump)", ErrStagingFull)}
 	}
 	stderrMu.Lock()
-	excerpt := sanitize(string(stderrData))
+	excerpt := excerptOf(stderrData, stderrTruncated, t.Conn.Password)
 	stderrMu.Unlock()
 	if stderrErr != nil {
 		return nil, &Classified{Class: pgclient.ClassUnknown,

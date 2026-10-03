@@ -33,13 +33,15 @@ func TestExcerptOfReviewFixtures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := excerptOf([]byte(tc.stderr), tc.secrets[0])
+			// The boundary-cut fixture simulates a retention truncation; the
+			// others represent complete stderr streams.
+			truncated := strings.Contains(tc.name, "boundary")
+			got := excerptOf([]byte(tc.stderr), truncated, tc.secrets[0])
 			for _, sec := range tc.secrets {
 				if strings.Contains(got, sec) {
 					t.Fatalf("%s: secret survived: %q", tc.name, got)
 				}
 			}
-			_ = fmt.Sprintf
 		})
 	}
 }
@@ -54,7 +56,7 @@ func TestExcerptOfPercentEncodingMatrix(t *testing.T) {
 	}
 	encPartial := "p%40ss%2Fword~x-y_z"
 	for _, form := range []string{string(encAll), encPartial} {
-		got := excerptOf([]byte("error: "+form), pw)
+		got := excerptOf([]byte("error: "+form+"\n"), false, pw)
 		if strings.Contains(got, form) {
 			t.Fatalf("percent form survived: %q", got)
 		}

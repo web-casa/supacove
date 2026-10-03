@@ -420,3 +420,76 @@ Router overlay 已重新核对，仅替换测试 HTTP 传输为进程内 RoundTr
 证据目录：`/tmp/supabackup-phase2-review11-evidence/`。`race-native.jsonl` / `race-router.jsonl` 保存全量结果，`probes-head.jsonl` / `probes-baseline.jsonl` 保存 API 与真实 Runner 新旧对照，`matrix-baseline.jsonl` 保存旧版四个失败重现。`README.md` 提供复现命令和 fixture 边界；`summary.json` 保存计数及六条保留重复键的日志检查，`sources.sha256`、overlay、探针源码及差异文件提供复核入口。
 
 **第 11 轮最终结论：未通过。R9-P1-01 = FIXED；P1-02（组合转义残留）= FIXED；新回归 1（R11-P1-01，P1）。原两个问题已关闭，但本次引入的跨层成功日志凭据泄漏仍需修复，当前不能判为“通过”或“修改后通过”。**
+
+---
+
+## Phase 2 第 12 轮追加复审：1fb0350 单点确认
+
+评审日期：2026-10-03。实际 HEAD：`1fb0350f09c17dd9d80230dfb88771886fb4be02`。范围：`git diff 416a11a..1fb0350`，仅复核 R11-P1-01 的三个既有泄漏形态与本次差异的新回归。使用 `code-reviewer` 技能。仓库仅追加本节，生产代码和仓库测试未修改；审计探针通过 `/tmp` Go overlay 加载，所有结果均在本轮重新执行。
+
+**判定：R11-P1-01 = NOT_FIXED（P1，仍阻断）。新回归数：0。最终结论：未通过。** 三个既有 fixture 在 `416a11a` 与 HEAD 的生产 Runner 最终成功日志中均为 **3/3 FAIL**。新增 helper 局部有效，但没有接入生产路径，不能据此判为 PARTIALLY；本轮确认的是原问题未关闭，不另计 REGRESSED，也不重开此前已关闭的组合转义问题。
+
+### R11-P1-01：新增 excerptOf 未接线，生产路径三个形态全部仍泄漏
+
+**主要定位：** `backend/internal/dumper/dumper.go:173`、`:216`–`:218`、`:483`–`:485`、`:538`；日志出口 `backend/internal/jobs/jobs.go:665`–`:667`。
+
+本轮代码实际调用链为：
+
+```text
+子进程 stderr → 保留前 16 KiB → sanitize(string(stderrData))
+→ Result.StdErrExcerpt → jobs redact.Secrets → slog JSON 成功日志
+```
+
+`Run` 在 `dumper.go:484` 仍调用 `sanitize`；生产代码没有调用 `excerptOf`，仅新增测试调用它。因此新增的尾行丢弃和 `removePasswordForms` 均未执行。本 diff 对实际 `sanitize` 路径只是去掉 scheme 后的 `[REDACTED]` 标签及原长度检查，并未在日志出口前删除凭据值。`jobs.go:514` 记录的是原始 `ci.Password`，`:667` 的 `redact.Secrets` 仍无法匹配百分号编码、截断片段或被 scheme 改写拆开的原值，不能承担修复主体。
+
+以下重放上一轮**原样保留的** `TestReview11CrossLayerRegressions`。每例均通过生产 `ParseURI` 往返校验，任务为 succeeded，artifact 和 manifest 均存在。表中为最终 JSON `stderr_excerpt` 的解码内容，省略尾部换行和截断例的填充字符。
+
+| 原泄漏形态 | `416a11a` 最终日志 | `1fb0350` 最终日志 | 判定 |
+| --- | --- | --- | --- |
+| URI 百分号编码，秘密 `CANARY-P@ss/word` | `postgres-uri://[REDACTED]app:CANARY-P%40ss%2Fword@localhost/appdb?sslmode=disable` | `postgres-uri://app:CANARY-P%40ss%2Fword@localhost/appdb?sslmode=disable` | **NOT_FIXED**，可逆编码口令仍在。 |
+| 16 KiB 保留边界切断 `CANARY-cut-PASSWORD-SUFFIX` | 尾部 `password=CANARY-cut-` | 尾部 `password=CANARY-cut-` | **NOT_FIXED**，口令前缀仍在。 |
+| 原始秘密 `prefixpostgres://CANARY-SUFFIX` 内含 scheme | `password='prefixpostgres-uri://[REDACTED]CANARY-SUFFIX'` | `password='prefixpostgres-uri://CANARY-SUFFIX'` | **NOT_FIXED**，原值仍先被改写、再匹配失败。 |
+
+另用真实 `Config.Run` 单独读取 `Result.StdErrExcerpt`，三例均已含凭据内容；再调用真实 `redact.Secrets` 仍为 **3/3 FAIL**。这与真实 Runner 最终日志结果一致，不能确认“dumper excerpt 已删值 → jobs 仅防线”的预期分工成立。
+
+### 即使接入 helper，raw 跳过条件仍会使第三个 fixture 泄漏
+
+`removePasswordForms` 虽以 `forms := []string{pw}` 开始，但循环条件是 `f != "" && f != pw`，明确跳过原始口令，也跳过所有恰好等于原值的表示。对带换行的第三个原 fixture 实测：
+
+```text
+password:     prefixpostgres://CANARY-SUFFIX
+input:        password='prefixpostgres://CANARY-SUFFIX'\n
+excerptOf:    password='prefixpostgres-uri://CANARY-SUFFIX'
+jobs redact:  password='prefixpostgres-uri://CANARY-SUFFIX'
+```
+
+所以仅把 `Run` 改为调用 `excerptOf` 仍不足以关闭原问题，必须让原始值也在 scheme 改写前被完整删除。带完整换行、保留非敏感诊断前缀的五种表示探针结果为：**raw FAIL；backslash-doubled、quote-escaped、percent-all、percent-special 四项 PASS**。原三 fixture 经正确模拟保留上限后直接进入 helper，则 URI 编码和尾行截断两项 PASS，scheme 项 FAIL。这些是同一未关闭问题的原因与定位，不重复登记为独立新回归。
+
+### 指定仓库测试通过，但当前断言不能证明修复
+
+`TestExcerptOfReviewFixtures` 的三个 fixture 与 `TestExcerptOfPercentEncodingMatrix` 的两个输入均没有换行，`excerptOf` 在 `dumper.go:177`–`:180` 将它们全部清空；实测五个输出均为 `""`。测试因此全部 PASS，尚未覆盖保留下来的完整诊断行中的值删除。
+
+此外，截断 fixture 直接传入完整长字符串，没有经过生产 16 KiB 保留切片，且只检查完整口令；scheme fixture 也只检查完整原值。这样的断言不能捕获已被切断或改写后仍含 `CANARY` 的泄漏。本轮独立探针使用真实保留切片、完整行换行和凭据片段断言；跨层验收继续使用上一轮原 fixture 与最终日志断言，未改变关闭标准。
+
+修复应把 `excerptOf(stderrData, t.Conn.Password)` 接入实际结果生成处，修正跳过 raw 的条件，确保值删除先于 scheme 改写；以原三例真实 Runner 最终日志无凭据验收，并将非空完整行、真实截断及片段检查纳入仓库测试。继续保留 stderr 全量排空与有界保留，以及已通过的组合转义和 marker 终止性。此处只记录修复要求，未修改实现。
+
+### 验证结果、证据边界与最终结论
+
+环境：`go1.26.0 linux/arm64`，`CGO_ENABLED=1`，`GOCACHE=/tmp/supabackup-review-go-cache`。全部 Go 运行使用 `-race -count=1`，全量工程检查不加载连接 fixture 或审计探针。
+
+| 检查 | 本轮实际结果 |
+| --- | --- |
+| 仓库 `TestExcerptOfReviewFixtures`、`TestExcerptOfPercentEncodingMatrix` | **全部 PASS**；空输出原因见上文。附带 `TestParseURIRoundTripStillValid` 也 PASS。 |
+| 原生 `go test -race -json -count=1 -timeout=120s ./backend/...` | **退出 1**：server 的 `httptest` 监听报 `socket: operation not permitted`；66 个顶层测试 PASS、5 SKIP、1 FAIL。 |
+| 同一全量命令，加本轮 `router-overlay.json` | **退出 0：82 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；11 个有测试包通过、6 个无测试文件。 |
+| HEAD helper 与真实 dumper 定向探针 | 1 个顶层测试 PASS、3 FAIL：完整行 scheme、五形态中的 raw、真实 dumper 三例保密断言失败。 |
+| 原三例真实 Runner 最终日志，新旧对照 | `416a11a` **3/3 FAIL**；HEAD **3/3 FAIL**。属于既有泄漏持续存在。 |
+| 原 5×7 组合矩阵重放及真实 Runner 路径 | 直接 `redact.Secrets` **35/35 PASS**；真实子进程 → dumper → Runner 最终日志 **35/35 PASS**。 |
+| Marker 终止性 | 三种秘密 `[REDACTED]`、`REDACTED`、`prefix[REDACTED]suffix` 经真实 Runner **3/3 返回并 succeeded**；仓库 marker 测试也 PASS。 |
+| Race / diff 检查 | 所有运行均无 data race 报告；`git diff 416a11a..1fb0350 --check` 及追加后的 `git diff --check` 通过。 |
+
+Router overlay 已核对差异，仅替换测试 HTTP 传输为进程内 RoundTripper → 生产 Router → Recorder，保留 CookieJar、路由、中间件、handler 和原断言；不声称原生 TCP/TLS 监听通过。Docker PostgreSQL 容器不可用导致五项 SKIP，环境限制不计缺陷。Runner 使用真实 SQLite、OS 子进程与管道、age、文件提交及生产 JSON 日志，只有网络元数据和 dump/stderr 内容是受控 fixture，不声称真实 PostgreSQL 自然输出过这些口令。
+
+证据目录：`/tmp/supabackup-phase2-review12-evidence/`。`stock-excerpt.jsonl` 保存指定测试；`dumper-probes.jsonl` 保存 helper 与真实 dumper 结果；`probes-head.jsonl` / `probes-baseline.jsonl` 保存原 fixture 的跨层对照；`race-native.jsonl` / `race-router.jsonl` 保存全量检查。`README.md` 提供复现命令与退出码，`summary.json`、`sources.sha256`、overlay、差异及探针源码提供复核入口。
+
+**第 12 轮最终结论：未通过。R11-P1-01 = NOT_FIXED；新回归 0。三个既有生产日志泄漏形态全部仍可复现，P1 阻断未关闭，不能判为“通过”或“修改后通过”。**
