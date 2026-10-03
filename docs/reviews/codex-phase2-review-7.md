@@ -493,3 +493,101 @@ Router overlay 已核对差异，仅替换测试 HTTP 传输为进程内 RoundTr
 证据目录：`/tmp/supabackup-phase2-review12-evidence/`。`stock-excerpt.jsonl` 保存指定测试；`dumper-probes.jsonl` 保存 helper 与真实 dumper 结果；`probes-head.jsonl` / `probes-baseline.jsonl` 保存原 fixture 的跨层对照；`race-native.jsonl` / `race-router.jsonl` 保存全量检查。`README.md` 提供复现命令与退出码，`summary.json`、`sources.sha256`、overlay、差异及探针源码提供复核入口。
 
 **第 12 轮最终结论：未通过。R11-P1-01 = NOT_FIXED；新回归 0。三个既有生产日志泄漏形态全部仍可复现，P1 阻断未关闭，不能判为“通过”或“修改后通过”。**
+
+---
+
+## Phase 2 第 13 轮追加复审：8a32232 单点确认
+
+评审日期：2026-10-03。实际 HEAD：`8a32232bf43ceaf75b8864f50bd171980fce536d`。范围：`git diff 1fb0350..8a32232`，复核 R11-P1-01 的原三个泄漏形态及本次差异的新回归。使用 `code-reviewer` 技能。仓库仅追加本节，生产代码和仓库测试未修改；独立探针通过 `/tmp` Go overlay 加载，结果均在本轮重新执行。
+
+**判定：R11-P1-01 = PARTIALLY（P1，仍阻断）。新回归数：1（R13-P1-01，P1，REGRESSED）。最终结论：未通过。** 原三个 fixture 的普通管道重放在 HEAD 为 **3/3 PASS**，但同一截断 fixture 在合法的读取分段下仍泄漏；另有原本安全的完整 stderr 被本次接入的二次裁剪切断口令，实测基线 PASS → HEAD FAIL。
+
+沿用原口径：按生产 Runner 最终日志判定，不能以 helper 单测通过代替跨层验收。原截断形态的分段依赖归入 R11-P1-01 未关闭部分，不重复计为新回归；新增的二次裁剪问题有独立的新旧对照。环境限制不计代码缺陷。
+
+### R11-P1-01：接线和 raw 删除已修复，截断标志仍漏掉恰好填满上限的读取
+
+**定位：** `backend/internal/dumper/dumper.go:173`–`:189`、`:222`–`:224`、`:449`–`:455`、`:492`；最终日志出口 `backend/internal/jobs/jobs.go:665`–`:667`。
+
+`Run` 现已调用 `excerptOf(stderrData, stderrTruncated, t.Conn.Password)`，且 `removePasswordForms` 不再跳过 raw；已知原值的删除先于 scheme 改写。以下原样复用上一轮 `TestReview11CrossLayerRegressions`，秘密、stderr 内容、URI 往返和最终日志断言均未变化。各例任务均 succeeded，artifact 和 manifest 存在。表中省略尾部换行与长填充文本。
+
+| 原 fixture | `1fb0350` 最终日志 | `8a32232` 本次普通管道重放 | 关闭判断 |
+| --- | --- | --- | --- |
+| URI 百分号编码：`CANARY-P@ss/word` | `postgres-uri://app:CANARY-P%40ss%2Fword@localhost/appdb?sslmode=disable`，FAIL | `postgres-uri://app:[REDACTED]@localhost/appdb?sslmode=disable`，PASS | 此形态 FIXED。 |
+| 保留边界切断 `CANARY-cut-PASSWORD-SUFFIX` | 尾部 `password=CANARY-cut-`，FAIL | 空 excerpt，PASS | 仅本次读取分段通过；下述受控分段仍 FAIL。 |
+| scheme 位于秘密内部：`prefixpostgres://CANARY-SUFFIX` | `password='prefixpostgres-uri://CANARY-SUFFIX'`，FAIL | `password='[REDACTED]'`，PASS | 此形态 FIXED。 |
+
+剩余问题是截断标志只在**单次读取从上限以下跨过上限**时设为 true：
+
+```go
+total += n
+if total <= stderrKeep {
+    stderrData = append(stderrData, buf[:n]...)
+} else if total-n < stderrKeep {
+    stderrData = append(stderrData, buf[:stderrKeep-(total-n)]...)
+    stderrTruncated = true
+}
+```
+
+若某次读取后 `total == 16384`，下一次读取到剩余数据时，`total > stderrKeep`，但 `total-n == stderrKeep`，两个分支均不进入。后续数据被丢弃，标志却一直为 false，`excerptOf` 因而保留尾部的 `CANARY-cut-`；完整口令匹配无法补救。
+
+本轮 `TestReview13RunnerReadBoundary` 保持**原截断 fixture 的全部字节不变**，仅控制真实子进程的写入分段。生产 drainer、dumper、jobs 和 redactor 均未替换。子进程写完第一段后通过管道 `FIONREAD` 确认已被读空，再写剩余数据，不依赖固定 sleep 猜测消费时机。
+
+| 同一 stderr 的写入分段 | `1fb0350` | `8a32232` 最终 Runner 日志 |
+| --- | --- | --- |
+| 先排空 16,383 字节，再写剩余内容 | FAIL，`password=CANARY-cut-` | PASS，空 excerpt；下一次读取跨过上限，标志为 true。 |
+| 先排空 16,384 字节，再写剩余内容 | FAIL，`password=CANARY-cut-` | **FAIL，excerpt 为 16,384 字节，尾部仍是 `password=CANARY-cut-`。** |
+
+两条 HEAD 路径都完成加密、artifact/manifest 提交并进入最终 JSON 成功日志；失败不是只存在于内存中的中间值，也不是 data race。只要确实丢弃了任何输入字节，就应记录截断，而不能仅在跨界那一次 append 中设置标志。这个反例仍是原来的“保留边界截断普通口令”，因此总项判为 PARTIALLY，不能以普通重放的 3/3 PASS 判为 FIXED。
+
+### R13-P1-01：新接入的二次长度裁剪切断组合转义口令，基线安全 → HEAD 泄漏
+
+**新增回归，P1，REGRESSED；计数 1。** 接入点 `backend/internal/dumper/dumper.go:492`；发生点 `:186`–`:189`，相关 scheme 扩展 `:232`、组合表示枚举 `:215`–`:218`；最终日志 `backend/internal/jobs/jobs.go:667`。
+
+`removePasswordForms` 枚举了 raw、单独的反斜杠加倍和单独的单引号转义，但没有覆盖两者组合的 conninfo 形式。这本可由 jobs 的 `redact.Secrets` 完整删除，原 35 组短输入矩阵仍全部通过。不过，`sanitize` 将 `postgres://` 扩展为 `postgres-uri://`，随后 `excerptOf` 再按 16 KiB 裁剪，可能先把组合形式切掉几个字符，令下游完整秘密匹配失效。该 helper 在基线没有接入生产，所以此处是本次实际引入的回归。
+
+独立探针 `TestReview13PostLabelTruncation` 使用原矩阵已有的合法秘密和生产 `QuoteConninfo`，构造**完整、未发生读取保留截断**的 stderr：
+
+```go
+secret := `prefix\segment'CANARY-SUFFIX`
+value := "password=" + pgclient.QuoteConninfo(secret)
+label := "postgres://"
+stderr := label + strings.Repeat("x", (16<<10)-len(label)-len(value)-1) + value + "\n"
+// len(stderr) == 16384；真实流已经完整保留，retentionTruncated=false 是正确值。
+```
+
+| 相同完整输入，新旧 Runner 最终日志 | 实测结果 |
+| --- | --- |
+| `1fb0350` | PASS，尾部为 `password='[REDACTED]'\n`；组合秘密完整交给 jobs 删除。 |
+| `8a32232` | **FAIL**，尾部为 `password='prefix\\segment\'CANARY-SUFF...[truncated]`，泄漏口令内容。 |
+| 对照：前缀改为等长 `plain-text:`，仍填充到恰好 16 KiB | 两版均 PASS；没有 scheme 扩展时，完整组合口令仍可被 jobs 删除。 |
+
+上表按解码后的日志文本表示；失败行中的两条连续反斜杠就是 conninfo 内容。HEAD 失败日志 excerpt 长度为 **16,398 字节**（16 KiB 加截断标签），任务依然 succeeded，artifact 和 manifest 均提交。所有对照使用真实生产日志出口；`final-logs/head/` 和 `final-logs/baseline/` 保存完整 JSON 日志。这不是提高转义层级或重开已通过的短输入组合矩阵，而是本 diff 激活的裁剪操作把先前安全的同类输入变为不安全。
+
+修复应保证所有会改变长度或内容的操作及最终裁剪不会在最后一道值级脱敏之前留下半个秘密；可以先完成组合形式的值删除，或在最后裁剪处丢弃可能含不完整凭据的尾行。仅修正读取截断标志不能关闭本项，因为该 fixture 没有丢弃任何原始 stderr 字节。此处只记录修复要求，未修改实现。
+
+### excerptOf 单测、race 与证据边界
+
+仓库 `TestExcerptOfReviewFixtures`、`TestExcerptOfPercentEncodingMatrix` 全部 PASS。独立 helper 检查也确认：raw、反斜杠加倍、单引号转义及两类百分号编码共 **5/5 PASS**，完整诊断行保留 `warning: password=[REDACTED]\n`；完整无换行输入不再被清空。原三 fixture 使用真实 16 KiB 保留切片并传入正确截断标志时 **3/3 PASS**；另有截断尾行、保留安全完整行、恰好上限但未截断等 **6/6 PASS**。
+
+因此上一轮“所有输入均清空而空洞通过”的原因已消除。但仓库截断 fixture 在 `excerpt_test.go:38`–`:39` 直接由名字设置 `truncated=true`，仍绕过生产 drainer 对该标志的计算；它还传完整长字符串并仅检查完整秘密，不能捕获本轮的前缀泄漏。测试补强应锁定上述真实 Runner 反例；不另计测试覆盖问题为回归。
+
+环境：`go1.26.0 linux/arm64`，`CGO_ENABLED=1`，`GOCACHE=/tmp/supabackup-review-go-cache`。全部 Go 验证使用 `-race -count=1`；全量工程检查不加载连接 fixture 或审计探针。
+
+| 检查 | 本轮实际结果 |
+| --- | --- |
+| 仓库 excerpt/URI 定向测试 | **3 个顶层测试 PASS**；其中 URI 测试仅为原仓库 sanity check，真实 `ParseURI` 往返另由 Runner 探针校验。 |
+| 独立 helper 与真实 dumper 探针 | **4 个顶层测试 PASS**：上述 helper 14 个子用例，以及普通管道下真实 `Config.Run` 原三例。 |
+| 原三个 fixture 的生产 Runner 最终日志 | 基线 **3/3 FAIL**；HEAD 普通重放 **3/3 PASS**。保存完整日志的重放结果一致。 |
+| 原截断 fixture 的受控分段 | 基线 **2/2 FAIL**；HEAD **1 PASS / 1 FAIL**，精确填满上限后仍泄漏。 |
+| 完整 stderr 经标签扩展后二次裁剪 | 新回归：基线 PASS → HEAD FAIL；无扩展对照两版均 PASS。 |
+| 原 5×7 组合矩阵和真实 Runner 短输入矩阵 | 直接 `redact.Secrets` **35/35 PASS**；真实 Runner **35/35 PASS**。 |
+| Marker 终止性 | 三种秘密 `[REDACTED]`、`REDACTED`、`prefix[REDACTED]suffix` 经 Runner **3/3 返回并 succeeded**；仓库 marker 测试也 PASS。 |
+| 原生 `go test -race -json -count=1 -timeout=120s ./backend/...` | **退出 1**：server 的 `httptest` 监听报 `socket: operation not permitted`；66 个顶层测试 PASS、5 SKIP、1 FAIL。 |
+| 同一全量命令，加本轮 `router-overlay.json` | **退出 0：82 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；11 个有测试包通过、6 个无测试文件。 |
+| Race / diff 检查 | 所有运行均无 `DATA RACE` 报告；`git diff 1fb0350..8a32232 --check` 及报告追加后的 `git diff --check` 通过。安全断言 FAIL 未被记作通过。 |
+
+Router overlay 已核对，仅替换测试 HTTP 传输为进程内 RoundTripper → 生产 Router → Recorder，保留 CookieJar、路由、中间件、handler 和原断言；不声称原生 TCP/TLS 监听通过。五项 Docker 集成测试因环境不可用 SKIP。Runner 探针执行真实 SQLite、OS 子进程与管道、age、文件提交及生产 JSON 日志；连接检查和依赖元数据通过同上一轮的 overlay 提供，dump/stderr 为合成 fixture，不声称真实 PostgreSQL 自然输出了这些口令。
+
+证据目录：`/tmp/supabackup-phase2-review13-evidence/`。`stock-excerpt.jsonl`、`dumper-probes.jsonl` 保存单测与 helper/真实 dumper 结果；`probes-head.jsonl` / `probes-baseline.jsonl` 保存原 fixture 及矩阵；`extended-head.jsonl` / `extended-baseline.jsonl` 保存边界与新回归对照；`capture-*.jsonl` 和 `final-logs/` 保存完整生产日志的重放；`race-native.jsonl` / `race-router.jsonl` 保存全量结果。`README.md`、`summary.json`、`sources.sha256`、overlay、差异及源码提供复现入口。
+
+**第 13 轮最终结论：未通过。R11-P1-01 = PARTIALLY；新回归 1（R13-P1-01，P1）。接线、raw 删除及原 URI/scheme 两个形态已经修复，但原保留边界仍依赖读取分段，并新增了标签扩展后二次裁剪导致的日志泄漏，当前不能判为“通过”或“修改后通过”。**

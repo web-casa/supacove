@@ -213,9 +213,14 @@ func removePasswordForms(s, pw string) string {
 		}
 	}
 	forms = append(forms, all.String(), special.String())
+	// Composed form: backslash-doubling applied first, then quote-escaping —
+	// the order conninfo/JSON encoding actually produces (round-13 review
+	// R13-P1-01: the composed form was missing, and post-label truncation
+	// then defeated the jobs-layer full-value match).
 	forms = append(forms,
 		strings.ReplaceAll(pw, "\\", "\\\\"),
 		strings.ReplaceAll(pw, "'", "\\'"),
+		strings.ReplaceAll(strings.ReplaceAll(pw, "\\", "\\\\"), "'", "\\'"),
 	)
 	// The RAW password itself must be removed — skipping it (round-12
 	// review) left the primary form in the text.
@@ -438,19 +443,28 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		// Drain to EOF ALWAYS; retain only the first stderrKeep bytes, and
-		// record whether retention cut the stream — the tail may end
-		// mid-line, possibly mid-password (excerptOf drops that line).
+		// Drain to EOF ALWAYS; retain only the first stderrKeep bytes. The
+		// truncated flag is set whenever total exceeds the cap — read
+		// segmentation must not affect it (round-13 review: a read landing
+		// exactly on the cap left the flag false).
 		buf := make([]byte, 32<<10)
 		total := 0
 		for {
 			n, rerr := stderrPipe.Read(buf)
 			stderrMu.Lock()
+			keep := n
+			if total < stderrKeep {
+				if room := stderrKeep - total; keep > room {
+					keep = room
+				}
+			} else {
+				keep = 0
+			}
+			if keep > 0 {
+				stderrData = append(stderrData, buf[:keep]...)
+			}
 			total += n
-			if total <= stderrKeep {
-				stderrData = append(stderrData, buf[:n]...)
-			} else if total-n < stderrKeep {
-				stderrData = append(stderrData, buf[:stderrKeep-(total-n)]...)
+			if total > stderrKeep {
 				stderrTruncated = true
 			}
 			stderrMu.Unlock()
