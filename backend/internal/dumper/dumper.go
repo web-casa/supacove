@@ -167,8 +167,8 @@ var (
 	// A quoted conninfo password may itself contain backslash-escaped
 	// quotes — the value regex must consume `\'` sequences, otherwise the
 	// tail of the secret survives redaction (round-6 review P1-02).
-	quotedPwRe = regexp.MustCompile(`(?i)(password=')(?:[^']|\\')*(')`)
-	plainPwRe  = regexp.MustCompile(`(?i)(password=)(?:[^\s'";,]|\\')*`)
+	quotedPwRe = regexp.MustCompile(`(?i)(password=')(?:[^'\\]|\\.)*(')`)
+	plainPwRe  = regexp.MustCompile(`(?i)(password=)(?:[^\s'";,\\]|\\.)*`)
 	uriRe      = regexp.MustCompile(`(?i)(postgres(?:ql)?://)[^\s'";,]*`)
 )
 
@@ -182,17 +182,30 @@ func sanitize(s string) string {
 }
 
 // RedactKnownSecrets removes every occurrence of the actual secret values
-// from arbitrary error text: raw, backslash-doubled, and conninfo
-// single-quote-escaped forms (round-5 review P1-02 remainder — a password
-// like `prefix'CANARY` survives as `prefix\'CANARY` without this).
+// from arbitrary error text, across escape compositions: raw, quote-escaped,
+// backslash-doubled, and both composed (round-7 review P1-02: text can hold
+// e.g. `prefix\\'CANARY` while only `prefix\'CANARY` was removed before).
 func RedactKnownSecrets(secrets []string, s string) string {
 	for _, sec := range secrets {
 		if sec == "" {
 			continue
 		}
-		s = strings.ReplaceAll(s, sec, "[REDACTED]")
-		s = strings.ReplaceAll(s, strings.ReplaceAll(sec, "\\", "\\\\"), "[REDACTED]")
-		s = strings.ReplaceAll(s, strings.ReplaceAll(sec, "'", "\\'"), "[REDACTED]")
+		escapedQuote := strings.ReplaceAll(sec, "'", "\\'")
+		doubled := strings.ReplaceAll(sec, "\\", "\\\\")
+		doubleEscaped := strings.ReplaceAll(escapedQuote, "\\", "\\\\")
+		for {
+			changed := false
+			for _, form := range []string{sec, escapedQuote, doubled, doubleEscaped} {
+				if form == "" || !strings.Contains(s, form) {
+					continue
+				}
+				s = strings.ReplaceAll(s, form, "[REDACTED]")
+				changed = true
+			}
+			if !changed {
+				break
+			}
+		}
 	}
 	return s
 }
