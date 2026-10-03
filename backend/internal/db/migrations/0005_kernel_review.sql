@@ -33,3 +33,15 @@ ALTER TABLE databases ADD COLUMN sslmode TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs ADD COLUMN retryable INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE jobs ADD COLUMN artifact_state TEXT NOT NULL DEFAULT '';
+
+-- +goose Down
+-- Best-effort reverse. NOTE: reverting the soft-delete columns necessarily
+-- loses tombstone state; jobs created under v5 keep their history but the
+-- active-job index disappears, restoring the pre-v5 duplicate-allowed shape.
+DROP INDEX idx_jobs_active_per_database;
+DROP INDEX IF EXISTS idx_databases_name_live;
+ALTER TABLE jobs DROP COLUMN artifact_state;
+ALTER TABLE jobs DROP COLUMN retryable;
+ALTER TABLE jobs DROP COLUMN error_code;
+ALTER TABLE databases DROP COLUMN sslmode;
+ALTER TABLE databases DROP COLUMN deleted_at;

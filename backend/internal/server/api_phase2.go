@@ -162,7 +162,7 @@ func (a *apiService) DeleteDatabase(ctx context.Context, request api.DeleteDatab
 	// registration row (plus job history) survives for audit.
 	res, err := a.srv.store.DB.ExecContext(ctx, `
 		UPDATE databases SET
-		  name = name || ' (deleted #' || id || ')',
+		  name = name || ' (deleted #' || id || '-' || lower(hex(randomblob(6))) || ')',
 		  deleted_at = strftime('%s','now'), updated_at = strftime('%s','now')
 		WHERE id = ? AND deleted_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM jobs

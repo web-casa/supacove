@@ -179,7 +179,9 @@ func sanitize(s string) string {
 }
 
 // RedactKnownSecrets removes every occurrence of the actual secret values
-// from arbitrary error text (their raw and backslash-escaped forms).
+// from arbitrary error text: raw, backslash-doubled, and conninfo
+// single-quote-escaped forms (round-5 review P1-02 remainder — a password
+// like `prefix'CANARY` survives as `prefix\'CANARY` without this).
 func RedactKnownSecrets(secrets []string, s string) string {
 	for _, sec := range secrets {
 		if sec == "" {
@@ -187,18 +189,22 @@ func RedactKnownSecrets(secrets []string, s string) string {
 		}
 		s = strings.ReplaceAll(s, sec, "[REDACTED]")
 		s = strings.ReplaceAll(s, strings.ReplaceAll(sec, "\\", "\\\\"), "[REDACTED]")
+		s = strings.ReplaceAll(s, strings.ReplaceAll(sec, "'", "\\'"), "[REDACTED]")
 	}
 	return s
 }
 
-// spaceCheck verifies free headroom and the per-job budget.
-func (c *Config) spaceCheck(jobID int64) error {
+// spaceCheck verifies free headroom and returns the CURRENT staging usage
+// so the writer's budget can be the REMAINING allowance, not the full quota
+// (round-5 review P1-13: 700 KiB existing + 717 KiB new passed a 1 MiB
+// total budget when the writer received the full quota).
+func (c *Config) spaceCheck() (used int64, err error) {
 	if err := os.MkdirAll(c.StagingDir, 0o700); err != nil {
-		return err
+		return 0, err
 	}
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(c.StagingDir, &st); err != nil {
-		return err
+		return 0, err
 	}
 	avail := int64(st.Bavail) * int64(st.Bsize)
 	floor := c.FreeFloor
@@ -206,24 +212,21 @@ func (c *Config) spaceCheck(jobID int64) error {
 		floor = 64 << 20
 	}
 	if avail < floor {
-		return fmt.Errorf("%w: filesystem has %d bytes free, need %d", ErrStagingFull, avail, floor)
+		return 0, fmt.Errorf("%w: filesystem has %d bytes free, need %d", ErrStagingFull, avail, floor)
 	}
-	if c.QuotaBytes > 0 {
-		used := int64(0)
-		_ = filepath.WalkDir(c.StagingDir, func(_ string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
-			}
-			if info, ierr := d.Info(); ierr == nil {
-				used += info.Size()
-			}
+	_ = filepath.WalkDir(c.StagingDir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
 			return nil
-		})
-		if used >= c.QuotaBytes {
-			return fmt.Errorf("%w: staging holds %d of %d budgeted bytes", ErrStagingFull, used, c.QuotaBytes)
 		}
+		if info, ierr := d.Info(); ierr == nil {
+			used += info.Size()
+		}
+		return nil
+	})
+	if c.QuotaBytes > 0 && used >= c.QuotaBytes {
+		return used, fmt.Errorf("%w: staging holds %d of %d budgeted bytes", ErrStagingFull, used, c.QuotaBytes)
 	}
-	return nil
+	return used, nil
 }
 
 // Run executes one dump+encrypt+commit chain per protocol A.
@@ -236,8 +239,17 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	if err != nil {
 		return nil, err
 	}
-	if err := c.spaceCheck(jobID); err != nil {
+	used, err := c.spaceCheck()
+	if err != nil {
 		return nil, &Classified{Class: pgclient.ClassDisk, Err: err}
+	}
+	writerBudget := c.QuotaBytes // 0 = unlimited
+	if c.QuotaBytes > 0 {
+		writerBudget = c.QuotaBytes - used
+		if writerBudget <= 0 {
+			return nil, &Classified{Class: pgclient.ClassDisk,
+				Err: fmt.Errorf("%w: staging usage %d already at budget %d", ErrStagingFull, used, c.QuotaBytes)}
+		}
 	}
 
 	// Budget watchdog: if the staging usage blows past the quota mid-dump,
@@ -347,7 +359,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	}
 
 	hasher := sha256.New()
-	counter := &countingWriter{w: tmp, quota: c.QuotaBytes}
+	counter := &countingWriter{w: tmp, quota: writerBudget}
 	encTarget := io.MultiWriter(counter, hasher)
 
 	if err := cmd.Start(); err != nil {

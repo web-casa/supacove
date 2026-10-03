@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -113,6 +115,86 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 		  manifest_path = ''
 		WHERE status = 'interrupted' AND artifact_state = '' AND artifact_path != ''`); err != nil {
 		return n, err
+	}
+
+	// FILE RECONCILIATION (round-5 review P1-12): scanning beats SQL-only
+	// bookkeeping. Every committed ciphertext on disk must be referenced by
+	// an interrupted/succeeded/failed job; every reference claiming a file
+	// that is missing must be recorded. Nothing is deleted here.
+	entries, rerr := os.ReadDir(r.stagingDir)
+	if os.IsNotExist(rerr) {
+		return n, nil // no staging dir yet: nothing to reconcile
+	}
+	if rerr != nil {
+		return n, rerr
+	}
+	artRe := regexp.MustCompile(`^backup-job(\d+)\.dump\.age$`)
+	for _, e := range entries {
+		m := artRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		var jobID int64
+		fmt.Sscanf(m[1], "%d", &jobID)
+		var path, state string
+		qerr := r.authDB.QueryRowContext(ctx,
+			`SELECT artifact_path, artifact_state FROM jobs WHERE id = ?`, jobID).
+			Scan(&path, &state)
+		if errors.Is(qerr, sql.ErrNoRows) {
+			r.log.Error("orphaned staging artifact with no job record", "file", e.Name())
+			continue
+		}
+		if qerr != nil {
+			return n, qerr
+		}
+		if path == "" {
+			// Job lost its reference but the ciphertext survived: restore the
+			// reference so the artifact is traceable and NOT deleted.
+			if _, uerr := r.authDB.ExecContext(ctx, `
+				UPDATE jobs SET artifact_path = ?, artifact_state = 'committed',
+				  error_message = COALESCE(NULLIF(error_message,''),'') ||
+				    ' [recovery: unreferenced ciphertext restored to this job]'
+				WHERE id = ?`, e.Name(), jobID); uerr != nil {
+				r.log.Error("artifact reference restore failed", "job", jobID, "err", uerr)
+			} else {
+				r.log.Warn("recovered unreferenced ciphertext", "job", jobID, "file", e.Name())
+			}
+		}
+		_ = state
+	}
+	// References claiming files that no longer exist get flagged.
+	rows, rerr := r.authDB.QueryContext(ctx, `
+		SELECT id, artifact_path FROM jobs
+		WHERE artifact_path != '' AND status IN ('interrupted','succeeded','failed')`)
+	if rerr != nil {
+		return n, rerr
+	}
+	defer rows.Close()
+	type missing struct {
+		id   int64
+		path string
+	}
+	var missingList []missing
+	for rows.Next() {
+		var id int64
+		var p string
+		if err := rows.Scan(&id, &p); err != nil {
+			return n, err
+		}
+		if _, serr := os.Stat(p); serr != nil {
+			missingList = append(missingList, missing{id, p})
+		}
+	}
+	rows.Close()
+	for _, mm := range missingList {
+		if _, uerr := r.authDB.ExecContext(ctx, `
+			UPDATE jobs SET error_message = COALESCE(NULLIF(error_message,''),'') ||
+			  ' [recovery: referenced artifact file is MISSING from staging]'
+			WHERE id = ?`, mm.id); uerr != nil {
+			r.log.Error("missing-artifact annotation failed", "job", mm.id, "err", uerr)
+		} else {
+			r.log.Warn("referenced artifact missing from staging", "job", mm.id, "path", mm.path)
+		}
 	}
 	return n, nil
 }

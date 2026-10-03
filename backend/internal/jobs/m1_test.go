@@ -181,7 +181,7 @@ func verifyRestoredContent(t *testing.T, verifyURI string) error {
 func TestM1_NegativeControl(t *testing.T) {
 	requireDocker(t)
 	uri := startTestPostgres(t)
-	seedTestTable(t, uri, 10)
+	seedTestTable(t, uri, 500) // must cover the verifier's sampled IDs (1/250/500)
 	if _, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
 		"-d", "appdb", "-c",
 		"UPDATE m1test SET payload = 'tampered' WHERE id = 1").CombinedOutput(); err != nil {
