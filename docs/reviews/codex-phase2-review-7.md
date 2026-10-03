@@ -273,3 +273,80 @@ Router overlay 沿用并重新核对上一轮的差异，仅替换测试 HTTP �
 证据目录：`/tmp/supabackup-phase2-review9-evidence/`。`core-server-head.log` / `core-server-baseline.log` 保存 422 与日志新旧对照，`core-dumper-*.log` 保存脱敏矩阵；`marker-summary.json`、`marker-*.log` 保存终止性对照与堆栈；`race-native.jsonl`、`race-router.jsonl` 保存全量门禁。`README.md`、`builds.json`、`summary.json`、`sources.sha256`、overlay 和探针源码提供复现入口。
 
 **第 9 轮最终结论：未通过。R8-P1-01 = PARTIALLY，P1-02（API 422 组合转义泄漏）= FIXED；R8-P1-01 的子串死循环与新增 R9-P1-01 日志泄漏仍为 P1 阻断。当前不能判为“通过”或“修改后通过”。**
+
+---
+
+## Phase 2 第 10 轮追加复审：7fad0b7 单点收敛
+
+评审日期：2026-10-03。实际 HEAD：`7fad0b75c07a107c6bd6baf902516eab1cc08756`。范围：`git diff f44a3f7..7fad0b7`，仅复核本轮指定的两个修复、marker 终止性及差异引入的新回归。使用 `code-reviewer` 技能；仓库仅追加本节，生产代码、仓库测试均未修改。所有实测均在本轮重新编译、执行，定向探针通过 `/tmp` 中的 Go overlay 加载。
+
+**两项判定：R9-P1-01 = PARTIALLY；P1-02（本轮指定的组合转义脱敏）= PARTIALLY。新回归数：0。最终结论：未通过。** 双 `err` / 原始错误属性已删除，marker 死循环也已关闭；但合法秘密经过 conninfo 再次转义后，仍有值完整进入唯一的日志 `err` 字段。
+
+沿用上一轮关闭口径：上一轮已明确“只删除第一个 `err` 尚不足以关闭这个新增日志出口”，唯一字段也必须通过组合转义保密断言。因此“双字段子项 FIXED”不等于 R9-P1-01 整项 FIXED。下表两项的未关闭部分是**同一个组合脱敏残留**，不重复计为两个新缺陷。上一轮已判 FIXED 的固定 API 422 响应仍为 FIXED，没有重新打开该客户端泄漏；本轮 P1-02 判定针对用户指定的 `RedactKnownSecrets` 组合覆盖。
+
+| 本轮指定项 | 判定 | 实测与关闭边界 |
+| --- | --- | --- |
+| **R9-P1-01：连接失败日志同时写原始与脱敏 `err`** | **PARTIALLY** | `server/api_phase2.go:117`–`:119` 已只保留一个脱敏调用，原始 `err.Error()` 属性删除；实际 JSON 日志逐 token 检查确认只有一个 `err`，并有不含密码的 `keyword_view`。上一轮四组日志探针全部转 PASS。但新增的相邻反斜杠 / 引号及连续反斜杠 fixture 仍在唯一字段中泄漏，原日志保密问题未完全关闭。 |
+| **P1-02：已知秘密的组合转义替换不足** | **PARTIALLY** | `dumper/dumper.go:197`–`:207` 的单次正则替换修复了原 `prefix\segment'CANARY-SUFFIX` 的 conninfo 及再次转义场景。生成矩阵由基线 26/35 PASS 提升为 31/35 PASS；相邻 `\'` 或三个连续反斜杠经过同样两层转义后，仍有 4 个表示用例 FAIL。属于原组合覆盖不足的残留，不是新的转义层级要求。 |
+
+### 剩余 P1：两层转义不等于每字符最多两个前置反斜杠
+
+定位：`backend/internal/dumper/dumper.go:199`–`:200`；实际日志出口为 `backend/internal/server/api_phase2.go:119`。
+
+最小复现使用生产 `QuoteConninfo` 和标准库 JSON 编码，不手写超出约定层级的转义文本：
+
+```go
+secret := `prefix\'CANARY-SUFFIX` // 原始秘密：一个反斜杠紧邻一个单引号
+encoded, _ := json.Marshal(pgclient.QuoteConninfo(secret))
+input := string(encoded)
+output := dumper.RedactKnownSecrets([]string{secret}, input)
+// 实测 output == input，CANARY-SUFFIX 完整保留。
+```
+
+原始 `\'` 经 `QuoteConninfo` 变成单引号前 **3 个实际反斜杠**，再经过 JSON 转义变成 **6 个**。当前表达式给原始反斜杠最多分配 `2 + 1 = 3` 个，再给单引号最多分配 2 个，总共只能匹配 **5 个**。开头额外的 `\\{0,2}` 位于 `prefix` 之前，不能弥补字符串中部的缺口。同理，三个连续原始反斜杠经过 conninfo 与 JSON 后变成 12 个，当前表达式连同下一个普通字符的前缀最多消耗 11 个。
+
+| 秘密 / 表示 | `f44a3f7` | `7fad0b7` |
+| --- | --- | --- |
+| `prefix\segment'CANARY-SUFFIX` / conninfo、反斜杠再次加倍、JSON(conninfo) | 三组 FAIL | 三组 PASS。原复现已修。 |
+| `prefix\'CANARY-SUFFIX` / 单层 conninfo | FAIL | PASS。 |
+| `prefix\'CANARY-SUFFIX` / 反斜杠再次加倍、JSON(conninfo) | 两组 FAIL | **两组仍 FAIL。** |
+| `prefix\\\segment'CANARY-SUFFIX` / 单层 conninfo | FAIL | PASS。 |
+| `prefix\\\segment'CANARY-SUFFIX` / 反斜杠再次加倍、JSON(conninfo) | 两组 FAIL | **两组仍 FAIL。** |
+
+以上秘密均通过生产 `ParseURI`。生成矩阵共 5 种秘密 × 7 种表示，包含原值、单引号转义、反斜杠加倍、两种组合及实际 JSON 编码；旧版 / HEAD 使用相同 fixture，仅 overlay 两个被审生产文件为 `f44a3f7` 原文进行对照。没有由 PASS 转为 FAIL 的矩阵用例，因此不标 REGRESSED，也不为同一残留新增编号。
+
+生产 handler 的两组补充日志探针均复现泄漏。错误在 `pgclient.Test` 网络边界受控注入，探针保留生产 URI 解析、错误分类、handler、脱敏和 `slog.NewJSONHandler`；逐 token 检查原始 JSON 字节，避免 map 解码掩盖重复键。实际结果是 `err_count=1`、`keyword_view_count=1`，但唯一 `err` 的解码后值仍为以下字符内容，单引号前有 **6 个实际反斜杠**：
+
+```text
+password authentication failed: password=[REDACTED]'prefix\\\\\\'CANARY-SUFFIX'
+```
+
+`keyword_view` 实测为 `localhost:5432/appdb (user app, sslmode disable)`，未包含密码；实际 API 响应仍为固定 422，无 canary。这里没有否认双字段删除，也不声称真实 PostgreSQL 在本轮自然输出过这些口令。失败来自上一轮已经检查的 conninfo 再次转义路径，只改变了合法秘密中反斜杠的位置 / 数量。
+
+仓库 `TestRedactEscapeMatrix` 实测 PASS，但其 `sec` 不含原始反斜杠，五个名称实际只有三种不同表示：`quoteEscaped == jsonEscaped`、`backslashDbl == doubleEscaped`，且没有调用 JSON 编码器，不能覆盖上述缺口。修复方向是根据实际转义转换生成匹配形式或建立等价的转义匹配规则，对原始输入做有界替换；补入相邻 `\'`、连续反斜杠以及真实 JSON 编码用例，并断言最终日志字节无秘密。避免重新引入扫描替换标记的循环。
+
+### Marker 终止性：R8-P1-01 已关闭
+
+**辅助复核判定：FIXED。** 仓库 `TestRedactMarkerSecretTerminates` 实测 PASS。另将 `[REDACTED]`、`REDACTED`、`prefix[REDACTED]suffix` 分别送入直接 `RedactKnownSecrets`、生产 `CreateDatabase`、真实子进程 stderr → dumper → Runner 成功日志三条路径，**9/9 返回，退出码均为 0**。API 返回固定 422，Runner 完成加密、文件提交并落库为 succeeded；不存在上一轮 `REDACTED` 无限扩张的阻塞。
+
+这些探针在独立、启用 race 的测试进程中运行，每次设置 15 秒 Go 测试期限和 30 秒外部进程上限，均未触发期限。新实现对每个秘密只执行一次替换，标记即使仍含秘密字面值，也不会被同一秘密无限重扫；不把标记中的 `REDACTED` 文本本身误报为口令泄漏。
+
+### 工程验证与最终结论
+
+环境：`go1.26.0 linux/arm64`，`CGO_ENABLED=1`，`GOCACHE=/tmp/supabackup-review-go-cache`。全量工程检查不加载连接错误 fixture 或审计探针。
+
+| 检查 | 本轮实际结果 |
+| --- | --- |
+| 原生 `go test -race -json -count=1 ./backend/...` | **退出 1**：server 的 `httptest` 监听报 `socket: operation not permitted`。61 个顶层测试 PASS、5 SKIP、1 FAIL；无 race 报告。 |
+| 同一全量命令，增加 `-overlay /tmp/supabackup-phase2-review10-evidence/router-overlay.json` | **退出 0：77 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；10 个有测试包通过、6 个无测试文件；无 race 报告。 |
+| 仓库 escape-matrix、marker 终止及 `TestRound7QuotedRedaction` | **全部 PASS**，包含在上述全量检查和 HEAD 定向检查中。 |
+| 上一轮 quoted、三种简单表示、组合矩阵、固定 422、原始日志四场景探针 | HEAD **全部 PASS**；日志每条只有一个 `err`，四个原场景无 canary。 |
+| 本轮生成矩阵与补充 handler 探针 | HEAD 定向检查总计 8 个顶层测试 PASS、2 FAIL。失败是生成矩阵的 4 个表示用例和 handler 的 2 个日志用例，均归属同一个组合转义残留；无 race 报告。 |
+| Marker 三秘密 × 三路径 | **9/9 PASS**；无 race 报告。 |
+| `git diff f44a3f7..7fad0b7 --check` / 追加报告后的 `git diff --check` | 通过。 |
+
+Router overlay 重新核对了与 HEAD 的差异，仅替换测试 HTTP 传输为进程内 RoundTripper → 生产 Router → Recorder，保留 CookieJar、路由、中间件、handler 和原断言；不声称原生 TCP/TLS 监听通过。五项集成测试因 Docker PostgreSQL 容器不可用而 SKIP，环境限制不计代码缺陷。Runner 探针执行真实 SQLite、age、文件提交和 OS 子进程，网络元数据与 dump 内容为受控 fixture，不冒充真实数据库备份。
+
+证据目录：`/tmp/supabackup-phase2-review10-evidence/`。`core-head.jsonl` / `core-baseline.jsonl` 保存全部定向新旧对照；`marker-summary.json`、`marker-*.log` 保存终止性检查；`race-native.jsonl`、`race-router.jsonl` 保存全量结果；`README.md`、`summary.json`、`sources.sha256`、overlay、差异和探针源码提供复现入口。
+
+**第 10 轮最终结论：未通过。R9-P1-01 = PARTIALLY（双 err 子项 FIXED，唯一字段仍泄漏）；P1-02 = PARTIALLY；新回归 0。R8-P1-01 marker 不终止已 FIXED，固定 API 422 继续保持 FIXED。剩余组合转义日志泄漏仍为 P1 阻断，不能判为“通过”或“修改后通过”。**

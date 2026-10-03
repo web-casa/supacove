@@ -10,9 +10,9 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/agekey"
 	"github.com/cloudfan/supabackup/backend/internal/api"
 	"github.com/cloudfan/supabackup/backend/internal/crypto"
-	"github.com/cloudfan/supabackup/backend/internal/dumper"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	"github.com/cloudfan/supabackup/backend/internal/redact"
 )
 
 // Phase 2 API surface: age status/recipient, database registrations,
@@ -116,7 +116,7 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 		// credential in combination-escaped forms (round-9 review R9-P1-01).
 		a.srv.log.Error("connection test failed", "name", name,
 			"keyword_view", ci.KeywordView(),
-			"err", dumper.RedactKnownSecrets([]string{ci.Password}, pgclient.SanitizeMessage(err.Error())))
+			"err", redact.Secrets([]string{ci.Password}, pgclient.SanitizeMessage(err.Error())))
 		return api.CreateDatabase422JSONResponse{Code: "connection_test_failed",
 			Message: "connection test failed — verify host, port, credentials and TLS mode"}, nil
 	}

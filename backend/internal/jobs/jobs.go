@@ -22,6 +22,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/dumper"
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
 )
 
 // Error classes (dev-plan seven classes). Stored verbatim in jobs.error_class.
@@ -468,7 +469,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// P1-02 remainder — labeled-but-kept values still leak).
 	var knownSecrets []string
 	redact := func(msg string) string {
-		return pgclient.SanitizeMessage(dumper.RedactKnownSecrets(knownSecrets, msg))
+		return pgclient.SanitizeMessage(redactpkg.Secrets(knownSecrets, msg))
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -663,7 +664,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 	r.log.Info("backup succeeded", "job", jobID, "database", name,
 		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
-		"stderr_excerpt", dumper.RedactKnownSecrets(knownSecrets, result.StdErrExcerpt))
+		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
 }
 
 func (r *Runner) loadDatabase(ctx context.Context, dbID int64) (name, platform, envTag, connEnc string, err error) {

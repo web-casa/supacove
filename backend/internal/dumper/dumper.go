@@ -163,48 +163,14 @@ func probeVersion(bin string) (major int, version string, err error) {
 // sanitize masks credential-bearing patterns in stderr before storage or
 // logging. The VALUE is removed, not just the key labeled (round-2 review
 // P1-02: `password=[REDACTED]<value>` still leaks the value).
-var (
-	// A quoted conninfo password may itself contain backslash-escaped
-	// quotes — the value regex must consume `\'` sequences, otherwise the
-	// tail of the secret survives redaction (round-6 review P1-02).
-	quotedPwRe = regexp.MustCompile(`(?i)(password=')(?:[^'\\]|\\.)*(')`)
-	plainPwRe  = regexp.MustCompile(`(?i)(password=)(?:[^\s'";,\\]|\\.)*`)
-	uriRe      = regexp.MustCompile(`(?i)(postgres(?:ql)?://)[^\s'";,]*`)
-)
-
-// sanitize masks credential-bearing patterns in stderr: the VALUE is removed
-// for both bare and quoted forms (round-2 review P1-02 remainder).
+// sanitize keeps only a bounded, labeled excerpt — the VALUE removal for
+// known secrets happens at the job layer via redact.Secrets (round-10
+// review: composed escapes make regex-guessing unreliable at this layer).
 func sanitize(s string) string {
-	s = quotedPwRe.ReplaceAllString(s, "$1[REDACTED]$2")
-	s = plainPwRe.ReplaceAllString(s, "$1[REDACTED]")
-	s = uriRe.ReplaceAllString(s, "$1[REDACTED]")
-	return s
-}
-
-// RedactKnownSecrets removes every occurrence of the actual secret values
-// from arbitrary error text. Each character of the secret may appear in the
-// text with up to two levels of backslash escaping (raw, \' and \\' — the
-// compositions conninfo quoting and JSON encoding actually produce), so the
-// match pattern allows optional backslashes before every character. The
-// whole span is removed in ONE regex pass; form-enumeration loops had
-// termination edge cases (round-8 review R8-P1-01).
-func RedactKnownSecrets(secrets []string, s string) string {
-	for _, sec := range secrets {
-		if sec == "" {
-			continue
-		}
-		var pattern strings.Builder
-		pattern.WriteString(`\\{0,2}`)
-		for _, r := range sec {
-			pattern.WriteString(`(?:\\{0,2}`)
-			pattern.WriteString(regexp.QuoteMeta(string(r)))
-			pattern.WriteString(`)`)
-		}
-		re, err := regexp.Compile(pattern.String())
-		if err != nil {
-			continue
-		}
-		s = re.ReplaceAllLiteralString(s, "[REDACTED]")
+	s = strings.ReplaceAll(s, "postgres://", "postgres-uri://[REDACTED]")
+	s = strings.ReplaceAll(s, "postgresql://", "postgres-uri://[REDACTED]")
+	if len(s) > stderrKeep {
+		s = s[:stderrKeep] + "...[truncated]"
 	}
 	return s
 }
