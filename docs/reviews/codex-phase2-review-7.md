@@ -350,3 +350,73 @@ Router overlay 重新核对了与 HEAD 的差异，仅替换测试 HTTP 传输�
 证据目录：`/tmp/supabackup-phase2-review10-evidence/`。`core-head.jsonl` / `core-baseline.jsonl` 保存全部定向新旧对照；`marker-summary.json`、`marker-*.log` 保存终止性检查；`race-native.jsonl`、`race-router.jsonl` 保存全量结果；`README.md`、`summary.json`、`sources.sha256`、overlay、差异和探针源码提供复现入口。
 
 **第 10 轮最终结论：未通过。R9-P1-01 = PARTIALLY（双 err 子项 FIXED，唯一字段仍泄漏）；P1-02 = PARTIALLY；新回归 0。R8-P1-01 marker 不终止已 FIXED，固定 API 422 继续保持 FIXED。剩余组合转义日志泄漏仍为 P1 阻断，不能判为“通过”或“修改后通过”。**
+
+---
+
+## Phase 2 第 11 轮追加复审：416a11a 收敛确认
+
+评审日期：2026-10-03。实际 HEAD：`416a11a44c1ee12689cce020feca06e1dde8c0f3`。范围：`git diff 7fad0b7..416a11a`，复核第十轮两个 PARTIALLY 及本次差异引入的新回归。使用 `code-reviewer` 技能。仓库仅追加本节；生产代码、仓库测试均未修改。定向探针通过 `/tmp` 中的 Go overlay 加载，旧 fixture 明确复用，所有结果均在本轮重新编译、执行。
+
+**两项判定：R9-P1-01 = FIXED；P1-02（指定的组合转义脱敏残留）= FIXED。新回归数：1（R11-P1-01，P1，REGRESSED）。最终结论：未通过。** 原 4/35 失败已经关闭；阻断原因是本次移除 dumper 值级脱敏后，原先安全的 stderr 又能携带凭据进入 Runner 成功日志。
+
+沿用原口径：FIXED 判断指定问题本身是否关闭，已满足验收后的强化仅标 NOTE；外部资源限制不计缺陷。本轮不因新发现的 dumper 回归而将已修好的 API 单字段日志、组合转义矩阵改判 PARTIALLY。下述三个新增失败形态归为同一项跨层脱敏回归，不重复计数。
+
+| 本轮指定项 | 判定 | 实测与关闭边界 |
+| --- | --- | --- |
+| **R9-P1-01：双 `err` 与唯一字段中的组合转义泄漏** | **FIXED** | `server/api_phase2.go:117`–`:119` 仅保留 `keyword_view` 和一个经过 `redact.Secrets` 的 `err`。原四组日志 fixture，加相邻反斜杠/单引号、三个连续反斜杠两组残留，共 **6/6 PASS**。逐 token 保留重复键检查最终 JSON 日志，六条均为 `err_count=1`、`keyword_view_count=1`，无 canary；安全摘要均为 `localhost:5432/appdb (user app, sslmode disable)`。固定 422 响应保持通过。 |
+| **P1-02：3+ 连续反斜杠导致组合转义 4/35 失败** | **FIXED** | `redact/redact.go:27`–`:36` 使用每字符任意数量前置反斜杠并单次替换。仓库 `TestSecretsMatrix` 通过；另原样复跑上一轮由生产 `QuoteConninfo` 和真正 `json.Marshal` 生成的 5×7 矩阵，`7fad0b7` **31/35 PASS、4 FAIL**，HEAD **35/35 PASS**。同样 35 个输入经真实子进程 stderr → dumper excerpt → Runner → 最终 JSON 成功日志，HEAD 也为 **35/35 PASS**。 |
+
+基线矩阵使用 `git show 7fad0b7:backend/internal/dumper/dumper.go` 中的真实 `RedactKnownSecrets`；HEAD 矩阵仅迁移测试包和调用名至 `redact.Secrets`，秘密、表示生成器和断言未变。原失败的两种秘密分别经过反斜杠再次加倍和 JSON(conninfo) 的四个用例全部转 PASS，没有提高转义层级或更换验收标准。
+
+Marker 终止性未回归：仓库两个终止性测试通过；`[REDACTED]`、`REDACTED`、`prefix[REDACTED]suffix` 经真实 dumper/Runner 路径均完成加密、提交、manifest 和 succeeded 状态，**3/3 返回**。不把替换标记本身包含 `REDACTED` 当成秘密泄漏。
+
+### R11-P1-01：移除 dumper 值级脱敏后，跨层成功日志重新泄漏凭据
+
+**新增回归，P1，REGRESSED；计数 1。** 改动定位：`backend/internal/dumper/dumper.go:169`–`:175`。相关保留边界：`:381`–`:394`，excerpt 生成：`:431`、`:485`；最终日志出口：`backend/internal/jobs/jobs.go:665`–`:667`。
+
+旧实现会删除 `password=` 后的值和 PostgreSQL URI 主体；新实现只改写 URI scheme，并把值级删除全部交给 jobs 中的完整秘密匹配。这个交接不总能保留可匹配的原值：URI 中的密码可能是百分号编码，stderr 保留上限可能切断密码，scheme 改写也可能发生在密码内部。`redact.Secrets` 的反斜杠匹配规则无法补救这些内容变化。
+
+以下是**相同 Runner 探针在基线与 HEAD 的实测对照**。秘密均通过生产 `ParseURI` 往返校验；最终状态均为 succeeded，artifact 和 manifest 均存在。表中是最终 JSON 日志中 `stderr_excerpt` 的解码值；长填充部分及尾部换行省略。
+
+| 触发形态 | 合成 stderr 输入 | `7fad0b7` 最终日志 | `416a11a` 最终日志 |
+| --- | --- | --- | --- |
+| URI 百分号编码 | 秘密 `CANARY-P@ss/word`，由 `url.UserPassword` 生成 `postgres://app:CANARY-P%40ss%2Fword@localhost/appdb?sslmode=disable` | `postgres://[REDACTED]`，PASS。 | `postgres-uri://[REDACTED]app:CANARY-P%40ss%2Fword@localhost/appdb?sslmode=disable`，**FAIL，完整可逆编码口令仍在**。 |
+| 保留边界截断普通密码 | 填充文本后接 `password=CANARY-cut-PASSWORD-SUFFIX`，16 KiB 边界恰好落在 `CANARY-cut-` 后 | 尾部为 `password=[REDACTED]`，PASS。 | 尾部为 `password=CANARY-cut-`，**FAIL，口令前缀泄漏**。 |
+| scheme 出现在合法秘密内部 | 秘密 `prefixpostgres://CANARY-SUFFIX`，stderr 为 `password='prefixpostgres://CANARY-SUFFIX'` | `password=[REDACTED]'[REDACTED]'`，PASS。 | `password='prefixpostgres-uri://[REDACTED]CANARY-SUFFIX'`，**FAIL，替换拆碎原值后保留秘密内容**。 |
+
+截断 fixture 的构造为：
+
+```go
+secret := "CANARY-cut-PASSWORD-SUFFIX"
+stderr := strings.Repeat("x", (16<<10)-len("password=")-len("CANARY-cut-")) +
+    "password=" + secret
+```
+
+这里的首次截断发生在 stderr 读取保留逻辑中，进入 `sanitize` 前已经只剩口令前缀；新 `sanitize` 的 `len(s) > stderrKeep` 检查不能恢复完整值，也不会给恰好 16 KiB 的该输入追加截断标记。旧 `plainPwRe` 可将保留到结尾的整个 `password=` 值删除，新路径只寻找完整秘密，因此泄漏。第三个 fixture 则完全不依赖截断或额外编码，仅本次新增的 scheme 改写就会破坏完整秘密匹配。
+
+上述三组保密断言在基线 **3/3 PASS**，HEAD **3/3 FAIL**；属于本次实际退化，不是新增验收条件，也不是仅观察到内存中的中间 excerpt。探针执行真实 OS 子进程、管道读取、SQLite、age、文件提交和生产 `slog.NewJSONHandler`；仅连接检查、依赖元数据和 dump 内容为受控 fixture。不声称真实 PostgreSQL 在本轮自然输出过这些口令，也不将这些成功日志泄漏误记为 API 422 泄漏或数据库错误字段泄漏。
+
+修复应保证日志出口删除凭据值：处理完整原值时先脱敏再做会改变内容的标签替换；为 URI 的编码凭据保留安全删除能力；对截断处可能残留的凭据片段采取删除或丢弃策略。不能只增大 `\\*` 的匹配能力，也不能简单取消流读取上限。修复后应以以上真实跨层的最终日志断言验收，并保持现有组合矩阵和 marker 终止性通过。
+
+### 验证结果、NOTE 与最终结论
+
+环境：`go1.26.0 linux/arm64`，`CGO_ENABLED=1`，`GOCACHE=/tmp/supabackup-review-go-cache`。全量工程检查不加载连接错误 fixture 或审计探针。
+
+| 检查 | 本轮实际结果 |
+| --- | --- |
+| 原生 `go test -race -json -count=1 ./backend/...` | **退出 1**：server 的 `httptest` 监听报 `socket: operation not permitted`；63 个顶层测试 PASS、5 SKIP、1 FAIL。未将原生运行写为通过。 |
+| 同一全量命令，增加 `-overlay /tmp/supabackup-phase2-review11-evidence/router-overlay.json` | **退出 0：79 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；11 个有测试包通过、6 个无测试文件。 |
+| 仓库 redact 矩阵、marker 测试及 `TestRound7QuotedRedaction` | **全部 PASS**，已包含于上述全量检查。 |
+| 上一轮真实组合矩阵重放 | 基线 31 PASS / 4 FAIL；HEAD **35/35 PASS**。 |
+| API 固定 422 / 唯一日志字段 | HEAD 六场景全部 PASS；基线相邻反斜杠/单引号与三个连续反斜杠两场景仍 FAIL，符合上一轮记录。 |
+| 真实子进程 → dumper → Runner → JSON 日志 | 原组合矩阵 **35/35 PASS**；marker **3/3 返回**；新增回归三个场景 **基线 PASS → HEAD FAIL**。 |
+| HEAD 定向探针合计 | 6 个顶层测试 PASS、1 FAIL；唯一失败测试为 `TestReview11CrossLayerRegressions` 的三个子用例。 |
+| Race / diff 检查 | 所有运行均无 data race 报告；`git diff 7fad0b7..416a11a --check` 及追加后的 `git diff --check` 通过。 |
+
+Router overlay 已重新核对，仅替换测试 HTTP 传输为进程内 RoundTripper → 生产 Router → Recorder，保留 CookieJar、路由、中间件、handler 和原断言；不声称验证了真实 TCP/TLS 监听。Docker PostgreSQL 容器不可用导致五项 SKIP。以上环境边界不计缺陷，不改变本轮新回归的代码判定。
+
+**NOTE（不阻断原两项关闭）：** `redact/redact_test.go:25` 的 `json` 实际与 `backslashDbl` 相同，仓库矩阵仍未直接调用 JSON 编码器，且仅检查完整秘密/完整 form 是否残留。建议将本轮已通过的生产 `QuoteConninfo` + 标准库 [`json.Marshal`](https://pkg.go.dev/encoding/json#Marshal) fixture 和最终日志保密断言纳入仓库。当前真实组合验收已经由独立探针满足，因此这里只记覆盖强化，不据此改判 PARTIALLY。
+
+证据目录：`/tmp/supabackup-phase2-review11-evidence/`。`race-native.jsonl` / `race-router.jsonl` 保存全量结果，`probes-head.jsonl` / `probes-baseline.jsonl` 保存 API 与真实 Runner 新旧对照，`matrix-baseline.jsonl` 保存旧版四个失败重现。`README.md` 提供复现命令和 fixture 边界；`summary.json` 保存计数及六条保留重复键的日志检查，`sources.sha256`、overlay、探针源码及差异文件提供复核入口。
+
+**第 11 轮最终结论：未通过。R9-P1-01 = FIXED；P1-02（组合转义残留）= FIXED；新回归 1（R11-P1-01，P1）。原两个问题已关闭，但本次引入的跨层成功日志凭据泄漏仍需修复，当前不能判为“通过”或“修改后通过”。**

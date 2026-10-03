@@ -163,15 +163,68 @@ func probeVersion(bin string) (major int, version string, err error) {
 // sanitize masks credential-bearing patterns in stderr before storage or
 // logging. The VALUE is removed, not just the key labeled (round-2 review
 // P1-02: `password=[REDACTED]<value>` still leaks the value).
-// sanitize keeps only a bounded, labeled excerpt — the VALUE removal for
-// known secrets happens at the job layer via redact.Secrets (round-10
-// review: composed escapes make regex-guessing unreliable at this layer).
-func sanitize(s string) string {
-	s = strings.ReplaceAll(s, "postgres://", "postgres-uri://[REDACTED]")
-	s = strings.ReplaceAll(s, "postgresql://", "postgres-uri://[REDACTED]")
+// excerptOf builds the retained stderr excerpt for a job: it drops a
+// trailing incomplete line (the stderr drain caps retention mid-line, which
+// previously cut a password value in half — round-11 review), removes every
+// form of the known password, then labels URI schemes. The jobs layer adds
+// redact.Secrets as a final defense; it cannot recover values that were
+// percent-encoded or cut, so removal happens HERE where the raw password
+// is known.
+func excerptOf(retained []byte, password string) string {
+	s := string(retained)
+	// Drop the last incomplete line: the retention cap may have cut it
+	// mid-secret.
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	} else {
+		s = ""
+	}
+	s = removePasswordForms(s, password)
+	s = sanitize(s)
 	if len(s) > stderrKeep {
 		s = s[:stderrKeep] + "...[truncated]"
 	}
+	return s
+}
+
+// removePasswordForms deletes every representation of the known password:
+// raw, backslash-doubled, quote-escaped, percent-encoded per byte, and
+// percent-encoded only for characters that URI syntax requires to be
+// encoded (round-11 review: libpq errors quote the percent-encoded URI
+// form, e.g. CANARY-P%40ss%2Fword).
+func removePasswordForms(s, pw string) string {
+	if pw == "" {
+		return s
+	}
+	forms := []string{pw}
+	var all, special strings.Builder
+	for i := 0; i < len(pw); i++ {
+		c := pw[i]
+		fmt.Fprintf(&all, "%%%02X", c)
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~' {
+			special.WriteByte(c)
+		} else {
+			fmt.Fprintf(&special, "%%%02X", c)
+		}
+	}
+	forms = append(forms, all.String(), special.String())
+	forms = append(forms,
+		strings.ReplaceAll(pw, "\\", "\\\\"),
+		strings.ReplaceAll(pw, "'", "\\'"),
+	)
+	for _, f := range forms {
+		if f != "" && f != pw {
+			s = strings.ReplaceAll(s, f, "[REDACTED]")
+		}
+	}
+	return s
+}
+
+// sanitize labels URI schemes; value removal happened earlier.
+func sanitize(s string) string {
+	s = strings.ReplaceAll(s, "postgres://", "postgres-uri://")
+	s = strings.ReplaceAll(s, "postgresql://", "postgres-uri://")
 	return s
 }
 
