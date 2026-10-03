@@ -20,21 +20,29 @@ import (
 
 // ---- age (protocol B) ----
 
-func (a *apiService) ageStatus(ctx context.Context) api.AgeStatus {
-	recipient, _ := a.srv.recipientFor(ctx)
+func (a *apiService) ageStatus(ctx context.Context) (api.AgeStatus, error) {
+	recipient, err := a.srv.recipientFor(ctx)
+	if err != nil {
+		return api.AgeStatus{}, err
+	}
 	if recipient == "" {
-		return api.AgeStatus{Configured: false}
+		return api.AgeStatus{Configured: false}, nil
 	}
 	fingerprint := agekey.Fingerprint(recipient)
 	return api.AgeStatus{
 		Configured: true,
 		Recipient:  &recipient,
 		KeyId:      &fingerprint,
-	}
+	}, nil
 }
 
 func (a *apiService) GetAgeStatus(ctx context.Context, _ api.GetAgeStatusRequestObject) (api.GetAgeStatusResponseObject, error) {
-	return api.GetAgeStatus200JSONResponse(a.ageStatus(ctx)), nil
+	st, err := a.ageStatus(ctx)
+	if err != nil {
+		a.srv.log.Error("age status", "err", err)
+		return api.GetAgeStatus500JSONResponse{}, nil
+	}
+	return api.GetAgeStatus200JSONResponse(st), nil
 }
 
 func (a *apiService) PutAgeRecipient(ctx context.Context, request api.PutAgeRecipientRequestObject) (api.PutAgeRecipientResponseObject, error) {
@@ -53,7 +61,11 @@ func (a *apiService) PutAgeRecipient(ctx context.Context, request api.PutAgeReci
 		return api.PutAgeRecipient500JSONResponse{}, nil
 	}
 	a.srv.log.Info("age recipient configured", "key_id", agekey.Fingerprint(rcp))
-	return api.PutAgeRecipient200JSONResponse(a.ageStatus(ctx)), nil
+	st, err := a.ageStatus(ctx)
+	if err != nil {
+		return api.PutAgeRecipient500JSONResponse{}, nil
+	}
+	return api.PutAgeRecipient200JSONResponse(st), nil
 }
 
 // ---- databases ----
@@ -87,12 +99,17 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 
 	ci, err := pgclient.ParseURI(body.ConnectionUri)
 	if err != nil {
-		return api.CreateDatabase400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
+		// Deliberately FIXED-TEXT: url.Error and friends embed the full URI
+		// with credentials — never echo parse failures back (round-1 P1-02).
+		return api.CreateDatabase400JSONResponse{Code: "invalid_request",
+			Message: "connectionUri is not a valid, supported postgres:// URI (" + err.Error() + ")"}, nil
 	}
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {
+		// pgclient errors are classified and credential-safe; still scrub
+		// defensively before returning.
 		return api.CreateDatabase422JSONResponse{Code: "connection_test_failed",
-			Message: "connection test failed: " + sanitizeForStore(err.Error())}, nil
+			Message: "connection test failed: " + pgclient.SanitizeMessage(err.Error())}, nil
 	}
 
 	enc, err := crypto.Encrypt(a.srv.key, []byte(body.ConnectionUri))
@@ -103,10 +120,10 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 
 	var id int64
 	err = a.srv.store.DB.QueryRowContext(ctx,
-		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, server_version, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, server_version, sslmode, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
 		 RETURNING id`,
-		name, platform, envTagOrEmpty(body.EnvTag), enc, test.ServerVersion).Scan(&id)
+		name, platform, envTagOrEmpty(body.EnvTag), enc, test.ServerVersion, ci.SSLMode).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return api.CreateDatabase409JSONResponse{Code: "name_exists", Message: "a database with this name already exists"}, nil
@@ -137,21 +154,26 @@ func (a *apiService) GetDatabase(ctx context.Context, request api.GetDatabaseReq
 }
 
 func (a *apiService) DeleteDatabase(ctx context.Context, request api.DeleteDatabaseRequestObject) (api.DeleteDatabaseResponseObject, error) {
-	var n int
-	if err := a.srv.store.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM jobs WHERE database_id = ? AND status IN ('pending','running')`,
-		request.Id).Scan(&n); err != nil {
-		return api.DeleteDatabase500JSONResponse{}, nil
-	}
-	if n > 0 {
-		return api.DeleteDatabase409JSONResponse{Code: "job_active",
-			Message: "a job is pending or running for this database"}, nil
-	}
-	res, err := a.srv.store.DB.ExecContext(ctx, `DELETE FROM databases WHERE id = ?`, request.Id)
+	// Soft delete in ONE atomic statement: the NOT EXISTS guard closes the
+	// check-then-delete TOCTOU with Enqueue (round-1 review P1-06), and the
+	// registration row (plus job history) survives for audit.
+	res, err := a.srv.store.DB.ExecContext(ctx, `
+		UPDATE databases SET deleted_at = strftime('%s','now'), updated_at = strftime('%s','now')
+		WHERE id = ? AND deleted_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM jobs
+		                  WHERE database_id = databases.id AND status IN ('pending','running'))`,
+		request.Id)
 	if err != nil {
 		return api.DeleteDatabase500JSONResponse{}, nil
 	}
-	if rn, _ := res.RowsAffected(); rn == 0 {
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Distinguish "unknown" from "active job" for a precise status code.
+		var n int
+		if err := a.srv.store.DB.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM databases WHERE id = ? AND deleted_at IS NULL`, request.Id).Scan(&n); err == nil && n == 1 {
+			return api.DeleteDatabase409JSONResponse{Code: "job_active",
+				Message: "a job is pending or running for this database"}, nil
+		}
 		return api.DeleteDatabase404JSONResponse{Code: "not_found", Message: "database not found"}, nil
 	}
 	return api.DeleteDatabase204Response{}, nil

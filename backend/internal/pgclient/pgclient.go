@@ -4,9 +4,9 @@
 package pgclient
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -14,8 +14,7 @@ import (
 )
 
 // ErrClass classifies failures into the seven job error classes plus unknown
-// (dev-plan P2 task 4). Classification is derived from libpq/pgx error text
-// patterns at the point of failure.
+// (dev-plan P2 task 4).
 type ErrClass string
 
 const (
@@ -32,7 +31,8 @@ const (
 // Allowed URI query parameters. Everything else — notably passfile,
 // service, sslkey, sslcert, options — is rejected: credentials and
 // connection behaviour must flow through this application only (dev-plan
-// P2 task 2).
+// P2 task 2). pgx additionally enforces ConnStringAllowedKeys as a second
+// line of defense.
 var allowedParams = map[string]bool{
 	"sslmode":          true,
 	"connect_timeout":  true,
@@ -52,29 +52,71 @@ type ConnInfo struct {
 	User     string
 	Password string
 	DBName   string
-	SSLMode  string // validated libpq sslmode; default "prefer"
+	SSLMode  string // validated libpq sslmode
 	Timeout  string // connect_timeout seconds, empty = driver default
 	AppName  string
+	// ExplicitTLS records whether the user chose sslmode themselves.
+	// Registration of NON-LOCAL targets without an explicit sslmode is
+	// rejected (round-1 review P1-09: no silent plaintext/prefer fallback).
+	ExplicitTLS bool
+	IsLocal     bool
 }
 
-var hostRe = regexp.MustCompile(`^[A-Za-z0-9.\-_]+$`)
+var hostLabelRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?$`)
+
+// classifyHost accepts IPv4, IPv6 (from url.Hostname(), brackets already
+// removed) and plain DNS names; rejects everything else. Round-1 review
+// P2-09: legal IPv6 literals must not be refused.
+func classifyHost(host string) error {
+	if host == "" {
+		return errors.New("empty host")
+	}
+	if strings.Contains(host, "%") || strings.Contains(host, ",") {
+		return errors.New("zone identifiers and multi-host lists are not supported")
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		if ip.Zone() != "" {
+			return errors.New("IPv6 zone identifiers are not supported")
+		}
+		return nil
+	}
+	if !hostLabelRe.MatchString(host) {
+		return fmt.Errorf("invalid host %q", host)
+	}
+	return nil
+}
 
 // ParseURI validates and decomposes a postgres:// connection URI. The
-// password never leaves this struct except to PGPASSFILE / pgx.
+// password never leaves this struct except to PGPASSFILE / pgx. Query parse
+// errors are propagated, never silently downgraded (round-1 review P1-09).
 func ParseURI(raw string) (*ConnInfo, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, errors.New("connection URI is empty")
+	}
+	u, err := url.Parse(trimmed)
 	if err != nil {
-		return nil, fmt.Errorf("parse connection URI: %w", err)
+		// Never echo the input back: url.Error embeds the full URI with
+		// credentials (round-1 review P1-02).
+		return nil, errors.New("connection URI is not a valid URL")
 	}
 	if u.Scheme != "postgres" && u.Scheme != "postgresql" {
 		return nil, errors.New("URI scheme must be postgres:// or postgresql://")
+	}
+	if u.RawQuery != "" {
+		if _, qerr := url.ParseQuery(u.RawQuery); qerr != nil {
+			return nil, errors.New("connection URI query string is malformed")
+		}
+	}
+	if u.Fragment != "" {
+		return nil, errors.New("connection URI must not contain a fragment")
 	}
 	if u.Host == "" {
 		return nil, errors.New("URI is missing the host")
 	}
 	host := u.Hostname()
-	if !hostRe.MatchString(host) && host != "localhost" {
-		return nil, fmt.Errorf("invalid host %q", host)
+	if err := classifyHost(host); err != nil {
+		return nil, err
 	}
 	port := u.Port()
 	if port == "" {
@@ -90,9 +132,13 @@ func ParseURI(raw string) (*ConnInfo, error) {
 		return nil, errors.New("URI is missing the database name")
 	}
 	dbname := strings.TrimPrefix(u.Path, "/")
+	if err := rejectConninfoControlBytes(host, port, u.User.Username(), pw, dbname); err != nil {
+		return nil, err
+	}
 
 	q := u.Query()
-	ci := &ConnInfo{Host: host, Port: port, User: u.User.Username(), Password: pw, DBName: dbname, SSLMode: "prefer"}
+	ci := &ConnInfo{Host: host, Port: port, User: u.User.Username(), Password: pw, DBName: dbname}
+	explicitTLS := false
 	for key, vals := range q {
 		if len(vals) != 1 {
 			return nil, fmt.Errorf("parameter %q must appear exactly once", key)
@@ -104,45 +150,81 @@ func ParseURI(raw string) (*ConnInfo, error) {
 				return nil, fmt.Errorf("invalid sslmode %q", v)
 			}
 			ci.SSLMode = v
+			explicitTLS = true
 		case "connect_timeout":
 			if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 600 {
 				return nil, fmt.Errorf("invalid connect_timeout %q", v)
 			}
 			ci.Timeout = v
 		case "application_name":
+			if len(v) > 100 {
+				return nil, errors.New("application_name too long")
+			}
+			if err := rejectConninfoControlBytes(v); err != nil {
+				return nil, fmt.Errorf("application_name: %w", err)
+			}
 			ci.AppName = v
 		default:
 			return nil, fmt.Errorf("unsupported connection parameter %q (only sslmode, connect_timeout, application_name are allowed)", key)
 		}
 	}
+	if ci.SSLMode == "" {
+		// Round-1 review P1-09: remote targets must choose TLS semantics
+		// explicitly; localhost keeps the comfortable prefer default.
+		ci.IsLocal = host == "localhost" || isLoopbackIP(host)
+		if ci.IsLocal {
+			ci.SSLMode = "prefer"
+		} else {
+			return nil, errors.New(
+				"remote connections must set sslmode explicitly (recommend verify-full; allow/prefer/require/verify-ca/disable are accepted for explicit choices)")
+		}
+	}
+	ci.ExplicitTLS = explicitTLS
 	return ci, nil
 }
 
-// DSN returns the libpq keyword/value conninfo WITHOUT any password — the
-// password travels exclusively via PGPASSFILE (protocol A). Values are
-// single-quoted and escaped per libpq conninfo rules.
-func (c *ConnInfo) DSN() string {
-	esc := func(v string) string {
-		if v == "" {
-			return v
+func isLoopbackIP(host string) bool {
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
+}
+
+// rejectConninfoControlBytes refuses characters that could break libpq
+// keyword/value parsing or the PGPASSFILE line format, even after escaping:
+// NUL and every byte libpq treats as whitespace (round-1 review P1-03).
+func rejectConninfoControlBytes(fields ...string) error {
+	for _, f := range fields {
+		if strings.ContainsAny(f, "\x00\r\n\v\f") {
+			return errors.New("connection fields must not contain control characters (NUL, CR, LF, VT, FF)")
 		}
-		if !strings.ContainsAny(v, " \t\n\\'") {
-			return v
-		}
-		return "'" + strings.ReplaceAll(strings.ReplaceAll(v, "\\", "\\\\"), "'", "\\'") + "'"
 	}
+	return nil
+}
+
+// QuoteConninfo renders one keyword/value element per libpq conninfo rules:
+// every value is single-quoted; backslash and single quote are escaped. All
+// values are quoted — including empty strings, whose unquoted form would be
+// swallowed as a missing token (round-1 review P2-02).
+func QuoteConninfo(v string) string {
+	q := strings.ReplaceAll(v, "\\", "\\\\")
+	q = strings.ReplaceAll(q, "'", "\\'")
+	return "'" + q + "'"
+}
+
+// DSN returns the libpq keyword/value conninfo WITHOUT any password — the
+// password travels exclusively via PGPASSFILE (protocol A).
+func (c *ConnInfo) DSN() string {
 	parts := []string{
-		"host=" + esc(c.Host),
-		"port=" + esc(c.Port),
-		"user=" + esc(c.User),
-		"dbname=" + esc(c.DBName),
-		"sslmode=" + esc(c.SSLMode),
+		"host=" + QuoteConninfo(c.Host),
+		"port=" + QuoteConninfo(c.Port),
+		"user=" + QuoteConninfo(c.User),
+		"dbname=" + QuoteConninfo(c.DBName),
+		"sslmode=" + QuoteConninfo(c.SSLMode),
 	}
 	if c.Timeout != "" {
-		parts = append(parts, "connect_timeout="+esc(c.Timeout))
+		parts = append(parts, "connect_timeout="+QuoteConninfo(c.Timeout))
 	}
 	if c.AppName != "" {
-		parts = append(parts, "application_name="+esc(c.AppName))
+		parts = append(parts, "application_name="+QuoteConninfo(c.AppName))
 	}
 	return strings.Join(parts, " ")
 }
@@ -159,172 +241,7 @@ var pgVersionRe = regexp.MustCompile(`PostgreSQL (\d+)\.`)
 func ServerMajor(version string) (int, error) {
 	m := pgVersionRe.FindStringSubmatch(version)
 	if m == nil {
-		return 0, fmt.Errorf("unrecognized server version string %q", version)
+		return 0, fmt.Errorf("unrecognized server version string")
 	}
 	return strconv.Atoi(m[1])
 }
-
-// TestResult carries what the kernel needs from a successful connection test.
-type TestResult struct {
-	ServerVersion string
-	ServerMajor   int
-}
-
-// Test connects with pgx and reports the server version. The pgx
-// configuration is built from the SAME ConnInfo the dumper uses, so both
-// paths share host/user/db/TLS semantics by construction.
-func Test(ctx context.Context, c *ConnInfo) (*TestResult, error) {
-	cfg, err := pgxConfig(c)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := pgxConnect(ctx, cfg)
-	if err != nil {
-		return nil, ClassifyError(err)
-	}
-	defer conn.Close(context.WithoutCancel(ctx))
-
-	var version string
-	if err := conn.QueryRow(ctx, `SELECT version()`).Scan(&version); err != nil {
-		return nil, ClassifyError(err)
-	}
-	major, err := ServerMajor(version)
-	if err != nil {
-		return nil, err
-	}
-	return &TestResult{ServerVersion: version, ServerMajor: major}, nil
-}
-
-// CollectDependencies gathers the restore-relevant facts recorded in the
-// manifest (dev-plan P2 task 6, protocol E): extensions, referenced roles,
-// large objects, foreign tables.
-func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error) {
-	cfg, err := pgxConfig(c)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := pgxConnect(ctx, cfg)
-	if err != nil {
-		return nil, ClassifyError(err)
-	}
-	defer conn.Close(context.WithoutCancel(ctx))
-
-	d := &Dependencies{}
-	rows, err := conn.Query(ctx,
-		`SELECT extname, COALESCE(extversion,'') FROM pg_extension ORDER BY 1`)
-	if err != nil {
-		return nil, ClassifyError(err)
-	}
-	for rows.Next() {
-		var name, ver string
-		if err := rows.Scan(&name, &ver); err != nil {
-			rows.Close()
-			return nil, ClassifyError(err)
-		}
-		d.Extensions = append(d.Extensions, Extension{Name: name, Version: ver})
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, ClassifyError(err)
-	}
-
-	if err := conn.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM pg_largeobject_metadata)`).Scan(&d.HasLargeObjects); err != nil {
-		return nil, ClassifyError(err)
-	}
-
-	if err := conn.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM pg_foreign_table)`).Scan(&d.HasForeignTables); err != nil {
-		return nil, ClassifyError(err)
-	}
-
-	// Roles that own objects in user schemas: restoring into a fresh cluster
-	// needs these roles to exist first (manifest dependency, protocol E).
-	rows, err = conn.Query(ctx, `
-        SELECT DISTINCT r.rolname
-        FROM pg_class c
-        JOIN pg_roles r ON r.oid = c.relowner
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
-        UNION
-        SELECT DISTINCT r.rolname
-        FROM pg_proc p
-        JOIN pg_roles r ON r.oid = p.proowner
-        JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
-        ORDER BY 1`)
-	if err != nil {
-		return nil, ClassifyError(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, ClassifyError(err)
-		}
-		d.Roles = append(d.Roles, name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, ClassifyError(err)
-	}
-	return d, nil
-}
-
-// Extension and Dependencies are manifest (protocol E) payloads.
-type Extension struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-type Dependencies struct {
-	Extensions       []Extension `json:"extensions"`
-	Roles            []string    `json:"roles"`
-	HasLargeObjects  bool        `json:"hasLargeObjects"`
-	HasForeignTables bool        `json:"hasForeignTables"`
-}
-
-// ClassifyError maps a connection/query failure to an error class using
-// libpq/pgx message patterns (dev-plan seven classes).
-func ClassifyError(err error) error {
-	if err == nil {
-		return nil
-	}
-	msg := strings.ToLower(err.Error())
-	cls := ClassUnknown
-	switch {
-	case strings.Contains(msg, "password authentication failed"),
-		strings.Contains(msg, "no password supplied"),
-		strings.Contains(msg, "authentication failed"):
-		cls = ClassAuth
-	case strings.Contains(msg, "connection refused"),
-		strings.Contains(msg, "no such host"),
-		strings.Contains(msg, "connection timed out"),
-		strings.Contains(msg, "network unreachable"),
-		strings.Contains(msg, "host is unreachable"),
-		strings.Contains(msg, "i/o timeout"),
-		strings.Contains(msg, "dial tcp"):
-		cls = ClassNetwork
-	case strings.Contains(msg, "permission denied"),
-		strings.Contains(msg, "privilege"):
-		cls = ClassPermission
-	case strings.Contains(msg, "no such file or directory") && strings.Contains(msg, ".sock"):
-		cls = ClassNetwork
-	case strings.Contains(msg, "unsupported ssl"),
-		strings.Contains(msg, "ssl is not enabled"),
-		strings.Contains(msg, "tls"):
-		cls = ClassNetwork
-	}
-	if cls == ClassUnknown {
-		return err
-	}
-	return fmt.Errorf("%w", &Classified{Class: cls, Err: err})
-}
-
-// Classified attaches an error class to an underlying failure.
-type Classified struct {
-	Class ErrClass
-	Err   error
-}
-
-func (e *Classified) Error() string { return e.Err.Error() }
-func (e *Classified) Unwrap() error { return e.Err }

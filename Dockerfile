@@ -41,8 +41,11 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates tzdata \
-       # P1 ships one client; P2 adds the tested multi-version matrix (14–18).
-       postgresql-client-18 \
+       # Multi-version client matrix per dev-plan §0: the kernel picks the
+       # client matching the SERVER major (same major preferred; never older
+       # than the server).
+       postgresql-client-14 postgresql-client-15 postgresql-client-16 \
+       postgresql-client-17 postgresql-client-18 \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*

@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -349,4 +350,108 @@ func taskStr(t *Task, field string) string {
 		return t.ErrorMessage
 	}
 	return ""
+}
+
+// TestConcurrentEnqueueExactlyOne (round-1 review P1-05): the partial unique
+// index makes concurrent enqueues produce exactly one pending job.
+func TestConcurrentEnqueueExactlyOne(t *testing.T) {
+	requireDocker(t)
+	uri := startTestPostgres(t)
+	dataDir := t.TempDir()
+	key, err := config.LoadOrCreateSecret(filepath.Join(dataDir, "secret.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	enc, _ := crypto.Encrypt(key, []byte(uri))
+	if _, err := store.DB.Exec(
+		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
+		 VALUES ('cdb','generic','',?,'0','0')`, enc); err != nil {
+		t.Fatal(err)
+	}
+	var dbID int64
+	_ = store.DB.QueryRow(`SELECT id FROM databases WHERE name='cdb'`).Scan(&dbID)
+	_, rcp, _ := agekey.Generate()
+	runner := NewRunner(store, key, filepath.Join(dataDir, "staging"), func(ctx context.Context) (string, error) {
+		return rcp, nil
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	var wg sync.WaitGroup
+	okCount, queuedCount := 0, 0
+	var mu sync.Mutex
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := runner.Enqueue(context.Background(), dbID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				okCount++
+			} else if errors.Is(err, ErrAlreadyQueued) {
+				queuedCount++
+			} else {
+				t.Logf("unexpected enqueue error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if okCount != 1 || queuedCount != 7 {
+		t.Fatalf("want exactly 1 enqueue + 7 rejections, got %d/%d", okCount, queuedCount)
+	}
+}
+
+// TestCancelPendingJobReachable (round-1 review P1-04): `canceled` is a real
+// terminal state for pending jobs.
+func TestCancelPendingJobReachable(t *testing.T) {
+	requireDocker(t)
+	uri := startTestPostgres(t)
+	dataDir := t.TempDir()
+	key, err := config.LoadOrCreateSecret(filepath.Join(dataDir, "secret.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	enc, _ := crypto.Encrypt(key, []byte(uri))
+	if _, err := store.DB.Exec(
+		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
+		 VALUES ('cancel-db','generic','',?,'0','0')`, enc); err != nil {
+		t.Fatal(err)
+	}
+	var dbID int64
+	_ = store.DB.QueryRow(`SELECT id FROM databases WHERE name='cancel-db'`).Scan(&dbID)
+	_, rcp, _ := agekey.Generate()
+	runner := NewRunner(store, key, filepath.Join(dataDir, "staging"), func(ctx context.Context) (string, error) {
+		return rcp, nil
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// NOTE: worker NOT started — the job stays pending.
+	jobID, err := runner.Enqueue(context.Background(), dbID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Cancel(jobID); err != nil {
+		t.Fatal(err)
+	}
+	runner.settleCanceledPending()
+	tk, err := GetTask(store.DB, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.Status != StatusCanceled {
+		t.Fatalf("status = %s, want canceled", tk.Status)
+	}
 }

@@ -18,7 +18,7 @@ func TestParseURIAcceptsAndNormalizes(t *testing.T) {
 	if strings.Contains(dsn, "se:cret") || strings.Contains(dsn, "secret") {
 		t.Fatal("DSN must never contain the password")
 	}
-	for _, want := range []string{"host=db.example.com", "port=5433", "user=admin", "dbname=appdb", "sslmode=verify-full"} {
+	for _, want := range []string{"host='db.example.com'", "port='5433'", "user='admin'", "dbname='appdb'", "sslmode='verify-full'"} {
 		if !strings.Contains(dsn, want) {
 			t.Fatalf("DSN missing %q: %s", want, dsn)
 		}
@@ -46,13 +46,12 @@ func TestParseURIRejectsDisallowed(t *testing.T) {
 
 func TestParseURIWhitelistedValues(t *testing.T) {
 	for _, uri := range []string{
-		"postgres://u:p@h/db",
 		"postgres://u:p@h/db?sslmode=disable",
 		"postgres://u:p@h/db?sslmode=require",
 		"postgres://u:p@h/db?sslmode=verify-ca",
 		"postgres://u:p@h/db?sslmode=verify-full",
-		"postgres://u:p@h/db?application_name=myapp",
-		"postgresql://u@localhost/mydb",
+		"postgres://u:p@h/db?sslmode=prefer&application_name=myapp",
+		"postgresql://u@localhost/mydb", // local target: implicit prefer is fine
 	} {
 		if _, err := ParseURI(uri); err != nil {
 			t.Errorf("valid URI rejected: %q: %v", uri, err)

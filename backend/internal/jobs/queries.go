@@ -114,7 +114,7 @@ type Database struct {
 func GetDatabase(dbh *sql.DB, id int64) (*Database, error) {
 	d := &Database{}
 	err := dbh.QueryRow(`SELECT id, name, platform, env_tag, server_version, created_at, updated_at
-		FROM databases WHERE id = ?`, id).
+		FROM databases WHERE id = ? AND deleted_at IS NULL`, id).
 		Scan(&d.ID, &d.Name, &d.Platform, &d.EnvTag, &d.ServerVersion, &d.CreatedAt, &d.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -134,7 +134,7 @@ func GetDatabase(dbh *sql.DB, id int64) (*Database, error) {
 // ListDatabases returns all registrations, newest job attached.
 func ListDatabases(dbh *sql.DB) ([]*Database, error) {
 	rows, err := dbh.Query(`SELECT id, name, platform, env_tag, server_version, created_at, updated_at
-		FROM databases ORDER BY id`)
+		FROM databases WHERE deleted_at IS NULL ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

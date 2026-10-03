@@ -12,9 +12,12 @@ import (
 const FormatVersion = 1
 
 type Manifest struct {
-	FormatVersion int       `json:"formatVersion"`
-	BackupID      string    `json:"backupId"`
-	CreatedAt     time.Time `json:"createdAt"`  // export snapshot START (freshness anchor, dev-plan P1-13)
+	FormatVersion int    `json:"formatVersion"`
+	BackupID      string `json:"backupId"`
+	// DumpStartedAt is when the pg_dump EXECUTION started — not the moment
+	// the server snapshot was taken (that instant is not observable through
+	// pg_dump and is honestly unknown; round-1 review P1-10).
+	DumpStartedAt time.Time `json:"dumpStartedAt"`
 	FinishedAt    time.Time `json:"finishedAt"` // artifact committed
 	Database      Database  `json:"database"`
 	Source        Source    `json:"source"`
@@ -48,6 +51,8 @@ type Backup struct {
 	Format       string       `json:"format"`      // "pg_dump custom (-Fc)"
 	Compression  string       `json:"compression"` // zlib (custom-format default)
 	ToolVersions ToolVersions `json:"toolVersions"`
+	// RestoreNote states the verified/unsupported restore targets verbatim.
+	RestoreNote string `json:"restoreNote"`
 }
 
 type Selection struct {
@@ -61,6 +66,7 @@ type Deps struct {
 	Roles            []string      `json:"roles"`
 	HasLargeObjects  bool          `json:"hasLargeObjects"`
 	HasForeignTables bool          `json:"hasForeignTables"`
+	ServerEncoding   string        `json:"serverEncoding,omitempty"`
 }
 
 // PgExtension mirrors pgclient.Extension without importing it here.

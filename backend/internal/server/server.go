@@ -77,6 +77,8 @@ type Server struct {
 }
 
 // recipientFor reads the configured age recipient from settings (protocol B).
+// A database error is returned as an error — never silently reported as
+// "not configured" (round-1 review P2-07).
 func (s *Server) recipientFor(ctx context.Context) (string, error) {
 	var r string
 	err := s.store.DB.QueryRowContext(ctx,
@@ -92,19 +94,27 @@ func (s *Server) RecipientFor(ctx context.Context) (string, error) {
 	return s.recipientFor(ctx)
 }
 
-// storeRecipient persists the age recipient with its fingerprint.
+// storeRecipient persists the recipient and its fingerprint in ONE
+// transaction — a partial update can never pair recipient B with key ID A
+// (round-1 review P2-07).
 func (s *Server) storeRecipient(ctx context.Context, recipient string) error {
-	_, err := s.store.DB.ExecContext(ctx,
-		`INSERT INTO settings (key, value) VALUES ('age_recipient', ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, recipient)
+	tx, err := s.store.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	_, err = s.store.DB.ExecContext(ctx,
-		`INSERT INTO settings (key, value) VALUES ('age_key_id', ?)
-		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-		agekey.Fingerprint(recipient))
-	return err
+	defer tx.Rollback()
+	fingerprint := agekey.Fingerprint(recipient)
+	for _, kv := range [][2]string{
+		{"age_recipient", recipient},
+		{"age_key_id", fingerprint},
+	} {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO settings (key, value) VALUES (?, ?)
+			 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, kv[0], kv[1]); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SetRunner attaches the backup kernel after construction (main.go owns the

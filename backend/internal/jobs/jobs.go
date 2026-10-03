@@ -60,13 +60,15 @@ type Runner struct {
 	recipient  func(ctx context.Context) (string, error)
 	log        *slog.Logger
 
-	mu        sync.Mutex
-	cancelFns map[int64]context.CancelFunc
-	perDB     map[int64]bool // database currently being processed
-	workerCh  chan struct{}
-	wake      chan struct{}
-	stopCh    chan struct{}
-	stopOnce  sync.Once
+	mu         sync.Mutex
+	cancelFns  map[int64]context.CancelFunc
+	perDB      map[int64]bool // database currently being processed
+	wake       chan struct{}
+	lifeCtx    context.Context
+	lifeCancel context.CancelFunc
+	wg         sync.WaitGroup
+	startOnce  sync.Once
+	stopped    bool
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
@@ -80,9 +82,7 @@ func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ct
 		log:        log,
 		cancelFns:  make(map[int64]context.CancelFunc),
 		perDB:      make(map[int64]bool),
-		workerCh:   make(chan struct{}, 1),
 		wake:       make(chan struct{}, 1),
-		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -99,23 +99,21 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// Enqueue creates a pending job for a database, refusing to queue behind an
-// already pending/running job for the SAME database (dev-plan: no overlap).
+// Enqueue creates a pending job for a database. The partial unique index
+// (idx_jobs_active_per_database) makes the no-overlap promise atomic: two
+// concurrent enqueues cannot both succeed (round-1 review P1-05).
 func (r *Runner) Enqueue(ctx context.Context, databaseID int64) (int64, error) {
-	var n int
-	if err := r.authDB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM jobs WHERE database_id = ? AND status IN ('pending','running')`,
-		databaseID).Scan(&n); err != nil {
-		return 0, err
-	}
-	if n > 0 {
-		return 0, ErrAlreadyQueued
-	}
 	res, err := r.authDB.ExecContext(ctx,
 		`INSERT INTO jobs (database_id, status, scheduled_at, created_at)
 		 VALUES (?, 'pending', strftime('%s','now'), strftime('%s','now'))`,
 		databaseID)
 	if err != nil {
+		// SQLite reports partial-unique violations against either the index
+		// name or the underlying column, depending on the planner path.
+		if strings.Contains(err.Error(), "idx_jobs_active_per_database") ||
+			strings.Contains(err.Error(), "UNIQUE constraint failed: jobs.database_id") {
+			return 0, ErrAlreadyQueued
+		}
 		return 0, err
 	}
 	id, err := res.LastInsertId()
@@ -128,22 +126,25 @@ func (r *Runner) Enqueue(ctx context.Context, databaseID int64) (int64, error) {
 
 // Start launches the single-concurrency worker. v1 fixes global concurrency
 // at 1 (dev-plan Phase 2 / P4 will make it configurable).
-func (r *Runner) Start(ctx context.Context) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-r.stopCh:
-				return
-			case <-r.wake:
-			case <-time.After(2 * time.Second): // safety poll; wake is the fast path
+func (r *Runner) Start(parent context.Context) {
+	r.startOnce.Do(func() {
+		r.lifeCtx, r.lifeCancel = context.WithCancel(parent)
+		r.wg.Add(1)
+		go func() {
+			defer r.wg.Done()
+			for {
+				select {
+				case <-r.lifeCtx.Done():
+					return
+				case <-r.wake:
+				case <-time.After(2 * time.Second): // safety poll; wake is the fast path
+				}
+				for r.claimAndRun(r.lifeCtx) {
+					// drain queued jobs one by one (global concurrency = 1)
+				}
 			}
-			for r.claimAndRun(ctx) {
-				// drain queued jobs one by one (global concurrency = 1)
-			}
-		}
-	}()
+		}()
+	})
 }
 
 // signalWake non-blockingly nudges the worker loop.
@@ -160,7 +161,6 @@ func (r *Runner) SetClientOverride(dir string) { r.cfg.BinDirOverride = dir }
 
 // Stop terminates the worker.
 func (r *Runner) Stop() {
-	r.stopOnce.Do(func() { close(r.stopCh) })
 }
 
 // Cancel requests cancellation of a pending or running job.
@@ -183,23 +183,28 @@ func (r *Runner) Cancel(jobID int64) error {
 	return nil
 }
 
-// claimAndRun claims the oldest pending job (fair order) and runs it.
+// claimAndRun claims the oldest pending job that is not for a database
+// currently being processed (round-2 review P2-01: skip, never rekey).
 // Returns false when nothing was claimable.
 func (r *Runner) claimAndRun(ctx context.Context) bool {
 	var id, dbID int64
 	err := r.authDB.QueryRowContext(ctx, `
 		SELECT j.id, j.database_id FROM jobs j
-		WHERE j.status = 'pending'
+		WHERE j.status = 'pending' AND j.cancel_requested = 0
 		ORDER BY j.id LIMIT 1`).Scan(&id, &dbID)
 	if err != nil {
+		// Nothing claimable — settle any cancel-requested pending jobs so
+		// `canceled` is actually reachable (round-1 review P1-04).
+		r.settleCanceledPending()
 		return false
 	}
 
 	r.mu.Lock()
 	if r.perDB[dbID] {
-		// Same-database job still finishing; skip for now, try later.
+		// Same-database job still finishing: SKIP this one (the job id and
+		// API address never change), keep scanning other databases; the
+		// safety poll picks it up once the slot frees (round-2 review P2-01).
 		r.mu.Unlock()
-		r.reschedule(id)
 		return false
 	}
 	r.perDB[dbID] = true
@@ -207,7 +212,7 @@ func (r *Runner) claimAndRun(ctx context.Context) bool {
 
 	res, err := r.authDB.Exec(
 		`UPDATE jobs SET status = 'running', started_at = strftime('%s','now')
-		 WHERE id = ? AND status = 'pending'`, id)
+		 WHERE id = ? AND status = 'pending' AND cancel_requested = 0`, id)
 	if err != nil {
 		r.mu.Lock()
 		delete(r.perDB, dbID)
@@ -215,16 +220,24 @@ func (r *Runner) claimAndRun(ctx context.Context) bool {
 		return false
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
+		// Lost a race with Cancel — settle it and move on.
+		r.settleCanceledPending()
 		r.mu.Lock()
 		delete(r.perDB, dbID)
 		r.mu.Unlock()
-		return false
+		return true
 	}
 
 	jobCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.cancelFns[id] = cancel
 	r.mu.Unlock()
+	// Handshake: the cancel flag may have been set between claim and
+	// registration — re-read and honor it now.
+	var cancelReq int
+	if err := r.authDB.QueryRow(`SELECT cancel_requested FROM jobs WHERE id = ?`, id).Scan(&cancelReq); err == nil && cancelReq == 1 {
+		cancel()
+	}
 
 	r.runJob(jobCtx, id, dbID)
 
@@ -240,11 +253,12 @@ func (r *Runner) claimAndRun(ctx context.Context) bool {
 	return true
 }
 
-// reschedule requeues a job that was skipped (same-database collision) by
-// bumping its id so the worker makes progress on other databases first.
-func (r *Runner) reschedule(id int64) {
-	_, _ = r.authDB.Exec(`UPDATE jobs SET id = (SELECT MAX(id)+1 FROM jobs) WHERE id = ? AND status = 'pending'`, id)
-	r.signalWake()
+// settleCanceledPending flips pending jobs with cancel_requested=1 to
+// canceled — the only place 'canceled' is written (round-1 review P1-04).
+func (r *Runner) settleCanceledPending() {
+	_, _ = r.authDB.Exec(`
+		UPDATE jobs SET status = 'canceled', finished_at = strftime('%s','now')
+		WHERE status = 'pending' AND cancel_requested = 1`)
 }
 
 // runJob executes one backup end-to-end and records the outcome. It never
@@ -296,7 +310,6 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 
 	// 3) Dump + encrypt + atomic commit (protocol A).
-	start := time.Now().UTC()
 	result, err := r.cfg.Run(ctx, jobID, dumper.Target{
 		Conn: ci, ServerMajor: test.ServerMajor, Recipient: recipient,
 	})
@@ -309,7 +322,6 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	now := time.Now().UTC()
 	m := &manifest.Manifest{
 		BackupID:   fmt.Sprintf("job-%d", jobID),
-		CreatedAt:  start,
 		FinishedAt: now,
 		Database:   manifest.Database{Name: name, Platform: platform, EnvTag: envTag},
 		Source:     manifest.Source{Host: ci.Host, Port: ci.Port, DBName: ci.DBName, ServerVersion: test.ServerVersion},
@@ -364,13 +376,19 @@ func (r *Runner) loadDatabase(ctx context.Context, dbID int64) (name, platform, 
 }
 
 func (r *Runner) fail(jobID int64, class, msg string) {
-	msg = sanitizeMessage(msg)
-	if _, err := r.authDB.Exec(`
+	msg = pgclient.SanitizeMessage(msg)
+	// A failure AFTER the artifact was committed must not lose the
+	// reference: the ciphertext is restorable regardless of job status.
+	res, err := r.authDB.Exec(`
 		UPDATE jobs SET status = 'failed', finished_at = strftime('%s','now'),
 		  error_class = ?, error_message = ?
-		WHERE id = ? AND status IN ('pending','running')`, class, msg, jobID); err != nil {
+		WHERE id = ? AND status IN ('pending','running')`, class, msg, jobID)
+	if err != nil {
 		r.log.Error("job failure update failed", "job", jobID, "err", err)
 		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		r.log.Error("job failure update affected 0 rows (job not in an active state)", "job", jobID)
 	}
 	r.log.Error("backup failed", "job", jobID, "class", class, "error", msg)
 }
@@ -386,17 +404,6 @@ func classify(err error) string {
 		return string(dc.Class)
 	}
 	return ClassUnknown
-}
-
-// sanitizeMessage scrubs credential-looking content from stored error text
-// (secret canary invariant: no password ever reaches SQLite or logs).
-func sanitizeMessage(msg string) string {
-	r := strings.NewReplacer(
-		"password=", "password=[REDACTED]",
-		"postgres://", "postgres://[REDACTED]",
-		"postgresql://", "postgresql://[REDACTED]",
-	)
-	return r.Replace(msg)
 }
 
 func writeAtomic(path string, data []byte) error {

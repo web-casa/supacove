@@ -13,6 +13,8 @@ backend/internal/web/dist/*
 *.tsbuildinfo
 
 # Runtime data
+# (a stray pg_dump artifact named "-" once leaked into git; guard name)
+backend/internal/jobs/-
 data/
 *.db
 *.db-wal

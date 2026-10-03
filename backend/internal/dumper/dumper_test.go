@@ -97,8 +97,8 @@ func TestRunCommitsOnlyOnFullSuccess(t *testing.T) {
 	if !strings.Contains(res.DumpToolVer, "99.0") || res.ClientMajor != 99 {
 		t.Fatalf("unexpected tool info: %s / %d", res.DumpToolVer, res.ClientMajor)
 	}
-	if res.BytesDumped == 0 {
-		t.Fatal("plaintext byte counter must be non-zero")
+	if res.PlaintextArc == 0 {
+		t.Fatal("archive byte counter must be non-zero")
 	}
 }
 
@@ -267,4 +267,35 @@ func asClassified(err error, target **Classified) bool {
 		err = u.Unwrap()
 	}
 	return false
+}
+
+// TestRunDrainsStderrBeyondLimit (round-2 review P1-01): a pg_dump that
+// writes FAR more stderr than we retain must not deadlock, and the retained
+// excerpt must be bounded.
+func TestRunDrainsStderrBeyondLimit(t *testing.T) {
+	noisy := `#!/bin/sh
+case "$1" in
+  --version) echo "pg_dump (PostgreSQL) 99.0"; exit 0 ;;
+esac
+i=0
+while [ $i -lt 5000 ]; do
+  echo "warning line $i from a very verbose pg_dump" >&2
+  i=$((i+1))
+done
+echo "FAKEDUMP-DATA"
+`
+	cfg, staging := newTestConfig(t, noisy)
+	res, err := cfg.Run(context.Background(), 42, testTarget(mustRecipient(t)))
+	if err != nil {
+		t.Fatalf("verbose stderr must not break the run: %v", err)
+	}
+	if len(res.StdErrExcerpt) > stderrKeep {
+		t.Fatalf("stderr excerpt exceeds the retained cap: %d", len(res.StdErrExcerpt))
+	}
+	entries, _ := os.ReadDir(staging)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".inprogress") || strings.HasPrefix(e.Name(), "job-creds-") {
+			t.Fatalf("leftover %s", e.Name())
+		}
+	}
 }
