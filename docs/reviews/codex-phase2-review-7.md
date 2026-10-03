@@ -591,3 +591,94 @@ Router overlay 已核对，仅替换测试 HTTP 传输为进程内 RoundTripper 
 证据目录：`/tmp/supabackup-phase2-review13-evidence/`。`stock-excerpt.jsonl`、`dumper-probes.jsonl` 保存单测与 helper/真实 dumper 结果；`probes-head.jsonl` / `probes-baseline.jsonl` 保存原 fixture 及矩阵；`extended-head.jsonl` / `extended-baseline.jsonl` 保存边界与新回归对照；`capture-*.jsonl` 和 `final-logs/` 保存完整生产日志的重放；`race-native.jsonl` / `race-router.jsonl` 保存全量结果。`README.md`、`summary.json`、`sources.sha256`、overlay、差异及源码提供复现入口。
 
 **第 13 轮最终结论：未通过。R11-P1-01 = PARTIALLY；新回归 1（R13-P1-01，P1）。接线、raw 删除及原 URI/scheme 两个形态已经修复，但原保留边界仍依赖读取分段，并新增了标签扩展后二次裁剪导致的日志泄漏，当前不能判为“通过”或“修改后通过”。**
+
+---
+
+## Phase 2 第 14 轮追加复审：29816b1 单点收敛
+
+评审日期：2026-10-04。实际 HEAD：`29816b1e8808ec9de0fc829c4eb571a7d4bc8328`。范围：`git diff 8a32232..29816b1`，仅复核 R11-P1-01 的分段残留、R13-P1-01 及本次差异的新回归。使用 `code-reviewer` 技能。仓库仅追加本节，生产代码和仓库测试未修改；独立探针通过 `/tmp` Go overlay 加载，所有结果均在本轮重新执行。
+
+**判定：R11-P1-01 = FIXED；R13-P1-01 = PARTIALLY（P1，仍阻断）。新回归数：0。最终结论：未通过。** 两个原反例均已通过，但 R13 的同一二次裁剪问题在既有组合转义矩阵中仍有残留；这些残留在 `8a32232` 已失败，不计为本次新回归。
+
+沿用原口径：以生产 Runner 最终日志为验收出口，区分原问题残留与新回归，不以 helper PASS 或单个 fixture PASS 代替问题关闭。本轮未增加转义层级；补充边界检查复用前轮已有的五个秘密和七种表示，只将其放到 R13 已确认的完整 16 KiB stderr 边界。其他历史项不重开，环境限制不计代码缺陷。
+
+| 指定问题 | 判定 | 本轮实测 |
+| --- | --- | --- |
+| R11-P1-01：恰好填满保留上限后继续读取，截断标志未设置 | **FIXED** | 原字节 fixture 不变，16,383 / 16,384 两种受控分段在 HEAD 均 PASS，最终 excerpt 均为空；基线仍为 1 PASS / 1 FAIL。原 URI、普通截断、秘密内含 scheme 三例也均 PASS。 |
+| R13-P1-01：组合值未在标签扩展及二次裁剪前删净 | **PARTIALLY** | 新增的先加倍反斜杠、再转义单引号形式有效，原 conninfo 反例由 FAIL 转为 PASS；但既有 `BQ`、`double_conninfo_BQB`、`JSON_conninfo` 形式在相同边界仍泄漏。35 组边界检查由基线 20 PASS / 15 FAIL 改为 HEAD 23 PASS / 12 FAIL。 |
+
+### R11-P1-01：截断标志已与读取分段解耦
+
+**定位：** `backend/internal/dumper/dumper.go:455`–`:468`、`:506`；最终日志 `backend/internal/jobs/jobs.go:665`–`:667`。
+
+新 drainer 先按剩余空间计算 `keep`，上限之后继续读至 EOF；每次读取都在 `total += n` 后独立检查 `total > stderrKeep`。因此前一次读取恰好到达上限，也不会跳过下一次读取的截断标记。`wg.Wait()` 后才构造 excerpt，本轮未观察到 data race。
+
+原样重放 `TestReview13RunnerReadBoundary`：真实子进程写完第一段后用管道 `FIONREAD` 确认已读空，再写余下字节，不用固定 sleep 假定读取进度，不替换生产 drainer。
+
+| 原截断 fixture 的写入分段 | `8a32232` 最终日志 | `29816b1` 最终日志 |
+| --- | --- | --- |
+| 先排空 16,383 字节，再写余量 | PASS，空 excerpt | **PASS，空 excerpt** |
+| 先排空 16,384 字节，再写余量 | **FAIL**，16,384 字节 excerpt 尾部为 `password=CANARY-cut-` | **PASS，空 excerpt** |
+
+四次任务均 succeeded，artifact 和 manifest 均存在。原三个 R11 fixture 在本轮 HEAD 普通管道重放中也为 **3/3 PASS**；其中 URI 编码和秘密内含 scheme 的非空诊断仍被保留。完整、恰好 16 KiB 的原 conninfo 对照没有被误判为读取截断，仍输出非空的脱敏诊断。R11 的这个指定残留可以关闭。
+
+### R13-P1-01：原 conninfo 形式已修复，二次裁剪仍破坏其他既有组合形式
+
+**P1，原问题残留，不新增编号。定位：** `backend/internal/dumper/dumper.go:220`–`:229`、`:186`–`:189`、`:237`；最终日志 `backend/internal/jobs/jobs.go:667`。
+
+`:223` 新增的是 `Q(B(password))`，其中 B 为反斜杠加倍，Q 为单引号转义。这与生产 `QuoteConninfo` 的内部值一致。原 `TestReview13PostLabelTruncation` 的秘密和完整 16,384 字节输入未变：
+
+| 原 fixture | `8a32232` | `29816b1` |
+| --- | --- | --- |
+| `plain-text:` 等长前缀，完整 conninfo 口令位于尾部 | PASS | PASS，最终 excerpt 16,364 字节 |
+| `postgres://` 前缀，完整 conninfo 口令位于尾部 | **FAIL**，尾部含 `CANARY-SUFF...[truncated]` | **PASS**，最终 excerpt 16,368 字节，尾部为 `password='[REDACTED]'\n` |
+
+独立 helper 另用分离的反斜杠/引号、相邻的反斜杠/引号、连续三个反斜杠三种既有秘密，分别检查完整短行和原二次裁剪边界；三组均确认组合值已在 dumper 内删除，修复不只依赖 jobs 的最后一道脱敏。
+
+**残留在于删除表示的枚举仍不覆盖已经纳入前轮矩阵的全部组合，而二次裁剪仍直接切字节。** 新增 `Q(B(password))` 没有处理 `B(Q(password))`，也没有处理 conninfo 再经反斜杠加倍或 JSON 编码的表示。完整值可以由现有 `redact.Secrets` 删除，但 `sanitize` 先将 `postgres://` 扩展四字节，`:189` 随即切掉密码尾部；到达 jobs 时已不再能匹配完整秘密。
+
+最小残留复现沿用原 R13 的秘密，仅采用既有矩阵中的 `JSON_conninfo` 表示：
+
+```go
+secret := `prefix\segment'CANARY-SUFFIX`
+encoded, err := json.Marshal(pgclient.QuoteConninfo(secret))
+// 检查 err 后，按原 R13 fixture 填充，整条 stderr（含换行）恰好 16384 字节。
+value := "password=" + string(encoded)
+label := "postgres://"
+stderr := label + strings.Repeat("x", (16<<10)-len(label)-len(value)-1) + value + "\n"
+```
+
+真实 Runner 在 HEAD 仍 succeeded 并提交 artifact/manifest；最终 JSON 日志解码后的 `stderr_excerpt` 长度为 **16,398 字节**，尾部仍含 **`CANARY-SUFFI...[truncated]`**。这是实际日志泄漏，不是 helper 中间值，也没有发生读取保留截断。相同输入在 `8a32232` 得到同一泄漏结果；以回归引入前 `1fb0350` 的 dumper 实现作历史对照，则输出 `password="'[REDACTED]'"\n`，保密断言 PASS。
+
+为确定残留和新回归边界，`TestReview14ExistingFormsAtPostLabelBoundary` 将**原五个秘密 × 原七种表示**逐项放入同一 R13 边界，全部执行真实 Runner：
+
+| 版本 / 实现对照 | 35 组完整 stderr 边界结果 | 变化 |
+| --- | --- | --- |
+| 回归前 `1fb0350` 的 dumper | **35 PASS / 0 FAIL** | 组合秘密完整到达 jobs，可被删除。此处仅替换 dumper 作历史对照，不声称全树复审该版本。 |
+| 本轮基线 `8a32232` | **20 PASS / 15 FAIL** | 包含原 conninfo 三组及下列十二组。 |
+| HEAD `29816b1` | **23 PASS / 12 FAIL** | 三种同时含反斜杠和引号的 conninfo 组已修复；无 PASS → FAIL。 |
+
+十二组残留为四种含引号的既有秘密，各自的 `BQ`、`double_conninfo_BQB`、`JSON_conninfo` 三种表示。HEAD 的失败集合严格包含于基线失败集合。原短输入 Runner 矩阵仍为 **35/35 PASS**，直接 redactor 矩阵仍为 **35/35 PASS**；这里不重开短输入脱敏，而是确认 R13 已引入的二次裁剪仍会将这些先前安全的完整表示变为半个秘密。因此原 conninfo 分支判 FIXED，R13 总项判 **PARTIALLY**，本次新回归仍为 **0**。
+
+修复应保证最终字节裁剪不会发生在完整值脱敏之前，或在二次裁剪时丢弃可能含半个秘密的尾行。可复用既有组合脱敏能力，同时保留百分号编码删除；不要只继续增加有限的单个组合。应将上述真实 Runner 边界用例固化为回归断言。本轮只记录评审结果，未修改实现。
+
+### Race、工程检查及证据边界
+
+环境：`go1.26.0 linux/arm64`，`CGO_ENABLED=1`，`GOCACHE=/tmp/supabackup-review-go-cache`。全部 Go 验证使用 `-race -count=1`；全量工程检查不加载连接 fixture 或审计探针。
+
+| 检查 | 本轮结果 |
+| --- | --- |
+| 仓库 excerpt/URI 定向测试，加前轮 helper 与真实 dumper 探针 | **7 个顶层测试 PASS**；前轮 17 个独立子用例全部通过。 |
+| 新增组合形式的 dumper 内删除检查 | **1 个顶层测试 PASS，3 组 PASS**；每组覆盖完整短行和二次裁剪边界。 |
+| 原 R11 三例、受控分段、原 R13 fixture | HEAD 分别 **3/3、2/2、2/2 PASS**；基线仍复现指定的两个失败。 |
+| 原直接脱敏矩阵 / Runner 短输入矩阵 / marker 终止性 | **35/35、35/35、3/3 PASS**；marker 三组均返回且 succeeded。 |
+| 原转义矩阵放入 R13 边界 | 基线 **20 PASS / 15 FAIL**，HEAD **23 PASS / 12 FAIL**，回归前 dumper **35 PASS**；安全断言失败按 FAIL 记录。 |
+| 原生 `go test -race -json -count=1 -timeout=120s ./backend/...` | **退出 1：66 个顶层测试 PASS、5 SKIP、1 FAIL**；server 的 `httptest` 监听报 `socket: operation not permitted`。 |
+| 同一全量命令，加本轮 `router-overlay.json` | **退出 0：82 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；11 个有测试包通过、6 个无测试文件。 |
+| Race / diff 检查 | 所有运行均无 `DATA RACE` 报告；`git diff 8a32232..29816b1 --check` 及报告追加后的 `git diff --check` 通过。 |
+
+Router overlay 已核对，只替换测试 HTTP 传输为进程内 RoundTripper → 生产 Router → Recorder，保留路由、中间件、handler、CookieJar 和原断言；不声称原生 TCP/TLS 监听通过。Docker PostgreSQL 不可用导致五项 SKIP，环境限制不计新缺陷。Runner 探针执行真实 ParseURI、SQLite、OS 子进程与管道、age、文件提交及生产 JSON 日志；只有连接检查/依赖元数据与 dump/stderr 内容为受控 fixture，不声称真实 PostgreSQL 自然输出过这些口令。
+
+证据目录：`/tmp/supabackup-phase2-review14-evidence/`。`probes-head.jsonl` / `probes-baseline.jsonl` 保存原反例、分段及短输入矩阵；`extended-head.jsonl` / `extended-baseline.jsonl` / `extended-pre-r13.jsonl` 保存同一边界矩阵的新旧对照；`dumper-probes.jsonl` / `composed-helper.jsonl` 保存 dumper 检查；`race-native.jsonl` / `race-router.jsonl` 保存全量结果；`final-logs/` 保存完整生产 JSON 日志。`README.md` 提供复现命令，`.exit`、`summary.json`、`sources.sha256`、overlay、差异及探针源码供复核。
+
+**第 14 轮最终结论：未通过。R11-P1-01 = FIXED；R13-P1-01 = PARTIALLY；新回归 0。分段截断残留和原 conninfo 反例已修复，但既有 JSON/组合表示仍被同一二次裁剪切断并写入生产成功日志，P1 尚未关闭，不能判为“通过”或“修改后通过”。**

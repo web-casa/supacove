@@ -30,6 +30,7 @@ import (
 
 	"github.com/cloudfan/supabackup/backend/internal/agekey"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	"github.com/cloudfan/supabackup/backend/internal/redact"
 )
 
 // stderrKeep is how much sanitized stderr is RETAINED; the pipe is always
@@ -192,15 +193,17 @@ func excerptOf(retained []byte, retentionTruncated bool, password string) string
 }
 
 // removePasswordForms deletes every representation of the known password:
-// raw, backslash-doubled, quote-escaped, percent-encoded per byte, and
-// percent-encoded only for characters that URI syntax requires to be
-// encoded (round-11 review: libpq errors quote the percent-encoded URI
-// form, e.g. CANARY-P%40ss%2Fword).
+// redact.Secrets matches the secret with ANY number of backslashes before
+// each character (covering raw, quote-escaped, backslash-doubled, JSON and
+// all composed forms — round-14 review R13-P1-01: enumerated pairs kept
+// missing compositions), and percent-encoded forms are removed explicitly.
+// This runs BEFORE scheme labeling and the size bound, so no later step can
+// cut a secret.
 func removePasswordForms(s, pw string) string {
 	if pw == "" {
 		return s
 	}
-	forms := []string{pw}
+	s = redact.Secrets([]string{pw}, s)
 	var all, special strings.Builder
 	for i := 0; i < len(pw); i++ {
 		c := pw[i]
@@ -212,23 +215,8 @@ func removePasswordForms(s, pw string) string {
 			fmt.Fprintf(&special, "%%%02X", c)
 		}
 	}
-	forms = append(forms, all.String(), special.String())
-	// Composed form: backslash-doubling applied first, then quote-escaping —
-	// the order conninfo/JSON encoding actually produces (round-13 review
-	// R13-P1-01: the composed form was missing, and post-label truncation
-	// then defeated the jobs-layer full-value match).
-	forms = append(forms,
-		strings.ReplaceAll(pw, "\\", "\\\\"),
-		strings.ReplaceAll(pw, "'", "\\'"),
-		strings.ReplaceAll(strings.ReplaceAll(pw, "\\", "\\\\"), "'", "\\'"),
-	)
-	// The RAW password itself must be removed — skipping it (round-12
-	// review) left the primary form in the text.
-	for _, f := range forms {
-		if f != "" {
-			s = strings.ReplaceAll(s, f, "[REDACTED]")
-		}
-	}
+	s = strings.ReplaceAll(s, all.String(), "[REDACTED]")
+	s = strings.ReplaceAll(s, special.String(), "[REDACTED]")
 	return s
 }
 

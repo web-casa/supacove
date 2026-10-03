@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 )
 
 // TestExcerptOfReviewFixtures (round-11 review R11-P1-01): the three leak
@@ -73,4 +75,23 @@ func TestParseURIRoundTripStillValid(t *testing.T) {
 		t.Fatalf("expected percent encoding in %q", uri)
 	}
 	_ = url.QueryEscape
+}
+
+// TestExcerptOfJSONConninfoAtBoundary (round-14 review R13-P1-01 residue):
+// the JSON-encoded conninfo form (3+ consecutive backslashes) sits at the
+// tail of a full, un-truncated 16 KiB stderr — the exact residual leak.
+func TestExcerptOfJSONConninfoAtBoundary(t *testing.T) {
+	secret := `prefix\segment'CANARY-SUFFIX`
+	encoded := `"` + strings.ReplaceAll(strings.ReplaceAll(
+		pgclient.QuoteConninfo(secret), `\`, `\\`), `'`, `\'`) + `"`
+	value := "password=" + encoded
+	label := "postgres://"
+	stderr := label + strings.Repeat("x", (16<<10)-len(label)-len(value)-1) + value + "\n"
+
+	got := excerptOf([]byte(stderr), false, secret)
+	for _, s := range []string{"CANARY-SUFFIX", "CANARY"} {
+		if strings.Contains(got, s) {
+			t.Fatalf("JSON conninfo secret survived at boundary: %q", got)
+		}
+	}
 }
