@@ -91,3 +91,97 @@ Router overlay 仅把测试 HTTP 传输改为进程内 RoundTripper → 生产 R
 证据目录：`/tmp/supabackup-phase2-review7-evidence/`。`core.log` 保存重放的 stderr/API/恢复探针；`barrier.log`、`early-matrix.log` 保存早期取消及负对照；`review7.log` 保存新旧正则匹配和 basename/绝对路径对照；`negative-single-pg.log`、`negative-no-tamper.log`、`single-pg-trace.jsonl` 保存真实 SQL 与变异；`race-native.jsonl`、`race-router.jsonl` 保存完整门禁结果。`README.md`、`summary.json`、`sources.sha256`、overlay 和审计源码提供复现入口。所有结果均在当前 HEAD 新执行，未沿用上轮日志。
 
 本次 diff **未确认新回归**；原 R6-P2-01 的新回填问题已关闭。前端、契约生成、release image、双架构、真实 Supabase、联网 CI、TLS 实连和掉电实验不在本轮执行范围，不作为额外阻断。P1-02 原 canary 泄漏仍可复现，尚不能给出“通过”或“修改后通过”；**Phase 2 代码与工程门禁最终：未通过。**
+
+---
+
+## Phase 2 第 8 轮追加复审：b01ff7e 单点收敛
+
+评审日期：2026-10-03。实际 HEAD：`b01ff7eddca181d97e6ccb98c839d2dfa8fde891`。范围：`git diff 7f61813..b01ff7e`，仅复核 P1-02 残留与该 diff 新回归。沿用前文判定口径；不重开其他历史项，不把环境限制或额外强化作为新代码阻断。仓库仅追加本节，生产代码和仓库测试均未修改；审计探针通过 `/tmp` 中的 Go overlay 执行。
+
+**单项判定：P1-02 = PARTIALLY。quoted 正则的原根因已 FIXED，但同一项上一轮已确认的 API 组合转义泄漏仍 NOT_FIXED。新回归 1 项：R8-P1-01，已知秘密替换循环不终止。最终结论：未通过。** 本轮不把新回归合并为 P1-02 的 REGRESSED，也不以组合残留否认 quoted 分支确已修复。
+
+| 验收点 | 判定 / 实测 |
+| --- | --- |
+| `[^']` 抢先消耗反斜杠、导致合法 quoted password 提前结束 | **FIXED**。新正则完整匹配单引号、反斜杠与单引号组合、相邻转义、多单引号四组 `QuoteConninfo` 结果；plain 形式两组也通过。 |
+| 上一轮真实子进程 stderr → dumper → Runner 成功日志 | **PASS**。重跑 `TestReview5SuccessStderrLog`，普通秘密与 escaped quote 均无 canary；原 escaped 用例由 FAIL 转 PASS。 |
+| `TestRound7QuotedRedaction` 及已知秘密的 raw / quote-escaped / double-escaped 三种形式 | **PASS**。秘密为 `prefix'CANARY-SUFFIX` 时三种输入均完整替换。 |
+| 已有反斜杠与单引号组合秘密，经 `QuoteConninfo` → `RedactKnownSecrets` / API 422 | **NOT_FIXED**。重跑上一轮 `TestReview6RedactEscapes/combined` 与 `TestReview6APIEscapedCanary`，仍含 `CANARY-SUFFIX`。这是原验收残留，不是新增条件。 |
+| 新增迭代清扫的终止性 | **REGRESSED，R8-P1-01**。合法口令 `[REDACTED]`、`REDACTED` 在直接调用、生产 API handler、Runner 成功日志三条路径均卡住；旧实现的六组对照全部返回。 |
+
+### P1-02：正则已修，组合枚举仍不完整
+
+定位：`backend/internal/dumper/dumper.go:170`、`:171`、`:193`–`:198`；实际泄漏出口 `backend/internal/server/api_phase2.go:114`–`:115`。
+
+新普通字符分支排除了反斜杠，因此 `\'` 必须由 escaped-pair 分支整体消耗；这关闭了上一轮在 [Go leftmost-first 匹配语义](https://pkg.go.dev/regexp#Compile)下的原复现。下面代码块均表示**实际字符**，没有再套 `%q` 展示转义：
+
+```text
+input:       password='prefix\'CANARY-SUFFIX'
+old match:   password='prefix\'
+HEAD match:  password='prefix\'CANARY-SUFFIX'
+HEAD output: password=[REDACTED]'[REDACTED]'
+```
+
+对用户输入中的 `password='prefix\\'CANARY-SUFFIX'` 也单独按**两个实际反斜杠**运行了探针：匹配止于 `password='prefix\\'`，`sanitize` 输出仍含 `CANARY-SUFFIX`；直接 `RedactKnownSecrets` 可以删除完整值，但在 `sanitize` 之后调用已无法补救。按 [libpq 语法](https://www.postgresql.org/docs/18/libpq-connect.html#LIBPQ-CONNSTRING)，两个反斜杠表示一个字面反斜杠，其后的引号是结束引号；因此它不等同于上面的合法单层 escaped quote。若它来自日志二次转义，仍需在破坏完整秘密前清扫。此处记录输入层级边界，不把原有行为另计为本次正则新回归。`TestRound7QuotedRedaction:11` 的 raw string 实际只有一个反斜杠。
+
+组合残留的最小复现使用项目已有的 `pgclient.QuoteConninfo`：
+
+```go
+secret := `prefix\segment'CANARY-SUFFIX`
+msg := "password=" + pgclient.QuoteConninfo(secret)
+out := dumper.RedactKnownSecrets([]string{secret}, msg)
+// msg 和 out 均为：password='prefix\\segment\'CANARY-SUFFIX'
+```
+
+令 `Q` 表示给单引号加反斜杠，`B` 表示反斜杠加倍。本补丁枚举 `sec`、`Q(sec)`、`B(sec)`、`B(Q(sec))`，而生产 `QuoteConninfo` 在 `pgclient.go:208`–`:210` 生成的是 `Q(B(sec))`。二者顺序不可交换；新循环没有任何形式命中，重复执行也不能补齐。
+
+| 组合实测，秘密均为 `prefix\segment'CANARY-SUFFIX` | 结果 |
+| --- | --- |
+| `B(Q(sec))`：先转义引号、再加倍反斜杠 | PASS，本补丁新增覆盖。 |
+| `Q(B(sec))`：先加倍反斜杠、再转义引号，即原 `QuoteConninfo` 组合 | **FAIL，原残留。** |
+| `B(Q(B(sec)))`：上述 conninfo 再加倍反斜杠 | FAIL，补充边界；不另计缺陷。 |
+
+生产 `CreateDatabase` 的实际 422 响应仍为以下内容（此处是 JSON，因此反斜杠另有 JSON 转义）：
+
+```json
+{"code":"connection_test_failed","message":"connection test failed: password=[REDACTED]'prefix\\\\segment\\'CANARY-SUFFIX'"}
+```
+
+该响应由受控连接错误驱动生产 handler 生成，错误值来自生产 `QuoteConninfo`，未替换脱敏函数；不声称 PostgreSQL 本轮自然输出过口令。新测试只以不含原始反斜杠的秘密测试三种表示，故不能覆盖这个已有残留。修复应复用 `QuoteConninfo` 的组合顺序，并继续用此 API 422 探针验收。
+
+### R8-P1-01：迭代替换会重新命中占位符，导致请求 / worker 不返回
+
+**新回归，P1。** 定位：`backend/internal/dumper/dumper.go:196`–`:206`，尤其是 `:202`–`:203`。
+
+```go
+dumper.RedactKnownSecrets([]string{"[REDACTED]"}, "failure: [REDACTED]")
+dumper.RedactKnownSecrets([]string{"REDACTED"}, "failure: REDACTED")
+```
+
+第一例每次把 `[REDACTED]` 换成自身，仍无条件设置 `changed=true`，永远无法退出。第二例会继续替换刚插入标记内的 `REDACTED`，不断添加方括号，因此仅增加 `new == old` 检查也不足以解决。两种秘密经 `url.UserPassword` 正确编码后均通过生产 `ParseURI`，不是非法口令前提。
+
+| 路径，每条均测试上述两种秘密 | `7f61813` 对照 | `b01ff7e` |
+| --- | --- | --- |
+| 直接 `RedactKnownSecrets` | 两组返回，退出 0 | 两组超过 2 秒，堆栈位于替换循环。 |
+| `CreateDatabase` 连接失败 → 422 handler | 两组返回 422，退出 0 | 两组超过 2 秒，堆栈为 `api_phase2.go:114` → `RedactKnownSecrets`。 |
+| 真实子进程 stderr → dumper → Runner 成功日志 | 两组完成，退出 0 | 两组超过 2 秒，堆栈为 `jobs.go:666` → `RedactKnownSecrets`。 |
+
+对照只将 `dumper.go` 换为 `git show 7f61813:backend/internal/dumper/dumper.go` 的原文，其他调用链保持相同，因而能归因到本 diff。探针在独立、启用 race 的测试进程中运行；进入目标路径后由外部期限终止并通过 SIGQUIT 保存堆栈，没有把超时算成测试通过，也没有遗留无限运行的 goroutine。循环不检查上下文，受影响的请求或备份执行无法正常返回，属于可用性回归。
+
+修复应对原始输入做有界替换，避免再次扫描已插入的占位符；同时保留组合转义覆盖。补入占位符相等、包含关系以及真实 handler / Runner 路径的终止性断言。
+
+### 工程验证与最终结论
+
+运行环境：`go1.26.0 linux/arm64`，`GOCACHE=/tmp/supabackup-review-go-cache`。所有结果均在本 HEAD 新执行。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 原生 `go test -race -json -count=1 ./backend/...` | **退出 1**：server 的 `httptest` 监听被沙箱拒绝。已执行顶层测试 59 PASS、5 SKIP、1 FAIL；未发现 race 报告。`TestRound7QuotedRedaction`、跨进程 advisory lock 均通过。 |
+| 相同全量命令，增加上一轮已检查过的 `router-overlay.json` | **退出 0：75 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；10 个有测试包通过、6 个无测试文件；无 race 报告。 |
+| 定向 quoted / 已知秘密 / 成功日志 / API 探针 | 8 个顶层测试中 5 PASS、3 FAIL；失败为原组合秘密、组合矩阵、API 422。两个实际反斜杠用例的 PASS 仅表示观察完成，不表示无泄漏。 |
+| 新回归旧版 / HEAD 对照 | 旧版 6/6 返回，HEAD 6/6 超时，均已进入目标路径；堆栈证实阻塞在生产替换循环。 |
+
+Router overlay 只将测试 HTTP 传输改为进程内 Router → Recorder，保留生产路由、中间件、handler、CookieJar 和原断言；不声称原生监听或真实 TCP/TLS 已通过。API / Runner 定向探针替换网络元数据或连接错误，真实进程 stderr、生产脱敏、age、SQLite 与文件提交保持执行；合成 dump 不冒充真实数据库备份。本轮未重跑其他已关闭项的专项故障矩阵，也未把 Docker SKIP 或监听限制记为新代码缺陷。
+
+证据目录：`/tmp/supabackup-phase2-review8-evidence/`。`core.log`、`baseline-probes.log` 保存正则、转义组合与出口断言；`marker-summary.json`、`marker-*.log` 保存六组新旧终止性对照及堆栈；`race-native.jsonl`、`race-router.jsonl` 保存全量测试。`README.md`、`summary.json`、`sources.sha256`、overlay 和探针源码提供复现入口。`git diff --check` 通过。
+
+**第 8 轮最终结论：未通过。P1-02 = PARTIALLY（quoted 原根因已修，既有 API 组合转义泄漏未修）；新增 R8-P1-01 必须修复。当前补丁尚不能判为“通过”或“修改后通过”。**

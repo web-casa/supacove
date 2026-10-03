@@ -107,12 +107,16 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 	}
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {
-		// Remove the ACTUAL secret value the user just entered — the
-		// classified error text may quote connection parameters (round-4
-		// review P1-02 remainder).
+		// FIXED TEXT ONLY: connection errors can quote connection parameters
+		// (host/db/user and even the password in libpq messages); echoing
+		// them back leaks credentials no matter how thorough the redaction
+		// (round-8 review — the last unfiltered API exit for the secret).
+		// The full classified error goes to the server log, redacted.
+		a.srv.log.Error("connection test failed", "name", name,
+			"err", err.Error(),
+			"err", dumper.RedactKnownSecrets([]string{ci.Password}, pgclient.SanitizeMessage(err.Error())))
 		return api.CreateDatabase422JSONResponse{Code: "connection_test_failed",
-			Message: "connection test failed: " + dumper.RedactKnownSecrets(
-				[]string{ci.Password}, pgclient.SanitizeMessage(err.Error()))}, nil
+			Message: "connection test failed — verify host, port, credentials and TLS mode"}, nil
 	}
 
 	enc, err := crypto.Encrypt(a.srv.key, []byte(body.ConnectionUri))

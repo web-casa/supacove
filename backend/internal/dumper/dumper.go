@@ -186,6 +186,7 @@ func sanitize(s string) string {
 // backslash-doubled, and both composed (round-7 review P1-02: text can hold
 // e.g. `prefix\\'CANARY` while only `prefix\'CANARY` was removed before).
 func RedactKnownSecrets(secrets []string, s string) string {
+	const marker = "[REDACTED]"
 	for _, sec := range secrets {
 		if sec == "" {
 			continue
@@ -196,11 +197,17 @@ func RedactKnownSecrets(secrets []string, s string) string {
 		for {
 			changed := false
 			for _, form := range []string{sec, escapedQuote, doubled, doubleEscaped} {
-				if form == "" || !strings.Contains(s, form) {
+				// A form identical to the marker can never be removed —
+				// replacing would always "change" the text and loop forever
+				// (round-8 review R8-P1-01).
+				if form == "" || form == marker || !strings.Contains(s, form) {
 					continue
 				}
-				s = strings.ReplaceAll(s, form, "[REDACTED]")
-				changed = true
+				next := strings.ReplaceAll(s, form, marker)
+				if next != s {
+					s = next
+					changed = true
+				}
 			}
 			if !changed {
 				break
