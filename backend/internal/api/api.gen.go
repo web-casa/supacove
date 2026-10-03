@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +33,20 @@ const (
 	DatabaseCreatePlatformNeon     DatabaseCreatePlatform = "neon"
 	DatabaseCreatePlatformRailway  DatabaseCreatePlatform = "railway"
 	DatabaseCreatePlatformSupabase DatabaseCreatePlatform = "supabase"
+)
+
+// Defines values for DestinationPlatform.
+const (
+	DestinationPlatformB2 DestinationPlatform = "b2"
+	DestinationPlatformR2 DestinationPlatform = "r2"
+	DestinationPlatformS3 DestinationPlatform = "s3"
+)
+
+// Defines values for DestinationCreatePlatform.
+const (
+	DestinationCreatePlatformB2 DestinationCreatePlatform = "b2"
+	DestinationCreatePlatformR2 DestinationCreatePlatform = "r2"
+	DestinationCreatePlatformS3 DestinationCreatePlatform = "s3"
 )
 
 // Defines values for HealthStatusStatus.
@@ -124,6 +139,62 @@ type DatabaseList struct {
 	Databases []Database `json:"databases"`
 }
 
+// Destination defines model for Destination.
+type Destination struct {
+	Bucket         string              `json:"bucket"`
+	CreatedAt      int64               `json:"createdAt"`
+	Endpoint       *string             `json:"endpoint,omitempty"`
+	Id             int64               `json:"id"`
+	KeepDays       int                 `json:"keepDays"`
+	KeepRemote     int                 `json:"keepRemote"`
+	Name           string              `json:"name"`
+	Platform       DestinationPlatform `json:"platform"`
+	Prefix         *string             `json:"prefix,omitempty"`
+	Region         *string             `json:"region,omitempty"`
+	UpdatedAt      int64               `json:"updatedAt"`
+	VerifyReadback *bool               `json:"verifyReadback,omitempty"`
+}
+
+// DestinationPlatform defines model for Destination.Platform.
+type DestinationPlatform string
+
+// DestinationAssign defines model for DestinationAssign.
+type DestinationAssign struct {
+	// DestinationId 0/null clears the assignment.
+	DestinationId *int64 `json:"destinationId"`
+}
+
+// DestinationCreate defines model for DestinationCreate.
+type DestinationCreate struct {
+	AccessKey string `json:"accessKey"`
+	Bucket    string `json:"bucket"`
+
+	// Endpoint Required for r2/b2.
+	Endpoint       *string                    `json:"endpoint,omitempty"`
+	KeepDays       *int                       `json:"keepDays,omitempty"`
+	KeepRemote     *int                       `json:"keepRemote,omitempty"`
+	Name           string                     `json:"name"`
+	Platform       *DestinationCreatePlatform `json:"platform,omitempty"`
+	Prefix         *string                    `json:"prefix,omitempty"`
+	Region         *string                    `json:"region,omitempty"`
+	SecretKey      string                     `json:"secretKey"`
+	VerifyReadback *bool                      `json:"verifyReadback,omitempty"`
+}
+
+// DestinationCreatePlatform defines model for DestinationCreate.Platform.
+type DestinationCreatePlatform string
+
+// DestinationList defines model for DestinationList.
+type DestinationList struct {
+	Destinations []Destination `json:"destinations"`
+}
+
+// DownloadURL defines model for DownloadURL.
+type DownloadURL struct {
+	ExpiresAt int64  `json:"expiresAt"`
+	Url       string `json:"url"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	// Code Stable machine-readable error class.
@@ -154,6 +225,17 @@ type HealthStatusStatus string
 type LoginRequest struct {
 	Password string `json:"password"`
 	Username string `json:"username"`
+}
+
+// ReconcileReport defines model for ReconcileReport.
+type ReconcileReport struct {
+	DestinationId int64     `json:"destinationId"`
+	GeneratedAt   int64     `json:"generatedAt"`
+	Matched       int       `json:"matched"`
+	Missing       *[]string `json:"missing,omitempty"`
+	Orphaned      *[]string `json:"orphaned,omitempty"`
+	RemoteObjects int       `json:"remoteObjects"`
+	Uncommitted   *[]string `json:"uncommitted,omitempty"`
 }
 
 // Task defines model for Task.
@@ -225,6 +307,12 @@ type PostAuthLoginJSONRequestBody = LoginRequest
 // CreateDatabaseJSONRequestBody defines body for CreateDatabase for application/json ContentType.
 type CreateDatabaseJSONRequestBody = DatabaseCreate
 
+// AssignDatabaseDestinationJSONRequestBody defines body for AssignDatabaseDestination for application/json ContentType.
+type AssignDatabaseDestinationJSONRequestBody = DestinationAssign
+
+// CreateDestinationJSONRequestBody defines body for CreateDestination for application/json ContentType.
+type CreateDestinationJSONRequestBody = DestinationCreate
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// Set the age recipient (public key) used to encrypt backups.
@@ -260,6 +348,24 @@ type ServerInterface interface {
 	// Enqueue a backup job for this database (returns immediately).
 	// (POST /databases/{id}/backups)
 	TriggerBackup(w http.ResponseWriter, r *http.Request, id int64)
+	// Attach or clear the destination for a database.
+	// (PUT /databases/{id}/destination)
+	AssignDatabaseDestination(w http.ResponseWriter, r *http.Request, id int64)
+	// List storage destinations (no secrets).
+	// (GET /destinations)
+	ListDestinations(w http.ResponseWriter, r *http.Request)
+	// Create a destination after a live diagnostic test.
+	// (POST /destinations)
+	CreateDestination(w http.ResponseWriter, r *http.Request)
+	// Soft-delete a destination (refused while an upload is in flight).
+	// (DELETE /destinations/{id})
+	DeleteDestination(w http.ResponseWriter, r *http.Request, id int64)
+	// Read-only comparison of remote objects against job references.
+	// (POST /destinations/{id}/reconcile)
+	ReconcileDestination(w http.ResponseWriter, r *http.Request, id int64)
+	// Re-run the live diagnostic write/read/delete cycle.
+	// (POST /destinations/{id}/test)
+	TestDestination(w http.ResponseWriter, r *http.Request, id int64)
 	// Detailed runtime diagnostics. Requires authentication.
 	// (GET /health/details)
 	GetHealthDetails(w http.ResponseWriter, r *http.Request)
@@ -278,6 +384,12 @@ type ServerInterface interface {
 	// Request cancellation of a pending or running job.
 	// (POST /tasks/{id}/cancel)
 	CancelTask(w http.ResponseWriter, r *http.Request, id int64)
+	// Stream the local staged artifact (local-only backups).
+	// (GET /tasks/{id}/download)
+	DownloadTask(w http.ResponseWriter, r *http.Request, id int64)
+	// Presigned GET URL for a remotely committed backup (15 min).
+	// (GET /tasks/{id}/download-url)
+	GetTaskDownloadURL(w http.ResponseWriter, r *http.Request, id int64)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -350,6 +462,42 @@ func (_ Unimplemented) TriggerBackup(w http.ResponseWriter, r *http.Request, id 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Attach or clear the destination for a database.
+// (PUT /databases/{id}/destination)
+func (_ Unimplemented) AssignDatabaseDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List storage destinations (no secrets).
+// (GET /destinations)
+func (_ Unimplemented) ListDestinations(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Create a destination after a live diagnostic test.
+// (POST /destinations)
+func (_ Unimplemented) CreateDestination(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Soft-delete a destination (refused while an upload is in flight).
+// (DELETE /destinations/{id})
+func (_ Unimplemented) DeleteDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Read-only comparison of remote objects against job references.
+// (POST /destinations/{id}/reconcile)
+func (_ Unimplemented) ReconcileDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Re-run the live diagnostic write/read/delete cycle.
+// (POST /destinations/{id}/test)
+func (_ Unimplemented) TestDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Detailed runtime diagnostics. Requires authentication.
 // (GET /health/details)
 func (_ Unimplemented) GetHealthDetails(w http.ResponseWriter, r *http.Request) {
@@ -383,6 +531,18 @@ func (_ Unimplemented) GetTask(w http.ResponseWriter, r *http.Request, id int64)
 // Request cancellation of a pending or running job.
 // (POST /tasks/{id}/cancel)
 func (_ Unimplemented) CancelTask(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Stream the local staged artifact (local-only backups).
+// (GET /tasks/{id}/download)
+func (_ Unimplemented) DownloadTask(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Presigned GET URL for a remotely committed backup (15 min).
+// (GET /tasks/{id}/download-url)
+func (_ Unimplemented) GetTaskDownloadURL(w http.ResponseWriter, r *http.Request, id int64) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -666,6 +826,170 @@ func (siw *ServerInterfaceWrapper) TriggerBackup(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// AssignDatabaseDestination operation middleware
+func (siw *ServerInterfaceWrapper) AssignDatabaseDestination(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AssignDatabaseDestination(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDestinations operation middleware
+func (siw *ServerInterfaceWrapper) ListDestinations(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDestinations(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDestination operation middleware
+func (siw *ServerInterfaceWrapper) CreateDestination(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDestination(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDestination operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDestination(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDestination(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReconcileDestination operation middleware
+func (siw *ServerInterfaceWrapper) ReconcileDestination(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReconcileDestination(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestDestination operation middleware
+func (siw *ServerInterfaceWrapper) TestDestination(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestDestination(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealthDetails operation middleware
 func (siw *ServerInterfaceWrapper) GetHealthDetails(w http.ResponseWriter, r *http.Request) {
 
@@ -787,6 +1111,68 @@ func (siw *ServerInterfaceWrapper) CancelTask(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CancelTask(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DownloadTask operation middleware
+func (siw *ServerInterfaceWrapper) DownloadTask(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadTask(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTaskDownloadURL operation middleware
+func (siw *ServerInterfaceWrapper) GetTaskDownloadURL(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTaskDownloadURL(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -943,6 +1329,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/databases/{id}/backups", wrapper.TriggerBackup)
 	})
 	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/databases/{id}/destination", wrapper.AssignDatabaseDestination)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/destinations", wrapper.ListDestinations)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/destinations", wrapper.CreateDestination)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/destinations/{id}", wrapper.DeleteDestination)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/destinations/{id}/reconcile", wrapper.ReconcileDestination)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/destinations/{id}/test", wrapper.TestDestination)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/health/details", wrapper.GetHealthDetails)
 	})
 	r.Group(func(r chi.Router) {
@@ -959,6 +1363,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/tasks/{id}/cancel", wrapper.CancelTask)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tasks/{id}/download", wrapper.DownloadTask)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tasks/{id}/download-url", wrapper.GetTaskDownloadURL)
 	})
 
 	return r
@@ -1502,6 +1912,242 @@ func (response TriggerBackup500JSONResponse) VisitTriggerBackupResponse(w http.R
 	return json.NewEncoder(w).Encode(response)
 }
 
+type AssignDatabaseDestinationRequestObject struct {
+	Id   int64 `json:"id"`
+	Body *AssignDatabaseDestinationJSONRequestBody
+}
+
+type AssignDatabaseDestinationResponseObject interface {
+	VisitAssignDatabaseDestinationResponse(w http.ResponseWriter) error
+}
+
+type AssignDatabaseDestination200JSONResponse HealthStatus
+
+func (response AssignDatabaseDestination200JSONResponse) VisitAssignDatabaseDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AssignDatabaseDestination409JSONResponse Error
+
+func (response AssignDatabaseDestination409JSONResponse) VisitAssignDatabaseDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type AssignDatabaseDestination500JSONResponse struct{ InternalJSONResponse }
+
+func (response AssignDatabaseDestination500JSONResponse) VisitAssignDatabaseDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListDestinationsRequestObject struct {
+}
+
+type ListDestinationsResponseObject interface {
+	VisitListDestinationsResponse(w http.ResponseWriter) error
+}
+
+type ListDestinations200JSONResponse DestinationList
+
+func (response ListDestinations200JSONResponse) VisitListDestinationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListDestinations500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListDestinations500JSONResponse) VisitListDestinationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDestinationRequestObject struct {
+	Body *CreateDestinationJSONRequestBody
+}
+
+type CreateDestinationResponseObject interface {
+	VisitCreateDestinationResponse(w http.ResponseWriter) error
+}
+
+type CreateDestination201JSONResponse Destination
+
+func (response CreateDestination201JSONResponse) VisitCreateDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDestination400JSONResponse Error
+
+func (response CreateDestination400JSONResponse) VisitCreateDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDestination409JSONResponse Error
+
+func (response CreateDestination409JSONResponse) VisitCreateDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDestination422JSONResponse Error
+
+func (response CreateDestination422JSONResponse) VisitCreateDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateDestination500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateDestination500JSONResponse) VisitCreateDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteDestinationRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DeleteDestinationResponseObject interface {
+	VisitDeleteDestinationResponse(w http.ResponseWriter) error
+}
+
+type DeleteDestination204Response struct {
+}
+
+func (response DeleteDestination204Response) VisitDeleteDestinationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteDestination404JSONResponse Error
+
+func (response DeleteDestination404JSONResponse) VisitDeleteDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteDestination409JSONResponse Error
+
+func (response DeleteDestination409JSONResponse) VisitDeleteDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteDestination500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteDestination500JSONResponse) VisitDeleteDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReconcileDestinationRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type ReconcileDestinationResponseObject interface {
+	VisitReconcileDestinationResponse(w http.ResponseWriter) error
+}
+
+type ReconcileDestination200JSONResponse ReconcileReport
+
+func (response ReconcileDestination200JSONResponse) VisitReconcileDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReconcileDestination404JSONResponse Error
+
+func (response ReconcileDestination404JSONResponse) VisitReconcileDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ReconcileDestination500JSONResponse struct{ InternalJSONResponse }
+
+func (response ReconcileDestination500JSONResponse) VisitReconcileDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestDestinationRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type TestDestinationResponseObject interface {
+	VisitTestDestinationResponse(w http.ResponseWriter) error
+}
+
+type TestDestination200JSONResponse HealthStatus
+
+func (response TestDestination200JSONResponse) VisitTestDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestDestination404JSONResponse Error
+
+func (response TestDestination404JSONResponse) VisitTestDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestDestination422JSONResponse Error
+
+func (response TestDestination422JSONResponse) VisitTestDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestDestination500JSONResponse struct{ InternalJSONResponse }
+
+func (response TestDestination500JSONResponse) VisitTestDestinationResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type GetHealthDetailsRequestObject struct {
 }
 
@@ -1672,6 +2318,95 @@ func (response CancelTask500JSONResponse) VisitCancelTaskResponse(w http.Respons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type DownloadTaskRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DownloadTaskResponseObject interface {
+	VisitDownloadTaskResponse(w http.ResponseWriter) error
+}
+
+type DownloadTask200ApplicationoctetStreamResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response DownloadTask200ApplicationoctetStreamResponse) VisitDownloadTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type DownloadTask404JSONResponse Error
+
+func (response DownloadTask404JSONResponse) VisitDownloadTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DownloadTask500JSONResponse struct{ InternalJSONResponse }
+
+func (response DownloadTask500JSONResponse) VisitDownloadTaskResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTaskDownloadURLRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type GetTaskDownloadURLResponseObject interface {
+	VisitGetTaskDownloadURLResponse(w http.ResponseWriter) error
+}
+
+type GetTaskDownloadURL200JSONResponse DownloadURL
+
+func (response GetTaskDownloadURL200JSONResponse) VisitGetTaskDownloadURLResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTaskDownloadURL404JSONResponse Error
+
+func (response GetTaskDownloadURL404JSONResponse) VisitGetTaskDownloadURLResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTaskDownloadURL409JSONResponse Error
+
+func (response GetTaskDownloadURL409JSONResponse) VisitGetTaskDownloadURLResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetTaskDownloadURL500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetTaskDownloadURL500JSONResponse) VisitGetTaskDownloadURLResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Set the age recipient (public key) used to encrypt backups.
@@ -1707,6 +2442,24 @@ type StrictServerInterface interface {
 	// Enqueue a backup job for this database (returns immediately).
 	// (POST /databases/{id}/backups)
 	TriggerBackup(ctx context.Context, request TriggerBackupRequestObject) (TriggerBackupResponseObject, error)
+	// Attach or clear the destination for a database.
+	// (PUT /databases/{id}/destination)
+	AssignDatabaseDestination(ctx context.Context, request AssignDatabaseDestinationRequestObject) (AssignDatabaseDestinationResponseObject, error)
+	// List storage destinations (no secrets).
+	// (GET /destinations)
+	ListDestinations(ctx context.Context, request ListDestinationsRequestObject) (ListDestinationsResponseObject, error)
+	// Create a destination after a live diagnostic test.
+	// (POST /destinations)
+	CreateDestination(ctx context.Context, request CreateDestinationRequestObject) (CreateDestinationResponseObject, error)
+	// Soft-delete a destination (refused while an upload is in flight).
+	// (DELETE /destinations/{id})
+	DeleteDestination(ctx context.Context, request DeleteDestinationRequestObject) (DeleteDestinationResponseObject, error)
+	// Read-only comparison of remote objects against job references.
+	// (POST /destinations/{id}/reconcile)
+	ReconcileDestination(ctx context.Context, request ReconcileDestinationRequestObject) (ReconcileDestinationResponseObject, error)
+	// Re-run the live diagnostic write/read/delete cycle.
+	// (POST /destinations/{id}/test)
+	TestDestination(ctx context.Context, request TestDestinationRequestObject) (TestDestinationResponseObject, error)
 	// Detailed runtime diagnostics. Requires authentication.
 	// (GET /health/details)
 	GetHealthDetails(ctx context.Context, request GetHealthDetailsRequestObject) (GetHealthDetailsResponseObject, error)
@@ -1725,6 +2478,12 @@ type StrictServerInterface interface {
 	// Request cancellation of a pending or running job.
 	// (POST /tasks/{id}/cancel)
 	CancelTask(ctx context.Context, request CancelTaskRequestObject) (CancelTaskResponseObject, error)
+	// Stream the local staged artifact (local-only backups).
+	// (GET /tasks/{id}/download)
+	DownloadTask(ctx context.Context, request DownloadTaskRequestObject) (DownloadTaskResponseObject, error)
+	// Presigned GET URL for a remotely committed backup (15 min).
+	// (GET /tasks/{id}/download-url)
+	GetTaskDownloadURL(ctx context.Context, request GetTaskDownloadURLRequestObject) (GetTaskDownloadURLResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -2056,6 +2815,172 @@ func (sh *strictHandler) TriggerBackup(w http.ResponseWriter, r *http.Request, i
 	}
 }
 
+// AssignDatabaseDestination operation middleware
+func (sh *strictHandler) AssignDatabaseDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	var request AssignDatabaseDestinationRequestObject
+
+	request.Id = id
+
+	var body AssignDatabaseDestinationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AssignDatabaseDestination(ctx, request.(AssignDatabaseDestinationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AssignDatabaseDestination")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AssignDatabaseDestinationResponseObject); ok {
+		if err := validResponse.VisitAssignDatabaseDestinationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListDestinations operation middleware
+func (sh *strictHandler) ListDestinations(w http.ResponseWriter, r *http.Request) {
+	var request ListDestinationsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListDestinations(ctx, request.(ListDestinationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListDestinations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListDestinationsResponseObject); ok {
+		if err := validResponse.VisitListDestinationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateDestination operation middleware
+func (sh *strictHandler) CreateDestination(w http.ResponseWriter, r *http.Request) {
+	var request CreateDestinationRequestObject
+
+	var body CreateDestinationJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateDestination(ctx, request.(CreateDestinationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateDestination")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateDestinationResponseObject); ok {
+		if err := validResponse.VisitCreateDestinationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteDestination operation middleware
+func (sh *strictHandler) DeleteDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DeleteDestinationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteDestination(ctx, request.(DeleteDestinationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteDestination")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteDestinationResponseObject); ok {
+		if err := validResponse.VisitDeleteDestinationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReconcileDestination operation middleware
+func (sh *strictHandler) ReconcileDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	var request ReconcileDestinationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReconcileDestination(ctx, request.(ReconcileDestinationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReconcileDestination")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReconcileDestinationResponseObject); ok {
+		if err := validResponse.VisitReconcileDestinationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestDestination operation middleware
+func (sh *strictHandler) TestDestination(w http.ResponseWriter, r *http.Request, id int64) {
+	var request TestDestinationRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestDestination(ctx, request.(TestDestinationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestDestination")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestDestinationResponseObject); ok {
+		if err := validResponse.VisitTestDestinationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetHealthDetails operation middleware
 func (sh *strictHandler) GetHealthDetails(w http.ResponseWriter, r *http.Request) {
 	var request GetHealthDetailsRequestObject
@@ -2197,6 +3122,58 @@ func (sh *strictHandler) CancelTask(w http.ResponseWriter, r *http.Request, id i
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CancelTaskResponseObject); ok {
 		if err := validResponse.VisitCancelTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DownloadTask operation middleware
+func (sh *strictHandler) DownloadTask(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DownloadTaskRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DownloadTask(ctx, request.(DownloadTaskRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DownloadTask")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DownloadTaskResponseObject); ok {
+		if err := validResponse.VisitDownloadTaskResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetTaskDownloadURL operation middleware
+func (sh *strictHandler) GetTaskDownloadURL(w http.ResponseWriter, r *http.Request, id int64) {
+	var request GetTaskDownloadURLRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetTaskDownloadURL(ctx, request.(GetTaskDownloadURLRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetTaskDownloadURL")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetTaskDownloadURLResponseObject); ok {
+		if err := validResponse.VisitGetTaskDownloadURLResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -34,6 +34,9 @@ type Config struct {
 	BootstrapTokenTTL time.Duration
 	// SessionTTL is the fixed session lifetime.
 	SessionTTL time.Duration
+	// LocalKeep is how many local staged artifacts per database are kept
+	// (protocol D local half; newest always protected).
+	LocalKeep int
 	// StagingQuotaBytes is the hard per-run cap on ciphertext written to the
 	// staging area (0 = only the filesystem free-space floor applies).
 	StagingQuotaBytes int64
@@ -51,6 +54,14 @@ type Config struct {
 
 // Load reads configuration from the environment with defaults.
 func Load() (*Config, error) {
+	localKeep := 5
+	if v := os.Getenv("SB_LOCAL_KEEP"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid SB_LOCAL_KEEP %q: must be a positive integer", v)
+		}
+		localKeep = n
+	}
 	quota := int64(0)
 	if v := os.Getenv("SB_STAGING_QUOTA_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -61,6 +72,7 @@ func Load() (*Config, error) {
 	}
 	c := &Config{
 		DataDir:           envOr("SB_DATA_DIR", "./data"),
+		LocalKeep:         localKeep,
 		StagingQuotaBytes: quota,
 		Addr:              envOr("SB_ADDR", ":8080"),
 		SecretFile:        os.Getenv("SB_SECRET_FILE"),

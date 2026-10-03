@@ -18,6 +18,10 @@ type Task struct {
 	ArtifactSize    int64  `json:"artifactSize,omitempty"`
 	HasManifest     bool   `json:"hasManifest"`
 	CancelRequested bool   `json:"cancelRequested"`
+	RemoteState     string `json:"remoteState,omitempty"`
+	RemoteObjectKey string `json:"-"`
+	ArtifactPath    string `json:"-"`
+	DestinationID   int64  `json:"-"`
 	ScheduledAt     int64  `json:"scheduledAt"`
 	StartedAt       *int64 `json:"startedAt,omitempty"`
 	FinishedAt      *int64 `json:"finishedAt,omitempty"`
@@ -32,11 +36,18 @@ func scanTask(scan func(dest ...any) error) (*Task, error) {
 	var errMsg, sha, cls string
 	var size int64
 	var hasManifestPath string
+	var destinationID sql.NullInt64
+	var remoteState, remoteKey string
 	if err := scan(&t.ID, &t.DatabaseID, &t.Status, &t.Attempt, &t.CancelRequested,
 		&cls, &errMsg, &sha, &size, &hasManifestPath,
-		&t.ScheduledAt, &startedAt, &finishedAt); err != nil {
+		&t.ScheduledAt, &startedAt, &finishedAt, &destinationID, &remoteState, &remoteKey); err != nil {
 		return nil, err
 	}
+	if destinationID.Valid {
+		t.DestinationID = destinationID.Int64
+	}
+	t.RemoteState = remoteState
+	t.RemoteObjectKey = remoteKey
 	t.ErrorClass = cls
 	t.ErrorMessage = errMsg
 	t.ArtifactSHA256 = sha
@@ -55,7 +66,7 @@ func scanTask(scan func(dest ...any) error) (*Task, error) {
 
 const taskColumns = `id, database_id, status, attempt, cancel_requested,
 	error_class, error_message, artifact_sha256, artifact_size, manifest_path,
-	scheduled_at, started_at, finished_at`
+	scheduled_at, started_at, finished_at, destination_id, remote_state, remote_object_key`
 
 // GetTask loads one job.
 func GetTask(dbh *sql.DB, id int64) (*Task, error) {

@@ -207,7 +207,8 @@ func runServe() error {
 	runner := jobs.NewRunner(store, key, stg.Dir,
 		func(ctx context.Context) (string, error) { return srv.RecipientFor(ctx) }, log)
 	runner.SetQuota(cfg.StagingQuotaBytes)
-	srv.SetRunner(runner)
+	runner.SetLocalKeep(cfg.LocalKeep)
+	srv.SetRunner(runner, stg.Dir)
 	if n, err := runner.RecoverInterrupted(ctx); err != nil {
 		return fmt.Errorf("recover interrupted jobs: %w", err)
 	} else if n > 0 {

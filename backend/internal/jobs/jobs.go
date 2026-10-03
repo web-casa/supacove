@@ -23,6 +23,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/cloudfan/supabackup/backend/internal/storage"
 )
 
 // Error classes (dev-plan seven classes). Stored verbatim in jobs.error_class.
@@ -57,36 +58,41 @@ type Runner struct {
 	store      *db.Store
 	authDB     *sql.DB // same SQLite handle; convenience alias
 	stagingDir string
+	localKeep  int
 	cfg        dumper.Config
 	key        []byte // master secret (credentials decryption)
 	recipient  func(ctx context.Context) (string, error)
 	log        *slog.Logger
 
-	mu         sync.Mutex
-	cancelFns  map[int64]context.CancelFunc
-	perDB      map[int64]bool // database currently being processed
-	wake       chan struct{}
-	lifeCtx    context.Context
-	lifeCancel context.CancelFunc
-	wg         sync.WaitGroup
-	startOnce  sync.Once
-	stopOnce   sync.Once
-	stopDone   chan struct{}
+	mu             sync.Mutex
+	cancelFns      map[int64]context.CancelFunc
+	perDB          map[int64]bool // database currently being processed
+	wake           chan struct{}
+	lifeCtx        context.Context
+	lifeCancel     context.CancelFunc
+	wg             sync.WaitGroup
+	startOnce      sync.Once
+	stopOnce       sync.Once
+	stopDone       chan struct{}
+	destMu         sync.Mutex
+	destBackends   map[int64]storage.Backend
+	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error)
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
 	return &Runner{
-		store:      store,
-		authDB:     store.DB,
-		stagingDir: stagingDir,
-		cfg:        dumper.Config{StagingDir: stagingDir},
-		key:        key,
-		recipient:  recipient,
-		log:        log,
-		cancelFns:  make(map[int64]context.CancelFunc),
-		perDB:      make(map[int64]bool),
-		wake:       make(chan struct{}, 1),
-		stopDone:   make(chan struct{}),
+		store:        store,
+		authDB:       store.DB,
+		stagingDir:   stagingDir,
+		cfg:          dumper.Config{StagingDir: stagingDir},
+		key:          key,
+		recipient:    recipient,
+		log:          log,
+		cancelFns:    make(map[int64]context.CancelFunc),
+		perDB:        make(map[int64]bool),
+		wake:         make(chan struct{}, 1),
+		stopDone:     make(chan struct{}),
+		destBackends: make(map[int64]storage.Backend),
 	}
 }
 
@@ -284,6 +290,10 @@ func (r *Runner) SetClientOverride(dir string) { r.cfg.BinDirOverride = dir }
 // SetQuota wires the staging hard budget into the dumper (round-1 review
 // P1-13: the quota must actually reach the kernel, not just the config).
 func (r *Runner) SetQuota(bytes int64) { r.cfg.QuotaBytes = bytes }
+
+// SetLocalKeep configures how many local staged artifacts per database are
+// retained (protocol D local half; newest is always protected).
+func (r *Runner) SetLocalKeep(n int) { r.localKeep = clampKeep(n, 1) }
 
 // Stop terminates the worker.
 func (r *Runner) Stop() {
@@ -630,7 +640,27 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		return
 	}
 
-	// 5) Success record — the only path that reaches 'succeeded'. The final
+	// 5) Remote upload phase (protocol C) — when a destination is assigned.
+	// Success of this phase is recorded via remote_state; failure fails the
+	// job with class storage_upload while keeping the local artifact and the
+	// upload intent (never re-dump).
+	upload := &uploadedArtifact{
+		artifactPath:  result.ArtifactPath,
+		artifactSize:  result.SizeBytes,
+		sha256Hex:     result.SHA256,
+		manifestPath:  manifestPath,
+		manifestBytes: mb,
+	}
+	if err := r.uploadAndCommitRemote(ctx, jobID, dbID, upload); err != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
+		r.fail(jobID, ClassStorageUp, redact(err.Error()))
+		return
+	}
+
+	// 6) Success record — the only path that reaches 'succeeded'. The final
 	// update is conditional (cancellation arbitration) and checks
 	// RowsAffected (round-1 reviews P1-12/P1-04).
 	successSQL := `
@@ -665,6 +695,17 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	r.log.Info("backup succeeded", "job", jobID, "database", name,
 		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
 		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
+
+	// 7) Retention (protocol D, beta simple form) — runs only after a
+	// successful commit; failures are logged and never affect the job.
+	r.pruneLocalArtifacts(ctx, dbID, r.localKeep)
+	if dest, derr := r.DestinationForDatabase(ctx, dbID); derr == nil && dest != nil {
+		if backend, berr := r.BuildBackend(ctx, dest); berr == nil {
+			r.runRemoteRetention(ctx, dest, backend, dbID)
+		} else {
+			r.log.Error("retention: build backend failed", "err", berr)
+		}
+	}
 }
 
 func (r *Runner) loadDatabase(ctx context.Context, dbID int64) (name, platform, envTag, connEnc string, err error) {

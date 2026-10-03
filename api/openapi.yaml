@@ -427,6 +427,218 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/Internal"
+  /destinations:
+    get:
+      operationId: listDestinations
+      summary: List storage destinations (no secrets).
+      responses:
+        "200":
+          description: Destinations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DestinationList"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createDestination
+      summary: Create a destination after a live diagnostic test.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationCreate"
+      responses:
+        "201":
+          description: Created (diagnostic test passed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Destination"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Diagnostic test failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations/{id}:
+    delete:
+      operationId: deleteDestination
+      summary: Soft-delete a destination (refused while an upload is in flight).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Upload in flight.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations/{id}/test:
+    post:
+      operationId: testDestination
+      summary: Re-run the live diagnostic write/read/delete cycle.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Diagnostic passed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Diagnostic failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations/{id}/reconcile:
+    post:
+      operationId: reconcileDestination
+      summary: Read-only comparison of remote objects against job references.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Reconciliation report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileReport"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases/{id}/destination:
+    put:
+      operationId: assignDatabaseDestination
+      summary: Attach or clear the destination for a database.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationAssign"
+      responses:
+        "200":
+          description: Assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "409":
+          description: Database not found or a job is active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/download-url:
+    get:
+      operationId: getTaskDownloadURL
+      summary: Presigned GET URL for a remotely committed backup (15 min).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadURL"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Not remotely committed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/download:
+    get:
+      operationId: downloadTask
+      summary: Stream the local staged artifact (local-only backups).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The ciphertext bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404":
+          description: Unknown id or artifact gone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
   /auth/me:
     get:
       operationId: getAuthMe
@@ -561,6 +773,128 @@ components:
           minLength: 12
           maxLength: 128
           format: password
+    Destination:
+      type: object
+      required: [id, name, platform, bucket, keepRemote, keepDays, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [s3, r2, b2]
+        endpoint:
+          type: string
+        region:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        verifyReadback:
+          type: boolean
+        keepRemote:
+          type: integer
+        keepDays:
+          type: integer
+        createdAt:
+          type: integer
+          format: int64
+        updatedAt:
+          type: integer
+          format: int64
+    DestinationList:
+      type: object
+      required: [destinations]
+      properties:
+        destinations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Destination"
+    DestinationCreate:
+      type: object
+      required: [name, bucket, accessKey, secretKey]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        platform:
+          type: string
+          enum: [s3, r2, b2]
+          default: s3
+        endpoint:
+          type: string
+          description: Required for r2/b2.
+        region:
+          type: string
+        bucket:
+          type: string
+          minLength: 3
+          maxLength: 63
+        prefix:
+          type: string
+        accessKey:
+          type: string
+          minLength: 3
+        secretKey:
+          type: string
+          minLength: 8
+          format: password
+        verifyReadback:
+          type: boolean
+          default: true
+        keepRemote:
+          type: integer
+          default: 10
+          minimum: 1
+        keepDays:
+          type: integer
+          default: 0
+          minimum: 0
+    DestinationAssign:
+      type: object
+      properties:
+        destinationId:
+          type: integer
+          format: int64
+          nullable: true
+          description: 0/null clears the assignment.
+    ReconcileReport:
+      type: object
+      required: [destinationId, generatedAt, remoteObjects, matched]
+      properties:
+        destinationId:
+          type: integer
+          format: int64
+        generatedAt:
+          type: integer
+          format: int64
+        remoteObjects:
+          type: integer
+        matched:
+          type: integer
+        orphaned:
+          type: array
+          items: { type: string }
+        missing:
+          type: array
+          items: { type: string }
+        uncommitted:
+          type: array
+          items: { type: string }
+    DownloadURL:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type: integer
+          format: int64
     AgeStatus:
       type: object
       required: [configured]

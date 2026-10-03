@@ -65,15 +65,16 @@ type BuildInfo struct {
 }
 
 type Server struct {
-	store   *db.Store
-	auth    *auth.Store
-	cfg     *config.Config
-	key     []byte // application master secret; CSRF tokens are HMAC-bound to sessions with it
-	lim     *limiter.Limiter
-	log     *slog.Logger
-	build   BuildInfo
-	started time.Time
-	runner  *jobs.Runner // backup kernel (Phase 2); may be nil in pure-API tests
+	store      *db.Store
+	auth       *auth.Store
+	cfg        *config.Config
+	key        []byte // application master secret; CSRF tokens are HMAC-bound to sessions with it
+	lim        *limiter.Limiter
+	log        *slog.Logger
+	build      BuildInfo
+	started    time.Time
+	runner     *jobs.Runner // backup kernel (Phase 2); may be nil in pure-API tests
+	stagingDir string
 }
 
 // recipientFor reads the configured age recipient from settings (protocol B).
@@ -118,8 +119,12 @@ func (s *Server) storeRecipient(ctx context.Context, recipient string) error {
 }
 
 // SetRunner attaches the backup kernel after construction (main.go owns the
-// lifecycle: migrations → runner → server).
-func (s *Server) SetRunner(r *jobs.Runner) { s.runner = r }
+// lifecycle: migrations → runner → server) and records the staging directory
+// for local downloads.
+func (s *Server) SetRunner(r *jobs.Runner, stagingDir string) {
+	s.runner = r
+	s.stagingDir = stagingDir
+}
 
 func (s *Server) Runner() *jobs.Runner { return s.runner }
 
