@@ -182,37 +182,29 @@ func sanitize(s string) string {
 }
 
 // RedactKnownSecrets removes every occurrence of the actual secret values
-// from arbitrary error text, across escape compositions: raw, quote-escaped,
-// backslash-doubled, and both composed (round-7 review P1-02: text can hold
-// e.g. `prefix\\'CANARY` while only `prefix\'CANARY` was removed before).
+// from arbitrary error text. Each character of the secret may appear in the
+// text with up to two levels of backslash escaping (raw, \' and \\' — the
+// compositions conninfo quoting and JSON encoding actually produce), so the
+// match pattern allows optional backslashes before every character. The
+// whole span is removed in ONE regex pass; form-enumeration loops had
+// termination edge cases (round-8 review R8-P1-01).
 func RedactKnownSecrets(secrets []string, s string) string {
-	const marker = "[REDACTED]"
 	for _, sec := range secrets {
 		if sec == "" {
 			continue
 		}
-		escapedQuote := strings.ReplaceAll(sec, "'", "\\'")
-		doubled := strings.ReplaceAll(sec, "\\", "\\\\")
-		doubleEscaped := strings.ReplaceAll(escapedQuote, "\\", "\\\\")
-		for {
-			changed := false
-			for _, form := range []string{sec, escapedQuote, doubled, doubleEscaped} {
-				// A form identical to the marker can never be removed —
-				// replacing would always "change" the text and loop forever
-				// (round-8 review R8-P1-01).
-				if form == "" || form == marker || !strings.Contains(s, form) {
-					continue
-				}
-				next := strings.ReplaceAll(s, form, marker)
-				if next != s {
-					s = next
-					changed = true
-				}
-			}
-			if !changed {
-				break
-			}
+		var pattern strings.Builder
+		pattern.WriteString(`\\{0,2}`)
+		for _, r := range sec {
+			pattern.WriteString(`(?:\\{0,2}`)
+			pattern.WriteString(regexp.QuoteMeta(string(r)))
+			pattern.WriteString(`)`)
 		}
+		re, err := regexp.Compile(pattern.String())
+		if err != nil {
+			continue
+		}
+		s = re.ReplaceAllLiteralString(s, "[REDACTED]")
 	}
 	return s
 }

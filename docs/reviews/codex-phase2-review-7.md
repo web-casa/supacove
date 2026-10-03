@@ -185,3 +185,91 @@ Router overlay 只将测试 HTTP 传输改为进程内 Router → Recorder，保
 证据目录：`/tmp/supabackup-phase2-review8-evidence/`。`core.log`、`baseline-probes.log` 保存正则、转义组合与出口断言；`marker-summary.json`、`marker-*.log` 保存六组新旧终止性对照及堆栈；`race-native.jsonl`、`race-router.jsonl` 保存全量测试。`README.md`、`summary.json`、`sources.sha256`、overlay 和探针源码提供复现入口。`git diff --check` 通过。
 
 **第 8 轮最终结论：未通过。P1-02 = PARTIALLY（quoted 原根因已修，既有 API 组合转义泄漏未修）；新增 R8-P1-01 必须修复。当前补丁尚不能判为“通过”或“修改后通过”。**
+
+---
+
+## Phase 2 第 9 轮追加复审：f44a3f7 最终单点确认
+
+评审日期：2026-10-03。实际 HEAD：`f44a3f7bc70cb7329bfa4dc70519f7e4ec6c01bd`。范围：`git diff b01ff7e..f44a3f7`，复核上一轮两个 OPEN 及本次差异引入的新回归。使用 `code-reviewer` 技能；仓库仅追加本节，生产代码和仓库测试均未修改。以下定向实测使用 `/tmp` 中的 Go overlay，全部在本轮重新编译、执行。
+
+**两项判定：R8-P1-01 = PARTIALLY；P1-02（API 422 组合转义泄漏）= FIXED。新增回归 1 项：R9-P1-01，连接失败日志泄漏口令。最终结论：未通过。**
+
+沿用原口径：FIXED 表示指定问题本身关闭。API 回传与新增日志出口分别判断，不以日志回归否认固定 422 已关闭原客户端泄漏；也不把原有转义枚举不足重复编号。外部资源、沙箱监听限制和 Docker 跳过不算代码缺陷。
+
+| 指定 OPEN | 判定 | 关闭情况 |
+| --- | --- | --- |
+| **R8-P1-01：已知秘密替换循环不终止** | **PARTIALLY** | `secret="[REDACTED]"` 在直接调用、API、Runner 三条路径均恢复返回；`secret="REDACTED"` 在同样三条路径仍无限替换。上一轮已明确包含两种秘密，问题尚未关闭。 |
+| **P1-02：API 422 组合转义泄漏** | **FIXED** | 普通值、单引号、反斜杠与单引号组合、conninfo 再次转义四组错误，实际响应均为相同固定 422，无 canary。原组合场景在 `b01ff7e` 仍泄漏、在 HEAD 已消除。日志另列新回归；特殊口令导致无法返回归属 R8-P1-01。 |
+
+### R8-P1-01：相等场景已修，子串场景仍阻塞请求和 worker
+
+定位：`backend/internal/dumper/dumper.go:197`–`:213`，尤其是 `:203`、`:206`–`:209`；调用出口为 `backend/internal/server/api_phase2.go:117`、`backend/internal/jobs/jobs.go:666`。
+
+跳过 `form == marker` 能解决替换为自身的场景，但 `REDACTED` 是 `[REDACTED]` 的真子串。每次替换都会再次命中新插入的标记，且文本确实变化，因此 `next != s` 始终成立。下面是连续单次替换的结果；当前每轮还会处理四个相同 form：
+
+```text
+failure: REDACTED
+failure: [REDACTED]
+failure: [[REDACTED]]
+failure: [[[REDACTED]]]
+...
+```
+
+| 实际生产路径 | b01ff7e：`[REDACTED]` / `REDACTED` | f44a3f7：`[REDACTED]` / `REDACTED` |
+| --- | --- | --- |
+| 直接 `RedactKnownSecrets` | 两组均超过 2 秒 | 返回 / 超过 2 秒。 |
+| 连接失败 → `CreateDatabase` → 422 | 两组均超过 2 秒 | 返回固定 422 / 超过 2 秒，尚未返回响应。 |
+| 真实子进程 stderr → dumper → Runner 成功日志 | 两组均超过 2 秒 | 完成 / 超过 2 秒，worker 未返回。 |
+
+两种口令经生产 `ParseURI` 接受。12 组对照均在独立、启用 race 的测试进程中执行；超时后发送 SIGQUIT 保存堆栈并回收进程，不以超时当作通过。HEAD 的 dumper、Runner 堆栈位于 `dumper.go:206`；API 另用 Go 的 1 秒测试期限补采堆栈，确认 `api_phase2.go:117` → `RedactKnownSecrets` → `dumper.go:206`。对照仅把本次两个生产改动文件换成 `git show b01ff7e:<path>` 原文，fixture 保持相同。Runner 使用真实 SQLite、age、文件提交与 OS 子进程；网络元数据和 dump 内容为受控 fixture。
+
+这是原 R8-P1-01 的残留，仍为 P1，不另计新回归。修复应对原始输入做有界替换，避免重新扫描已经插入的标记；不能仅增加相等判断，也不能直接跳过 `REDACTED` 而保留原始秘密。
+
+### P1-02：固定 422 已关闭原 API 泄漏
+
+定位：`backend/internal/server/api_phase2.go:118`–`:119`。定向探针在 `pgclient.Test` 边界注入分类错误，组合文本由生产 `QuoteConninfo` 生成；生产 URI 解析、handler、脱敏函数及生成的响应序列化器均保持执行。四组请求的实际状态码均为 422，JSON 只含两个固定字段：
+
+```json
+{"code":"connection_test_failed","message":"connection test failed — verify host, port, credentials and TLS mode"}
+```
+
+`TestReview9Fixed422` 四个子用例全部 PASS；原秘密 `prefix\segment'CANARY-SUFFIX` 的单层 conninfo 与再次转义输入均不再进入响应。`b01ff7e` 对照在这两组响应中仍含 `CANARY-SUFFIX`。本轮不声称已补齐 `RedactKnownSecrets` 的全部组合枚举：该函数原有组合残留依然可复现，但固定响应已经切断所指定的 API 泄漏路径。
+
+### R9-P1-01：新增连接失败日志直接写入原始口令
+
+**新增回归，P1，REGRESSED。** 定位：`backend/internal/server/api_phase2.go:115`–`:117`，尤其是 `:116` 的 `"err", err.Error()`。
+
+本次新增日志同时传入两个名为 `err` 的属性，第一个没有脱敏。实测使用与生产 `backend/cmd/supabackup/main.go:100` 相同的 `slog.NewJSONHandler`，原始日志字节保留两个字段，后一个不会覆盖已经写出的前一个。普通秘密即能复现；以下仅省略时间、级别等非关键字段：
+
+```json
+{"msg":"connection test failed","name":"fixture","err":"password authentication failed: CANARY-secret-pw","err":"password authentication failed: [REDACTED]"}
+```
+
+`TestReview9LogNoSecret` 四个子用例全部 FAIL；同一 fixture 在 `b01ff7e` 没有该错误日志，四组日志保密断言全部 PASS。探针检查原始日志字节，并逐 token 保留重复键，未通过解码成 map 丢掉第一个 `err`。实际结果：
+
+| 秘密 / 错误表示 | 第一个原始 `err` | 第二个声称脱敏的 `err` |
+| --- | --- | --- |
+| 普通秘密 / 原值 | 泄漏 | 无 canary。 |
+| 含单引号 / conninfo | 泄漏 | 无 canary。 |
+| 反斜杠与单引号组合 / conninfo | 泄漏 | **仍含 `CANARY-SUFFIX`。** |
+| 上述 conninfo 再次转义 | 泄漏 | **仍含 `CANARY-SUFFIX`。** |
+
+所以只删除第一个 `err` 尚不足以关闭这个新增日志出口：第二个仍调用未覆盖 `Q(B(secret))` 的既有替换逻辑，`SanitizeMessage` 也只是插入标记，没有移除剩余值。以上归为同一个新增日志泄漏回归，不把旧替换函数的组合不足另计新缺陷。修复需移除原始错误属性，并确保唯一日志字段不含秘密；可记录固定错误文本及安全的分类信息，若保留错误详情则必须通过原值、组合转义和日志最终字节的保密断言。fixture 使用合成 canary 错误，不声称本轮真实 PostgreSQL 自然输出过口令。
+
+### 工程检查与证据
+
+环境：`go version go1.26.0 linux/arm64`；`GOCACHE=/tmp/supabackup-review-go-cache`。全量门禁未加载连接错误注入或定向探针。
+
+| 检查 | 本轮结果 |
+| --- | --- |
+| 原生 `go test -race -json -count=1 ./backend/...` | **退出 1**：server 的 `httptest` 监听报 `socket: operation not permitted`；59 个顶层测试 PASS、5 SKIP、1 FAIL；无 race 报告。未将原生运行写为通过。 |
+| 相同命令，增加 `-overlay /tmp/supabackup-phase2-review9-evidence/router-overlay.json` | **退出 0：75 个顶层测试 PASS、5 个 Docker 集成测试 SKIP**；10 个有测试包通过、6 个无测试文件；无 race 报告。 |
+| 定向 API / 日志 / 脱敏探针，均以 `-race` 编译 | HEAD 共 6 个顶层测试：4 PASS、2 FAIL。失败分别为新增日志泄漏、既有组合替换残留。quoted 矩阵、三种简单秘密表示及仓库 `TestRound7QuotedRedaction` 均通过。 |
+| 占位符终止性对照 | 基线 6/6 超时；HEAD 3/6 返回、3/6 超时，详见上表；无 race 报告。 |
+| `git diff --check` | 通过。 |
+
+Router overlay 沿用并重新核对上一轮的差异，仅替换测试 HTTP 传输为进程内 RoundTripper → 生产 Router → Recorder，保留 CookieJar、路由、中间件、handler 和原断言；不声称验证了真实 TCP/TLS 监听。Docker 资源不可用导致五项 SKIP，以上环境边界均不计为缺陷。本轮未重开其他历史项或扩大外部验收范围。
+
+证据目录：`/tmp/supabackup-phase2-review9-evidence/`。`core-server-head.log` / `core-server-baseline.log` 保存 422 与日志新旧对照，`core-dumper-*.log` 保存脱敏矩阵；`marker-summary.json`、`marker-*.log` 保存终止性对照与堆栈；`race-native.jsonl`、`race-router.jsonl` 保存全量门禁。`README.md`、`builds.json`、`summary.json`、`sources.sha256`、overlay 和探针源码提供复现入口。
+
+**第 9 轮最终结论：未通过。R8-P1-01 = PARTIALLY，P1-02（API 422 组合转义泄漏）= FIXED；R8-P1-01 的子串死循环与新增 R9-P1-01 日志泄漏仍为 P1 阻断。当前不能判为“通过”或“修改后通过”。**
