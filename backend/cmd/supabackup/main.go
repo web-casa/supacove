@@ -214,6 +214,9 @@ func runServe() error {
 	} else if n > 0 {
 		log.Warn("jobs interrupted by previous shutdown", "count", n)
 	}
+	// Protocol C restart convergence: complete interrupted remote commits
+	// BEFORE the worker claims new jobs.
+	runner.ResumeRemotePhase(ctx)
 	runner.Start(ctx)
 	defer runner.Stop()
 

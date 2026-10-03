@@ -6,7 +6,9 @@ package jobs
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -76,7 +78,7 @@ type Runner struct {
 	stopDone       chan struct{}
 	destMu         sync.Mutex
 	destBackends   map[int64]storage.Backend
-	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error)
+	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error) // initialized in NewRunner
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
@@ -93,6 +95,9 @@ func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ct
 		wake:         make(chan struct{}, 1),
 		stopDone:     make(chan struct{}),
 		destBackends: make(map[int64]storage.Backend),
+		backendFactory: func(ctx context.Context, d *Destination) (storage.Backend, error) {
+			return storage.New(ctx, d.StorageConfig(), log)
+		},
 	}
 }
 
@@ -231,10 +236,15 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 // (idx_jobs_active_per_database) makes the no-overlap promise atomic: two
 // concurrent enqueues cannot both succeed (round-1 review P1-05).
 func (r *Runner) Enqueue(ctx context.Context, databaseID int64) (int64, error) {
+	uuidBytes := make([]byte, 16)
+	if _, err := rand.Read(uuidBytes); err != nil {
+		return 0, fmt.Errorf("generate backup uuid: %w", err)
+	}
+	backupUUID := hex.EncodeToString(uuidBytes)
 	res, err := r.authDB.ExecContext(ctx,
-		`INSERT INTO jobs (database_id, status, scheduled_at, created_at)
-		 VALUES (?, 'pending', strftime('%s','now'), strftime('%s','now'))`,
-		databaseID)
+		`INSERT INTO jobs (database_id, backup_uuid, status, scheduled_at, created_at)
+		 VALUES (?, ?, 'pending', strftime('%s','now'), strftime('%s','now'))`,
+		databaseID, backupUUID)
 	if err != nil {
 		// SQLite reports partial-unique violations against either the index
 		// name or the underlying column, depending on the planner path.
@@ -250,6 +260,90 @@ func (r *Runner) Enqueue(ctx context.Context, databaseID int64) (int64, error) {
 	}
 	r.signalWake()
 	return id, nil
+}
+
+// ResumeRemotePhase re-runs the remote upload/commit for interrupted jobs
+// that have a committed local artifact and an upload intent (protocol C
+// restart convergence: "重启不能补提交" — round-3 review P1-03). Runs
+// synchronously at startup, before the worker starts claiming new jobs.
+func (r *Runner) ResumeRemotePhase(ctx context.Context) {
+	rows, err := r.authDB.QueryContext(ctx, `
+		SELECT id, database_id, artifact_path, artifact_sha256, artifact_size, manifest_path, destination_id
+		FROM jobs
+		WHERE status = 'interrupted' AND artifact_state IN ('committed','committed_no_manifest')
+		  AND remote_state IN ('uploading','committed')`)
+	if err != nil {
+		r.log.Error("resume remote phase query", "err", err)
+		return
+	}
+	type job struct {
+		id, dbID     int64
+		artifactPath string
+		sha256       string
+		size         int64
+		manifestPath string
+		destID       sql.NullInt64
+	}
+	var jobsList []job
+	for rows.Next() {
+		var j job
+		var d sql.NullInt64
+		if err := rows.Scan(&j.id, &j.dbID, &j.artifactPath, &j.sha256, &j.size, &j.manifestPath, &d); err != nil {
+			rows.Close()
+			r.log.Error("resume scan", "err", err)
+			return
+		}
+		j.destID = d
+		jobsList = append(jobsList, j)
+	}
+	rows.Close()
+
+	for _, j := range jobsList {
+		if !j.destID.Valid {
+			continue
+		}
+		if _, err := os.Stat(j.artifactPath); err != nil {
+			r.log.Warn("resume: staged artifact gone, job stays interrupted", "job", j.id, "path", j.artifactPath)
+			continue
+		}
+		if _, rerr := os.Stat(j.artifactPath); rerr != nil {
+			r.log.Warn("resume: staged artifact gone", "job", j.id)
+			continue
+		}
+		mb, merr := os.ReadFile(j.manifestPath)
+		if merr != nil {
+			r.log.Error("resume: manifest unreadable", "job", j.id, "err", merr)
+			continue
+		}
+		// Restore to running so the remote phase can execute with the
+		// production contract, then re-run it.
+		if _, err := r.authDB.ExecContext(ctx,
+			`UPDATE jobs SET status = 'running' WHERE id = ?`, j.id); err != nil {
+			r.log.Error("resume: restore running", "job", j.id, "err", err)
+			continue
+		}
+		upload := &uploadedArtifact{
+			artifactPath:  j.artifactPath,
+			artifactSize:  j.size,
+			sha256Hex:     j.sha256,
+			manifestPath:  j.manifestPath,
+			manifestBytes: mb,
+		}
+		if uerr := r.uploadAndCommitRemote(ctx, j.id, j.dbID, upload); uerr != nil {
+			r.log.Error("resume: remote phase failed", "job", j.id, "err", uerr)
+			r.fail(j.id, ClassStorageUp, pgclient.SanitizeMessage(uerr.Error()))
+			continue
+		}
+		// Success record
+		if _, uerr := r.authDB.Exec(`
+			UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
+			  manifest_path = ?
+			WHERE id = ? AND status = 'running'`, j.manifestPath, j.id); uerr != nil {
+			r.log.Error("resume: success update failed", "job", j.id, "err", uerr)
+		} else {
+			r.log.Info("resumed remote commit completed", "job", j.id)
+		}
+	}
 }
 
 // Start launches the single-concurrency worker. v1 fixes global concurrency

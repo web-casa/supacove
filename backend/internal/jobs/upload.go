@@ -5,6 +5,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -44,8 +45,8 @@ func (r *Runner) uploadAndCommitRemote(ctx context.Context, jobID, dbID int64, r
 	}
 
 	destCfg := dest.StorageConfig()
-	objKey := destCfg.BackupKey(dbID, jobID)
-	manKey := destCfg.ManifestKey(dbID, jobID)
+	objKey := destCfg.BackupKey(r.jobUUID(ctx, jobID))
+	manKey := destCfg.ManifestKey(r.jobUUID(ctx, jobID))
 
 	// INTENT before any side effect (protocol C): a crash after this point
 	// leaves a traceable 'uploading' state; a crash before it leaves a
@@ -93,29 +94,33 @@ func (r *Runner) uploadAndCommitRemote(ctx context.Context, jobID, dbID int64, r
 		return fmt.Errorf("upload ciphertext: %w", lastErr)
 	}
 
-	// Publish the remote manifest — the REMOTE COMMIT MARK (protocol C).
-	if err := backend.Put(ctx, manKey, stringsReader(result.manifestBytes), int64(len(result.manifestBytes))); err != nil {
-		return fmt.Errorf("publish remote manifest: %w", err)
-	}
-
-	// C.1 verification: streamed read-back over the ciphertext, hash
-	// compared against the locally computed digest. This is the only
-	// integrity check that catches provider-side content corruption,
-	// same-size replacement and truncated writes.
-	if dest.VerifyReadback {
-		if vErr := verifyRemote(ctx, backend, objKey, result.sha256Hex, result.artifactSize); vErr != nil {
-			// The remote object failed verification: it is garbage we just
-			// wrote. Delete it (best effort) so no corrupt backup lingers.
+	// C.1 verification is MANDATORY (round-3 review P1-01): it is the only
+	// integrity check that catches provider-side corruption, same-size
+	// replacement and truncated writes. The VerifyReadback flag controls
+	// restore-verification scheduling (a different protocol), never whether
+	// the ciphertext read-back happens.
+	if vErr := verifyRemote(ctx, backend, objKey, result.sha256Hex, result.artifactSize); vErr != nil {
+		// Network/read failures are not proof of corruption: keep the
+		// remote ciphertext and do NOT delete (round-3 review P1-02:
+		// "暂时读失败也会删除可能完好的密文"). Only confirmed hash
+		// mismatch (provably our content, wrong bytes) triggers cleanup.
+		if errors.Is(vErr, errVerifyMismatch) {
 			if dErr := backend.Delete(ctx, objKey); dErr != nil {
 				return fmt.Errorf("%w; ALSO failed to delete the corrupt remote object %s: %v", vErr, objKey, dErr)
 			}
-			return vErr
 		}
+		return vErr
+	}
+
+	// Publish the remote manifest — the REMOTE COMMIT MARK (protocol C),
+	// only after verification succeeded.
+	if err := backend.Put(ctx, manKey, bytes.NewReader(result.manifestBytes), int64(len(result.manifestBytes))); err != nil {
+		return fmt.Errorf("publish remote manifest: %w", err)
 	}
 
 	if _, err := r.authDB.Exec(`
-		UPDATE jobs SET remote_state = 'committed', remote_verified = ?, uploaded_at = strftime('%s','now')
-		WHERE id = ?`, boolToInt(dest.VerifyReadback), jobID); err != nil {
+		UPDATE jobs SET remote_state = 'committed', remote_verified = 1, uploaded_at = strftime('%s','now')
+		WHERE id = ?`, jobID); err != nil {
 		return fmt.Errorf("record remote commit: %w", err)
 	}
 	return nil
@@ -178,6 +183,15 @@ func (r *Runner) BuildBackendByID(ctx context.Context, destID int64) (storage.Ba
 		return nil, err
 	}
 	return r.BuildBackend(ctx, dest)
+}
+
+// jobUUID resolves the backup UUID for a job (immutable identity for remote
+// keys; P0-01 fix).
+func (r *Runner) jobUUID(ctx context.Context, jobID int64) string {
+	var u string
+	_ = r.authDB.QueryRowContext(ctx,
+		`SELECT backup_uuid FROM jobs WHERE id = ?`, jobID).Scan(&u)
+	return u
 }
 
 // uploadedArtifact carries the local-commit facts the upload phase needs.

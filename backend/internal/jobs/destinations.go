@@ -185,7 +185,7 @@ func (r *Runner) DeleteDestination(ctx context.Context, id int64) error {
 		WHERE id = ? AND deleted_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM jobs
 		                  WHERE jobs.destination_id = destinations.id
-		                  AND jobs.remote_state = 'uploading')`, id)
+		                  AND jobs.status IN ('pending','running'))`, id)
 	if err != nil {
 		return err
 	}
@@ -227,23 +227,39 @@ func (r *Runner) BuildBackend(ctx context.Context, dest *Destination) (storage.B
 	}
 	r.destMu.Unlock()
 
-	if r.backendFactory == nil {
-		r.backendFactory = func(ctx context.Context, d *Destination) (storage.Backend, error) {
-			return storage.New(ctx, d.StorageConfig(), r.log)
-		}
+	// Double-check cache after build: a concurrent request may have
+	// published first (round-3 review P1-09 data race on backendFactory).
+	r.destMu.Lock()
+	if b, ok := r.destBackends[dest.ID]; ok {
+		r.destMu.Unlock()
+		return b, nil
 	}
-	b, err := r.backendFactory(ctx, dest)
+	r.destMu.Unlock()
+
+	factory := r.backendFactory
+	if factory == nil {
+		return nil, errors.New("backend factory not initialized")
+	}
+	b, err := factory(ctx, dest)
 	if err != nil {
 		return nil, err
 	}
 	r.destMu.Lock()
+	if existing, ok := r.destBackends[dest.ID]; ok {
+		r.destMu.Unlock()
+		return existing, nil
+	}
 	r.destBackends[dest.ID] = b
 	r.destMu.Unlock()
 	return b, nil
 }
 
-// SetBackendFactory overrides backend construction (test hook).
+// SetBackendFactory overrides backend construction. Must be called before
+// Start (round-3 review P1-09: concurrent first access raced on an
+// uninitialized factory).
 func (r *Runner) SetBackendFactory(f func(ctx context.Context, dest *Destination) (storage.Backend, error)) {
+	r.destMu.Lock()
+	defer r.destMu.Unlock()
 	r.backendFactory = f
 }
 
@@ -255,12 +271,16 @@ func (r *Runner) AssignDestination(ctx context.Context, dbID, destID int64) erro
 			return err
 		}
 	}
+	var destParam any // NULL clears the assignment (round-3 review P2-01)
+	if destID != 0 {
+		destParam = destID
+	}
 	res, err := r.authDB.ExecContext(ctx, `
 		UPDATE databases SET destination_id = ?, updated_at = strftime('%s','now')
 		WHERE id = ? AND deleted_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM jobs
 		                  WHERE jobs.database_id = databases.id
-		                  AND jobs.status IN ('pending','running'))`, destID, dbID)
+		                  AND jobs.status IN ('pending','running'))`, destParam, dbID)
 	if err != nil {
 		return err
 	}

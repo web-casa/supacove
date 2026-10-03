@@ -73,7 +73,12 @@ func (s *Store) Config() Config { return s.cfg }
 func (s *Store) Prefix() string { return s.cfg.Prefix }
 
 // Put implements Backend: single PUT below the multipart threshold,
-// streamed multipart above, abort on any failure.
+// manager.Uploader multipart above. The Uploader owns the entire multipart
+// lifecycle (create, parts, complete); on failure it aborts internally
+// (LeavePartsOnError defaults to false) and the real upload ID is extracted
+// from manager.MultiUploadFailure for the error record — our previous
+// manual Create+Abort wrapper used a DIFFERENT upload ID than the Uploader,
+// leaking parts on both success and failure (round-1 review P1-04).
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64) error {
 	if size >= 0 && size < multipartThreshold {
 		_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
@@ -87,51 +92,23 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64) er
 		}
 		return nil
 	}
-	return s.multipartPut(ctx, key, r)
-}
-
-func (s *Store) multipartPut(ctx context.Context, key string, r io.Reader) (err error) {
-	out, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
-		Bucket: aws.String(s.cfg.Bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return fmt.Errorf("create multipart upload: %w", err)
-	}
-	completed := false
-	uploadID := aws.ToString(out.UploadId)
-	defer func() {
-		if !completed {
-			if _, aerr := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
-				Bucket:   aws.String(s.cfg.Bucket),
-				Key:      aws.String(key),
-				UploadId: out.UploadId,
-			}); aerr != nil {
-				// Abort failure would leave billable parts behind: surface it.
-				err = errors.Join(err, fmt.Errorf("ABORT FAILED for multipart upload %s — parts may remain; clean up via bucket lifecycle rule: %w", uploadID, aerr))
-			}
-		}
-	}()
-
 	uploader := manager.NewUploader(s.client, func(u *manager.Uploader) {
 		u.PartSize = partSize
 		u.Concurrency = uploadConcurrency
 	})
-	// manager.Uploader handles part numbering and completion; it aborts
-	// internally on failure when LeavePartsOnError is false (the default),
-	// but we keep our own defer as a belt-and-braces guarantee.
-	uo, err := uploader.Upload(ctx, &s3.PutObjectInput{
+	out, err := uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.cfg.Bucket),
 		Key:    aws.String(key),
 		Body:   r,
 	})
 	if err != nil {
+		var muf manager.MultiUploadFailure
+		if errors.As(err, &muf) {
+			return fmt.Errorf("multipart upload %s: %w", muf.UploadID(), err)
+		}
 		return fmt.Errorf("multipart upload: %w", err)
 	}
-	if uo == nil || uo.ETag == nil {
-		return errors.New("multipart upload returned no ETag")
-	}
-	completed = true
+	_ = out // ETag not used; integrity comes from the C.1 read-back hash
 	return nil
 }
 
@@ -220,6 +197,17 @@ func (s *Store) DiagnosticTest(ctx context.Context) error {
 	if err := s.Put(ctx, key, strings.NewReader(body), int64(len(body))); err != nil {
 		return fmt.Errorf("diagnostic write: %w", err)
 	}
+	// Once written, the canary is ours: clean it up on EVERY exit path so a
+	// failed diagnostic never leaves billable objects behind (round-3 review
+	// P2-06).
+	var result error
+	defer func() {
+		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if derr := s.Delete(dctx, key); derr != nil && result == nil {
+			result = fmt.Errorf("%w; ALSO failed to clean up canary %s: %v", result, key, derr)
+		}
+	}()
 	rc, size, err := s.Get(ctx, key)
 	if err != nil {
 		return fmt.Errorf("diagnostic read: %w", err)
@@ -230,13 +218,12 @@ func (s *Store) DiagnosticTest(ctx context.Context) error {
 		return fmt.Errorf("diagnostic read body: %w", err)
 	}
 	if size >= 0 && int64(len(got)) != size {
-		return fmt.Errorf("diagnostic read: size mismatch (%d vs %d)", len(got), size)
+		result = fmt.Errorf("diagnostic read: size mismatch (%d vs %d)", len(got), size)
+		return result
 	}
 	if string(got) != body {
-		return fmt.Errorf("diagnostic read: content mismatch")
-	}
-	if err := s.Delete(ctx, key); err != nil {
-		return fmt.Errorf("diagnostic delete: %w", err)
+		result = fmt.Errorf("diagnostic read: content mismatch")
+		return result
 	}
 	return nil
 }

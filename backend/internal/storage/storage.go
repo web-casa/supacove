@@ -121,14 +121,14 @@ type Backend interface {
 }
 
 // BackupKey is the ciphertext object key for a job.
-func (c Config) BackupKey(databaseID, jobID int64) string {
-	return fmt.Sprintf("%sdatabases/%d/backup-%d.dump.age", c.Prefix, databaseID, jobID)
+func (c Config) BackupKey(backupUUID string) string {
+	return fmt.Sprintf("%sbackups/%s.dump.age", c.Prefix, backupUUID)
 }
 
 // ManifestKey is the manifest object key for a job (the REMOTE COMMIT MARK,
 // protocol C: publishing it makes the backup remotely available).
-func (c Config) ManifestKey(databaseID, jobID int64) string {
-	return fmt.Sprintf("%sdatabases/%d/backup-%d.manifest.json", c.Prefix, databaseID, jobID)
+func (c Config) ManifestKey(backupUUID string) string {
+	return fmt.Sprintf("%sbackups/%s.manifest.json", c.Prefix, backupUUID)
 }
 
 // DiagnosticKey returns a unique canary key under the diagnostic namespace,
