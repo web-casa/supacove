@@ -53,9 +53,11 @@ type Config struct {
 func Load() (*Config, error) {
 	quota := int64(0)
 	if v := os.Getenv("SB_STAGING_QUOTA_BYTES"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n >= 0 {
-			quota = n
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid SB_STAGING_QUOTA_BYTES %q: must be a non-negative integer", v)
 		}
+		quota = n
 	}
 	c := &Config{
 		DataDir:           envOr("SB_DATA_DIR", "./data"),

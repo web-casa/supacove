@@ -220,21 +220,41 @@ func (r *Runner) Cancel(jobID int64) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("job %d is not pending or running", jobID)
 	}
+	// ALWAYS unlock before invoking the callback: the cancelled worker
+	// re-enters Runner methods while unwinding, and holding r.mu across fn()
+	// deadlocked the only worker plus Stop (round-3 review R3-P1-01).
 	r.mu.Lock()
-	if fn, ok := r.cancelFns[jobID]; ok {
+	fn, ok := r.cancelFns[jobID]
+	delete(r.cancelFns, jobID)
+	r.mu.Unlock()
+	if ok {
 		fn()
-	} else {
-		// Claim/registration handshake window: the runner re-checks the flag
-		// right after registering, so this settles shortly.
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			r.mu.Lock()
-			if fn, ok := r.cancelFns[jobID]; ok {
-				fn()
-			}
-			r.mu.Unlock()
-		}()
+		return nil
 	}
+	// Registration handshake window: cancel landed before the worker
+	// registered its context. Poll briefly, managed by the runner lifetime.
+	r.mu.Lock()
+	lc := r.lifeCtx
+	r.mu.Unlock()
+	go func() {
+		tick := time.NewTicker(50 * time.Millisecond)
+		defer tick.Stop()
+		for i := 0; i < 40; i++ {
+			select {
+			case <-lc.Done():
+				return
+			case <-tick.C:
+			}
+			r.mu.Lock()
+			fn, ok := r.cancelFns[jobID]
+			delete(r.cancelFns, jobID)
+			r.mu.Unlock()
+			if ok {
+				fn()
+				return
+			}
+		}
+	}()
 	return nil
 }
 
@@ -357,6 +377,10 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// Load target credentials (protocol B: decrypt with the master secret).
 	name, platform, envTag, connEnc, err := r.loadDatabase(ctx, dbID)
 	if err != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
 		r.fail(jobID, ClassUnknown, "load database record: "+err.Error())
 		return
 	}
@@ -523,7 +547,8 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		return
 	}
 	r.log.Info("backup succeeded", "job", jobID, "database", name,
-		"bytes", result.SizeBytes, "sha256", result.SHA256[:16])
+		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
+		"stderr_excerpt", dumper.RedactKnownSecrets(knownSecrets, result.StdErrExcerpt))
 }
 
 func (r *Runner) loadDatabase(ctx context.Context, dbID int64) (name, platform, envTag, connEnc string, err error) {

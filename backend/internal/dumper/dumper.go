@@ -513,6 +513,12 @@ type countingWriter struct {
 }
 
 func (c *countingWriter) Write(p []byte) (int, error) {
+	// Pre-write check: a single oversized Write must not land on disk before
+	// the budget is enforced (round-4 review P1-13 remainder).
+	if c.quota > 0 && c.n+int64(len(p)) > c.quota {
+		c.breached = true
+		return 0, errQuotaExceeded
+	}
 	n, err := c.w.Write(p)
 	c.n += int64(n)
 	if c.quota > 0 && c.n > c.quota {

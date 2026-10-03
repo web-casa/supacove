@@ -10,6 +10,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/agekey"
 	"github.com/cloudfan/supabackup/backend/internal/api"
 	"github.com/cloudfan/supabackup/backend/internal/crypto"
+	"github.com/cloudfan/supabackup/backend/internal/dumper"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 )
@@ -106,10 +107,12 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 	}
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {
-		// pgclient errors are classified and credential-safe; still scrub
-		// defensively before returning.
+		// Remove the ACTUAL secret value the user just entered — the
+		// classified error text may quote connection parameters (round-4
+		// review P1-02 remainder).
 		return api.CreateDatabase422JSONResponse{Code: "connection_test_failed",
-			Message: "connection test failed: " + pgclient.SanitizeMessage(err.Error())}, nil
+			Message: "connection test failed: " + dumper.RedactKnownSecrets(
+				[]string{ci.Password}, pgclient.SanitizeMessage(err.Error()))}, nil
 	}
 
 	enc, err := crypto.Encrypt(a.srv.key, []byte(body.ConnectionUri))
@@ -158,7 +161,9 @@ func (a *apiService) DeleteDatabase(ctx context.Context, request api.DeleteDatab
 	// check-then-delete TOCTOU with Enqueue (round-1 review P1-06), and the
 	// registration row (plus job history) survives for audit.
 	res, err := a.srv.store.DB.ExecContext(ctx, `
-		UPDATE databases SET deleted_at = strftime('%s','now'), updated_at = strftime('%s','now')
+		UPDATE databases SET
+		  name = name || ' (deleted #' || id || ')',
+		  deleted_at = strftime('%s','now'), updated_at = strftime('%s','now')
 		WHERE id = ? AND deleted_at IS NULL
 		  AND NOT EXISTS (SELECT 1 FROM jobs
 		                  WHERE database_id = databases.id AND status IN ('pending','running'))`,

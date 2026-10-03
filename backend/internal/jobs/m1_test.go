@@ -146,31 +146,49 @@ func countRows(t *testing.T, uri string) int {
 }
 
 // verifyRestoredContent checks actual payload values in the restored db
-// (round-2 review P1-14: count alone is a false positive).
-func verifyRestoredContent(t *testing.T, verifyURI string) {
+// (round-2 review P1-14: count alone is a false positive). Returns an error
+// instead of failing directly so the NEGATIVE control can assert detection.
+func verifyRestoredContent(t *testing.T, verifyURI string) error {
 	t.Helper()
 	out, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
 		"-d", mustConn(t, verifyURI).DBName,
 		"-At", "-c",
 		"SELECT id, payload FROM m1test WHERE id IN (1, 250, 500) ORDER BY id").CombinedOutput()
 	if err != nil {
-		t.Fatalf("content probe: %v: %s", err, out)
+		return fmt.Errorf("content probe: %w: %s", err, out)
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) != 3 {
-		t.Fatalf("content probe returned %d lines, want 3", len(lines))
+		return fmt.Errorf("content probe returned %d lines, want 3", len(lines))
 	}
 	for _, line := range lines {
 		parts := strings.Split(line, "|")
 		if len(parts) != 2 {
-			t.Fatalf("malformed probe row: %q", line)
+			return fmt.Errorf("malformed probe row: %q", line)
 		}
 		var id int
 		fmt.Sscanf(parts[0], "%d", &id)
 		want := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%d", id))))
 		if parts[1] != want {
-			t.Fatalf("content mismatch at id %d: got %q want %q", id, parts[1], want)
+			return fmt.Errorf("content mismatch at id %d: got %q want %q", id, parts[1], want)
 		}
+	}
+	return nil
+}
+
+// TestM1_NegativeControl (round-4 review P1-14): a corrupted restore target
+// MUST be detected — guards the verifier itself against false positives.
+func TestM1_NegativeControl(t *testing.T) {
+	requireDocker(t)
+	uri := startTestPostgres(t)
+	seedTestTable(t, uri, 10)
+	if _, err := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
+		"-d", "appdb", "-c",
+		"UPDATE m1test SET payload = 'tampered' WHERE id = 1").CombinedOutput(); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRestoredContent(t, uri); err == nil {
+		t.Fatal("NEGATIVE CONTROL PASSED — the content verifier cannot detect corruption")
 	}
 }
 
@@ -306,7 +324,9 @@ func TestM1_FullKernelChain(t *testing.T) {
 	if gotRows != wantRows {
 		t.Fatalf("restored rows = %d, want %d", gotRows, wantRows)
 	}
-	verifyRestoredContent(t, verifyURI)
+	if err := verifyRestoredContent(t, verifyURI); err != nil {
+		t.Fatal(err)
+	}
 
 	// Manifest sanity (protocol E): key ID, versions, no secrets.
 	mb, err := os.ReadFile(filepath.Join(stagingDir, fmt.Sprintf("backup-job%d.dump.age.manifest.json", jobID)))
