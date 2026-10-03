@@ -154,7 +154,7 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 				UPDATE jobs SET artifact_path = ?, artifact_state = 'committed',
 				  error_message = COALESCE(NULLIF(error_message,''),'') ||
 				    ' [recovery: unreferenced ciphertext restored to this job]'
-				WHERE id = ?`, e.Name(), jobID); uerr != nil {
+				WHERE id = ?`, filepath.Join(r.stagingDir, e.Name()), jobID); uerr != nil {
 				r.log.Error("artifact reference restore failed", "job", jobID, "err", uerr)
 			} else {
 				r.log.Warn("recovered unreferenced ciphertext", "job", jobID, "file", e.Name())
@@ -162,6 +162,27 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 		}
 		_ = state
 	}
+	// Same reconciliation for manifest files: a committed/failed job with an
+	// empty manifest_path but an existing manifest on disk gets it restored.
+	for _, e := range entries {
+		mm := manifestRefRe.FindStringSubmatch(e.Name())
+		if mm == nil {
+			continue
+		}
+		var jobID int64
+		fmt.Sscanf(mm[1], "%d", &jobID)
+		var mpath string
+		qerr := r.authDB.QueryRowContext(ctx,
+			`SELECT COALESCE(manifest_path,'') FROM jobs WHERE id = ?`, jobID).Scan(&mpath)
+		if qerr == nil && mpath == "" {
+			full := filepath.Join(r.stagingDir, e.Name())
+			if _, uerr := r.authDB.ExecContext(ctx,
+				`UPDATE jobs SET manifest_path = ? WHERE id = ?`, full, jobID); uerr == nil {
+				r.log.Warn("recovered unreferenced manifest", "job", jobID, "file", e.Name())
+			}
+		}
+	}
+
 	// References claiming files that no longer exist get flagged.
 	rows, rerr := r.authDB.QueryContext(ctx, `
 		SELECT id, artifact_path FROM jobs
@@ -468,12 +489,24 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 	plain, err := crypto.Decrypt(r.key, connEnc)
 	if err != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
 		r.fail(jobID, ClassUnknown,
 			"stored credentials are unreadable — the master secret changed or the data is corrupted; re-add the database")
 		return
 	}
+	if ctx.Err() != nil && r.ranToCancellation(jobID) {
+		r.finalizeCanceled(jobID)
+		return
+	}
 	ci, err := pgclient.ParseURI(string(plain))
 	if err != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
 		r.fail(jobID, ClassUnknown, "stored connection URI invalid: "+err.Error())
 		return
 	}
@@ -700,3 +733,6 @@ func toManifestExts(in []pgclient.Extension) []manifest.PgExtension {
 	}
 	return out
 }
+
+// manifestRefRe matches staging manifest files: backup-job<id>.dump.age.manifest.json
+var manifestRefRe = regexp.MustCompile(`^backup-job(\d+)\.dump\.age\.manifest\.json$`)

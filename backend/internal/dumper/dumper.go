@@ -164,8 +164,11 @@ func probeVersion(bin string) (major int, version string, err error) {
 // logging. The VALUE is removed, not just the key labeled (round-2 review
 // P1-02: `password=[REDACTED]<value>` still leaks the value).
 var (
-	plainPwRe  = regexp.MustCompile(`(?i)(password=)[^\s'";,]*`)
-	quotedPwRe = regexp.MustCompile(`(?i)(password=')[^']*(')`)
+	// A quoted conninfo password may itself contain backslash-escaped
+	// quotes — the value regex must consume `\'` sequences, otherwise the
+	// tail of the secret survives redaction (round-6 review P1-02).
+	quotedPwRe = regexp.MustCompile(`(?i)(password=')(?:[^']|\\')*(')`)
+	plainPwRe  = regexp.MustCompile(`(?i)(password=)(?:[^\s'";,]|\\')*`)
 	uriRe      = regexp.MustCompile(`(?i)(postgres(?:ql)?://)[^\s'";,]*`)
 )
 
