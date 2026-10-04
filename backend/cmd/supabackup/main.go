@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/server"
 	"github.com/cloudfan/supabackup/backend/internal/staging"
 	"github.com/cloudfan/supabackup/backend/internal/stats"
+	"github.com/cloudfan/supabackup/backend/internal/verifier"
 )
 
 var (
@@ -161,6 +163,18 @@ func fatal(log *slog.Logger, err error) {
 	os.Exit(1)
 }
 
+// detectPGBin finds a PostgreSQL SERVER installation (initdb/pg_ctl), most
+// recent major first, across the standard Debian/PGDG locations.
+func detectPGBin() (string, error) {
+	for major := 18; major >= 14; major-- {
+		dir := fmt.Sprintf("/usr/lib/postgresql/%d/bin", major)
+		if st, err := os.Stat(filepath.Join(dir, "initdb")); err == nil && !st.IsDir() {
+			return dir, nil
+		}
+	}
+	return "", errors.New("searched /usr/lib/postgresql/{18..14}/bin")
+}
+
 func runServe() error {
 	log := newLogger()
 	cfg := mustLoadConfig(log)
@@ -210,10 +224,45 @@ func runServe() error {
 		func(ctx context.Context) (string, error) { return srv.RecipientFor(ctx) }, log)
 	runner.SetQuota(cfg.StagingQuotaBytes)
 	runner.SetLocalKeep(cfg.LocalKeep)
+	runner.SetStatsRecorder(stats.New(store.DB))
 	if hb := os.Getenv("SB_HEARTBEAT_URL"); hb != "" {
-		runner.SetLocalKeep(cfg.LocalKeep)
-		runner.SetStatsRecorder(stats.New(store.DB))
+		runner.SetHeartbeatURL(hb)
 		log.Info("heartbeat configured", "url_prefix", hb[:min(len(hb), 20)])
+	}
+	// Restore verification (ADR-004): OFF unless the administrator
+	// explicitly enabled it AND provided the age identity — a deliberate
+	// trust decision, since verification restores dumps in a same-UID
+	// throwaway PostgreSQL instance (NOT a sandbox) and decrypts artifacts.
+	// Both states are logged distinctly so the effective mode is always
+	// observable at startup (phase-5 review P1-04).
+	if cfg.VerifyEnabled {
+		identityRaw, rerr := os.ReadFile(cfg.VerifyIdentityFile)
+		if rerr != nil {
+			return fmt.Errorf("read SB_VERIFY_IDENTITY_FILE: %w", rerr)
+		}
+		pgBin := cfg.VerifyPGBin
+		if pgBin == "" {
+			var derr error
+			pgBin, derr = detectPGBin()
+			if derr != nil {
+				return fmt.Errorf("SB_VERIFY_ENABLED is set but no PostgreSQL server installation was found (%w); install postgresql-18 or set SB_VERIFY_PGBIN", derr)
+			}
+		}
+		ver, verr := verifier.New(verifier.Config{PGBin: pgBin, BaseDir: filepath.Join(cfg.DataDir, "verify")})
+		if verr != nil {
+			// The admin explicitly asked for verification; a broken setup is
+			// a startup failure, never a silent skip.
+			return fmt.Errorf("restore verification enabled but unavailable: %w", verr)
+		}
+		if cerr := ver.CleanupResidual(); cerr != nil {
+			log.Warn("verification residual cleanup incomplete", "err", cerr)
+		}
+		runner.SetVerifier(ver)
+		runner.SetVerifyIdentity(strings.TrimSpace(string(identityRaw)))
+		log.Info("restore verification ENABLED (ADR-004: same-UID embedded PostgreSQL; NOT a sandbox)",
+			"pg_bin", pgBin)
+	} else {
+		log.Info("restore verification disabled (set SB_VERIFY_ENABLED=1 with SB_VERIFY_IDENTITY_FILE to enable; see ADR-004)")
 	}
 	srv.SetRunner(runner, stg.Dir)
 	if n, err := runner.RecoverInterrupted(ctx); err != nil {
@@ -222,8 +271,11 @@ func runServe() error {
 		log.Warn("jobs interrupted by previous shutdown", "count", n)
 	}
 	// Protocol C restart convergence: complete interrupted remote commits
-	// BEFORE the worker claims new jobs.
+	// BEFORE the worker claims new jobs. Then regenerate recovery kits that
+	// a historical write failure left behind, and re-queue verifications
+	// that were pending at shutdown (phase-5 review P1-09/P1-06).
 	runner.ResumeRemotePhase(ctx)
+	runner.BackfillRecoveryKits(ctx)
 	runner.Start(ctx)
 	defer runner.Stop()
 

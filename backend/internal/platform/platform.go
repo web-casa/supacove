@@ -4,9 +4,7 @@
 // never credentials or API calls.
 package platform
 
-import (
-	"strings"
-)
+import "strings"
 
 // Platform represents a known PostgreSQL hosting platform.
 type Platform string
@@ -18,15 +16,32 @@ const (
 	Generic  Platform = "generic"
 )
 
-// Detect identifies the platform from a connection URI's host characteristics.
+// normalizeHost lowercases and strips one trailing dot (FQDN form).
+func normalizeHost(host string) string {
+	h := strings.ToLower(strings.TrimSpace(host))
+	return strings.TrimSuffix(h, ".")
+}
+
+// hostSuffix matches host against a domain suffix on a DNS-label boundary:
+// "db.supabase.co" matches ".supabase.co"; "evilsupabase.co" does not.
+func hostSuffix(host, suffix string) bool {
+	return host == suffix || strings.HasSuffix(host, "."+suffix)
+}
+
+// Detect identifies the platform from a connection URI's host
+// characteristics. Matching is suffix-with-label-boundary after
+// normalization — a host like "supabase.com.evil.invalid" or
+// "notneon.tech.example" is NOT the platform it embeds (phase-5 review
+// P2-01). Railway private-network hostnames (.railway.internal) count as
+// Railway: they are only resolvable inside Railway's network.
 func Detect(host string) Platform {
-	h := strings.ToLower(host)
+	h := normalizeHost(host)
 	switch {
-	case strings.Contains(h, "supabase.co") || strings.Contains(h, "supabase.com"):
+	case hostSuffix(h, "supabase.co") || hostSuffix(h, "supabase.com"):
 		return Supabase
-	case strings.Contains(h, "neon.tech"):
+	case hostSuffix(h, "neon.tech"):
 		return Neon
-	case strings.Contains(h, "proxy.rlwy.net") || strings.Contains(h, "rlwy.net"):
+	case hostSuffix(h, "rlwy.net") || hostSuffix(h, "railway.internal"):
 		return Railway
 	default:
 		return Generic
@@ -35,62 +50,103 @@ func Detect(host string) Platform {
 
 // PoolingHint returns a human-readable warning if the host/port suggests a
 // pooled connection that is incompatible with pg_dump.
+//
+// Detection covers both pooling markers documented by the platforms:
+//   - Supabase pooler hostnames (pooler.<ref>.supabase.com): port 6543 is
+//     the transaction pooler (incompatible), 5432 the session pooler (OK).
+//   - Neon pooled endpoints embed a "-pooler" label in the hostname
+//     (ep-xxx-pooler.<region>.aws.neon.tech) and are transaction-mode
+//     pgbouncer regardless of port; the direct endpoint omits the label.
 func PoolingHint(host string, port string) string {
-	h := strings.ToLower(host)
+	h := normalizeHost(host)
 	p := port
 	if p == "" {
 		p = "5432"
 	}
 	switch {
-	case strings.Contains(h, "pooler.supabase.com") && p == "6543":
-		return "Supabase transaction pooler (port 6543) is NOT compatible with pg_dump. Use the session pooler (port 5432) or the direct connection string."
-	case strings.Contains(h, "pooler.supabase.com") && p == "5432":
-		return "" // session pooler is OK
-	case strings.Contains(h, "neon.tech") && p == "6543":
-		return "Neon pooled connection (port 6543) is NOT compatible with pg_dump. Use the direct connection string (port 5432)."
+	// Supabase session/transaction pooler.
+	case hostSuffix(h, "supabase.co") || hostSuffix(h, "supabase.com"):
+		if strings.HasPrefix(h, "pooler.") || strings.Contains(h, ".pooler.") {
+			if p == "6543" {
+				return "Supabase transaction pooler (port 6543) is NOT compatible with pg_dump. Use the session pooler (port 5432) or the direct connection string."
+			}
+			return "" // session pooler is OK
+		}
+		return ""
+	// Neon: the -pooler label marks the pooled endpoint on ANY port.
+	case hostSuffix(h, "neon.tech"):
+		if p == "6543" {
+			return "Neon pooled connection (port 6543) is NOT compatible with pg_dump. Use the direct connection string (port 5432, no '-pooler' in the host)."
+		}
+		if containsLabel(h, "-pooler") {
+			return "This Neon endpoint is a POOLED endpoint ('-pooler' host) and is NOT compatible with pg_dump, regardless of port. Use the direct connection string (same host without '-pooler', port 5432)."
+		}
+		return ""
 	}
 	return ""
 }
 
+// containsLabel reports whether part contains marker such that it is
+// preceded and followed by label separators (start, '.', '-', or end), so
+// "not-pooler.example" style false embedding is still accepted deliberately
+// for "-pooler" because Neon embeds the marker inside the endpoint label
+// itself (ep-xxx-pooler).
+func containsLabel(host, marker string) bool {
+	return strings.Contains(host, marker+".") || strings.HasSuffix(host, marker)
+}
+
 // RecoveryNotes returns platform-specific recovery guidance lines for the
-// restore.sh recovery kit.
+// restore.sh recovery kit. The text must stay consistent with what the
+// backup ACTUALLY contains: a full pg_dump of the database — every user
+// schema at dump time — and nothing from platform services outside the
+// database (phase-5 review P1-10).
 func RecoveryNotes(p Platform) []string {
 	switch p {
 	case Supabase:
 		return []string{
-			"Supabase: this backup contains your database schema and data.",
-			"Auth users, Storage objects, and Edge Functions are NOT included",
-			"(they live in separate Supabase services).",
+			"Supabase: this archive is a FULL pg_dump of the Postgres database.",
+			"It contains ALL user schemas present at dump time — on Supabase that",
+			"includes the managed 'auth' and 'storage' schemas (auth user records,",
+			"storage object metadata).",
+			"NOT included: Storage file blobs (they live in object storage, not in",
+			"the database), Edge Function code, Auth/Storage service configuration,",
+			"and platform-level settings.",
 			"",
-			"To restore into a NEW Supabase project:",
-			"  1. Create the project and note its connection string.",
-			"  2. Run pg_restore --exit-on-error --no-owner -d <new_project_url>.",
-			"  3. Supabase managed schemas (auth, storage) already exist —",
-			"     use --no-owner to avoid ownership conflicts.",
-			"  4. Re-create RLS policies that reference auth.users if needed.",
-			"",
-			"Vault secrets and platform-level settings require manual recreation.",
+			"IMPORTANT: this generic script does NOT implement a Supabase-to-",
+			"Supabase migration. Restoring into a new Supabase project conflicts",
+			"with its managed schemas, system roles and hosted extensions. Restore",
+			"into a plain PostgreSQL instance (any major >= the source), or follow",
+			"Supabase's official backup/restore guide for project-to-project moves.",
+			"By default the script refuses a non-empty target; an override exists",
+			"but does not resolve role/extension conflicts on its own.",
 		}
 	case Neon:
 		return []string{
-			"Neon: this backup contains your database schema and data.",
-			"Branches, computes, and roles are Neon platform resources —",
-			"restore into a branch created via the Neon console or API.",
+			"Neon: this archive is a FULL pg_dump of the database branch's",
+			"database, including all user schemas.",
+			"NOT included: Neon platform resources — branches, computes, roles",
+			"managed by the console, and other databases on the project.",
 			"",
-			"Use the direct (non-pooled) connection string for pg_restore.",
+			"Restore into a branch/database created via the Neon console or API,",
+			"using the DIRECT (non-pooled) connection string — never a '-pooler'",
+			"endpoint; pgbouncer transaction mode breaks pg_restore.",
 		}
 	case Railway:
 		return []string{
-			"Railway: this backup contains your database schema and data.",
-			"Railway service configuration and environment variables are",
-			"platform resources — restore into a new Railway database plugin.",
+			"Railway: this archive is a FULL pg_dump of the database, including",
+			"all user schemas.",
+			"NOT included: the Railway service, its environment variables, and",
+			"other plugins.",
 			"",
-			"Use the TCP proxy connection string for external access.",
+			"Restore into a new Railway Postgres plugin instance via its TCP proxy",
+			"connection string.",
 		}
 	default:
 		return []string{
-			"Generic PostgreSQL: restore into any PostgreSQL instance with",
-			"a compatible or newer major version.",
+			"Generic PostgreSQL: this archive is a FULL pg_dump of the database,",
+			"including all user schemas. Restore into any PostgreSQL instance with",
+			"a compatible or newer major version; recreate required roles first",
+			"(they are listed in the manifest) or accept --no-owner semantics.",
 		}
 	}
 }

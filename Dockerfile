@@ -30,7 +30,11 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 
 FROM debian:bookworm-slim AS runtime
-# PostgreSQL clients come from PGDG (bookworm's own repo tops out below 18).
+# PostgreSQL clients from PGDG (bookworm's own repo tops out below 18), plus
+# the PG 18 SERVER for the embedded restore verifier (ADR-004). The verifier
+# stays DISABLED unless the administrator sets SB_VERIFY_ENABLED=1 and
+# supplies the age identity (phase-5 review P1-04: shipping the binaries is
+# what makes the documented feature actually usable in the release image).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
     && install -d /usr/share/postgres-common/pgdg \
@@ -46,6 +50,7 @@ RUN apt-get update \
        # than the server).
        postgresql-client-14 postgresql-client-15 postgresql-client-16 \
        postgresql-client-17 postgresql-client-18 \
+       postgresql-18 \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*

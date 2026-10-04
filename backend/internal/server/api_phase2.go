@@ -12,6 +12,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/crypto"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
 	"github.com/cloudfan/supabackup/backend/internal/redact"
 )
 
@@ -147,7 +148,14 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 	if err != nil {
 		return api.CreateDatabase500JSONResponse{}, nil
 	}
-	return api.CreateDatabase201JSONResponse(a.dbToAPI(d)), nil
+	// Surface the pooled-endpoint warning at registration time (P2-01): the
+	// wizard moment is where the user can still pick the direct endpoint.
+	out := a.dbToAPI(d)
+	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); hint != "" {
+		out.PoolingWarning = &hint
+		a.srv.log.Warn("pooled endpoint registered", "id", id, "hint", hint)
+	}
+	return api.CreateDatabase201JSONResponse(out), nil
 }
 
 func (a *apiService) GetDatabase(ctx context.Context, request api.GetDatabaseRequestObject) (api.GetDatabaseResponseObject, error) {
@@ -307,6 +315,34 @@ func taskToAPI(t *jobs.Task) api.Task {
 	if t.FinishedAt != nil {
 		out.FinishedAt = t.FinishedAt
 	}
+	// Phase 5/6: verification state machine and kit availability — the API
+	// reads the authoritative jobs row, never the stats snapshot (P2-02).
+	if t.Platform != "" {
+		p := api.TaskPlatform(t.Platform)
+		out.Platform = &p
+	}
+	if t.VerifyStatus != "" {
+		vs := api.TaskVerifyStatus(t.VerifyStatus)
+		out.VerifyStatus = &vs
+	}
+	if t.VerifyDetail != "" {
+		vd := t.VerifyDetail
+		out.VerifyDetail = &vd
+	}
+	if t.VerifyTables > 0 {
+		vt := t.VerifyTables
+		out.VerifyTables = &vt
+	}
+	if t.VerifyDurationSecs > 0 {
+		vdur := t.VerifyDurationSecs
+		out.VerifyDurationSecs = &vdur
+	}
+	if t.VerifyProfile != "" {
+		vp := t.VerifyProfile
+		out.VerifyProfile = &vp
+	}
+	hrk := t.HasRecoveryKit
+	out.HasRecoveryKit = &hrk
 	return out
 }
 

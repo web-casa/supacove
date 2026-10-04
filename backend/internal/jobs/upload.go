@@ -217,7 +217,8 @@ func (r *Runner) runRemoteRetention(ctx context.Context, dest *Destination, back
 	}
 
 	rows, err := r.authDB.QueryContext(ctx, `
-		SELECT id, remote_object_key, remote_manifest_key, COALESCE(uploaded_at, finished_at, created_at)
+		SELECT id, remote_object_key, remote_manifest_key,
+		       COALESCE(uploaded_at, finished_at, created_at), COALESCE(verify_status,'')
 		FROM jobs
 		WHERE database_id = ? AND destination_id = ? AND remote_state = 'committed'
 		ORDER BY id DESC`, dbID, dest.ID)
@@ -226,15 +227,16 @@ func (r *Runner) runRemoteRetention(ctx context.Context, dest *Destination, back
 		return
 	}
 	type candidate struct {
-		id     int64
-		objKey string
-		manKey string
-		at     int64
+		id          int64
+		objKey      string
+		manKey      string
+		at          int64
+		verifyState string
 	}
 	var committed []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.objKey, &c.manKey, &c.at); err != nil {
+		if err := rows.Scan(&c.id, &c.objKey, &c.manKey, &c.at, &c.verifyState); err != nil {
 			rows.Close()
 			r.log.Error("retention scan failed", "database", dbID, "err", err)
 			return
@@ -247,9 +249,20 @@ func (r *Runner) runRemoteRetention(ctx context.Context, dest *Destination, back
 	// untouchable, even when keep_days says otherwise (protocol D: "保护最新
 	// 完整备份" and "无锚点时禁止破坏性自动清理" — the anchor always exists
 	// here because we just committed one).
+	// The newest VERIFIED backup is protected too (phase-5 review P1-09):
+	// when the newer backups are unverified / failed verification / still
+	// pending, deleting the last restore-proven copy would silently downgrade
+	// the database's worst-case recovery guarantee.
+	lastVerifiedIdx := -1
 	for i, c := range committed {
-		if i == 0 {
-			continue // anchor
+		if c.verifyState == string(verifierStatusVerified) {
+			lastVerifiedIdx = i
+			break
+		}
+	}
+	for i, c := range committed {
+		if i == 0 || i == lastVerifiedIdx {
+			continue // anchor and last verified restore proof
 		}
 		tooMany := i >= keep
 		tooOld := !cutoff.IsZero() && time.Unix(c.at, 0).Before(cutoff)
@@ -259,6 +272,11 @@ func (r *Runner) runRemoteRetention(ctx context.Context, dest *Destination, back
 		r.deleteRemoteBackup(ctx, backend, dest.ID, c.id, c.objKey, c.manKey)
 	}
 }
+
+// verifyStatusVerified is the job-row verify_status value marking a
+// restore-proven backup (string form avoids importing the verifier package
+// into the retention path).
+const verifierStatusVerified = "verified"
 
 // deleteRemoteBackup removes one backup's remote objects (per-object error
 // handling; a partial delete is recorded, never silent) and its local
@@ -277,12 +295,14 @@ func (r *Runner) deleteRemoteBackup(ctx context.Context, backend storage.Backend
 			return
 		}
 	}
-	// Remote objects are gone; drop the local staged copies too.
-	var artifactPath, manifestPath string
+	// Remote objects are gone; drop the local staged copies too (the kit is
+	// removed with them — without the backup it describes it is dead weight;
+	// its reference is cleared in the same update).
+	var artifactPath, manifestPath, kitPath string
 	if err := r.authDB.QueryRow(
-		`SELECT artifact_path, manifest_path FROM jobs WHERE id = ?`, jobID).
-		Scan(&artifactPath, &manifestPath); err == nil {
-		for _, p := range []string{artifactPath, manifestPath} {
+		`SELECT artifact_path, manifest_path, COALESCE(recovery_kit_path,'') FROM jobs WHERE id = ?`, jobID).
+		Scan(&artifactPath, &manifestPath, &kitPath); err == nil {
+		for _, p := range []string{artifactPath, manifestPath, kitPath} {
 			if p != "" && strings.HasPrefix(p, r.stagingDir+string(os.PathSeparator)) {
 				if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 					r.log.Error("retention local cleanup failed", "job", jobID, "path", p, "err", err)
@@ -292,7 +312,7 @@ func (r *Runner) deleteRemoteBackup(ctx context.Context, backend storage.Backend
 	}
 	if _, err := r.authDB.Exec(`
 		UPDATE jobs SET remote_state = 'deleted',
-		  artifact_path = '', manifest_path = '',
+		  artifact_path = '', manifest_path = '', recovery_kit_path = '',
 		  remote_object_key = '', remote_manifest_key = ''
 		WHERE id = ? AND remote_state = 'committed'`, jobID); err != nil {
 		r.log.Error("retention state update failed", "job", jobID, "err", err)
@@ -324,7 +344,10 @@ func (r *Runner) deleteWithRetry(ctx context.Context, backend storage.Backend, k
 
 // pruneLocalArtifacts trims local staged ciphertexts for a database beyond
 // the newest keep (protocol D local half; the newest succeeded job's local
-// artifact is always protected).
+// artifact is always protected). Jobs whose artifact a verification is
+// currently reading are skipped (phase-5 review P1-09 file lease): deleting
+// under a live pg_restore would corrupt the verification. Recovery-kit
+// files are never pruned here — they are tiny text and stay downloadable.
 func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) {
 	rows, err := r.authDB.QueryContext(ctx, `
 		SELECT id, artifact_path, manifest_path, remote_state
@@ -357,6 +380,9 @@ func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) 
 		}
 		if j.remoteState == "uploading" {
 			continue // never delete a file an upload may still reference
+		}
+		if r.verifyBusy(j.id) {
+			continue // a verification is reading this artifact right now
 		}
 		for _, p := range []string{j.artifact, j.manifest} {
 			if p == "" || !strings.HasPrefix(p, r.stagingDir+string(os.PathSeparator)) {

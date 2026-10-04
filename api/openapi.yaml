@@ -639,6 +639,34 @@ paths:
                 $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/Internal"
+  /tasks/{id}/recovery-kit:
+    get:
+      operationId: downloadRecoveryKit
+      summary: Stream the generated restore.sh recovery kit for this backup.
+      description: >
+        The kit is a self-contained POSIX sh script (restore.sh) embedding the
+        ciphertext checksum, the key id and platform-specific guidance. It is
+        generated for every successful backup and regenerated at startup if
+        missing. Run it with `sh restore.sh`, never by executing it directly.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The recovery kit script.
+          content:
+            text/x-shellscript:
+              schema: { type: string, format: binary }
+        "404":
+          description: Unknown id or kit not available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
   /auth/me:
     get:
       operationId: getAuthMe
@@ -935,6 +963,13 @@ components:
         sslMode:
           type: string
           description: Persisted TLS mode for this target (round-1 review P1-09 —持续可见).
+        poolingWarning:
+          type: string
+          description: >
+            Registration-time warning when the endpoint looks like a pooled
+            connection that pg_dump cannot use (Supabase transaction pooler,
+            Neon '-pooler' endpoint). Present on the create response when
+            detected; absent otherwise.
         lastTask:
           $ref: "#/components/schemas/Task"
         createdAt:
@@ -1012,6 +1047,34 @@ components:
           type: integer
           format: int64
           nullable: true
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+          description: Auto-detected source platform (drives the recovery kit).
+        verifyStatus:
+          type: string
+          enum: ["", pending, running, verified, failed, unsupported, skipped]
+          description: >
+            Restore-verification state machine. Empty only for jobs created
+            before this field existed; pending/running are transitional;
+            verified/failed/unsupported are verifier outcomes; skipped
+            carries the reason in verifyDetail.
+        verifyDetail:
+          type: string
+          description: Human-readable verification outcome or skip reason (redacted).
+        verifyTables:
+          type: integer
+          format: int64
+          description: User tables found in the restored throwaway instance.
+        verifyDurationSecs:
+          type: number
+          format: double
+        verifyProfile:
+          type: string
+          description: How verification was proven (e.g. embedded-local:18).
+        hasRecoveryKit:
+          type: boolean
+          description: A generated restore.sh kit is available for download.
     TaskList:
       type: object
       required: [tasks]

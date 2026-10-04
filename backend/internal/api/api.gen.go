@@ -57,15 +57,23 @@ const (
 
 // Defines values for TaskErrorClass.
 const (
-	Auth          TaskErrorClass = "auth"
-	ClientVersion TaskErrorClass = "client_version"
-	Disk          TaskErrorClass = "disk"
-	Empty         TaskErrorClass = ""
-	Network       TaskErrorClass = "network"
-	Permission    TaskErrorClass = "permission"
-	StorageUpload TaskErrorClass = "storage_upload"
-	Unknown       TaskErrorClass = "unknown"
-	Verification  TaskErrorClass = "verification"
+	TaskErrorClassAuth          TaskErrorClass = "auth"
+	TaskErrorClassClientVersion TaskErrorClass = "client_version"
+	TaskErrorClassDisk          TaskErrorClass = "disk"
+	TaskErrorClassEmpty         TaskErrorClass = ""
+	TaskErrorClassNetwork       TaskErrorClass = "network"
+	TaskErrorClassPermission    TaskErrorClass = "permission"
+	TaskErrorClassStorageUpload TaskErrorClass = "storage_upload"
+	TaskErrorClassUnknown       TaskErrorClass = "unknown"
+	TaskErrorClassVerification  TaskErrorClass = "verification"
+)
+
+// Defines values for TaskPlatform.
+const (
+	Generic  TaskPlatform = "generic"
+	Neon     TaskPlatform = "neon"
+	Railway  TaskPlatform = "railway"
+	Supabase TaskPlatform = "supabase"
 )
 
 // Defines values for TaskStatus.
@@ -76,6 +84,17 @@ const (
 	Pending     TaskStatus = "pending"
 	Running     TaskStatus = "running"
 	Succeeded   TaskStatus = "succeeded"
+)
+
+// Defines values for TaskVerifyStatus.
+const (
+	TaskVerifyStatusEmpty       TaskVerifyStatus = ""
+	TaskVerifyStatusFailed      TaskVerifyStatus = "failed"
+	TaskVerifyStatusPending     TaskVerifyStatus = "pending"
+	TaskVerifyStatusRunning     TaskVerifyStatus = "running"
+	TaskVerifyStatusSkipped     TaskVerifyStatus = "skipped"
+	TaskVerifyStatusUnsupported TaskVerifyStatus = "unsupported"
+	TaskVerifyStatusVerified    TaskVerifyStatus = "verified"
 )
 
 // AgeRecipientRequest defines model for AgeRecipientRequest.
@@ -106,13 +125,16 @@ type BootstrapRequest struct {
 
 // Database defines model for Database.
 type Database struct {
-	CreatedAt     int64            `json:"createdAt"`
-	EnvTag        string           `json:"envTag"`
-	Id            int64            `json:"id"`
-	LastTask      *Task            `json:"lastTask,omitempty"`
-	Name          string           `json:"name"`
-	Platform      DatabasePlatform `json:"platform"`
-	ServerVersion string           `json:"serverVersion"`
+	CreatedAt int64            `json:"createdAt"`
+	EnvTag    string           `json:"envTag"`
+	Id        int64            `json:"id"`
+	LastTask  *Task            `json:"lastTask,omitempty"`
+	Name      string           `json:"name"`
+	Platform  DatabasePlatform `json:"platform"`
+
+	// PoolingWarning Registration-time warning when the endpoint looks like a pooled connection that pg_dump cannot use (Supabase transaction pooler, Neon '-pooler' endpoint). Present on the create response when detected; absent otherwise.
+	PoolingWarning *string `json:"poolingWarning,omitempty"`
+	ServerVersion  string  `json:"serverVersion"`
 
 	// SslMode Persisted TLS mode for this target (round-1 review P1-09 —持续可见).
 	SslMode   string `json:"sslMode"`
@@ -249,17 +271,42 @@ type Task struct {
 	ErrorMessage    *string         `json:"errorMessage,omitempty"`
 	FinishedAt      *int64          `json:"finishedAt"`
 	HasManifest     *bool           `json:"hasManifest,omitempty"`
-	Id              int64           `json:"id"`
-	ScheduledAt     *int64          `json:"scheduledAt,omitempty"`
-	StartedAt       *int64          `json:"startedAt"`
-	Status          TaskStatus      `json:"status"`
+
+	// HasRecoveryKit A generated restore.sh kit is available for download.
+	HasRecoveryKit *bool `json:"hasRecoveryKit,omitempty"`
+	Id             int64 `json:"id"`
+
+	// Platform Auto-detected source platform (drives the recovery kit).
+	Platform    *TaskPlatform `json:"platform,omitempty"`
+	ScheduledAt *int64        `json:"scheduledAt,omitempty"`
+	StartedAt   *int64        `json:"startedAt"`
+	Status      TaskStatus    `json:"status"`
+
+	// VerifyDetail Human-readable verification outcome or skip reason (redacted).
+	VerifyDetail       *string  `json:"verifyDetail,omitempty"`
+	VerifyDurationSecs *float64 `json:"verifyDurationSecs,omitempty"`
+
+	// VerifyProfile How verification was proven (e.g. embedded-local:18).
+	VerifyProfile *string `json:"verifyProfile,omitempty"`
+
+	// VerifyStatus Restore-verification state machine. Empty only for jobs created before this field existed; pending/running are transitional; verified/failed/unsupported are verifier outcomes; skipped carries the reason in verifyDetail.
+	VerifyStatus *TaskVerifyStatus `json:"verifyStatus,omitempty"`
+
+	// VerifyTables User tables found in the restored throwaway instance.
+	VerifyTables *int64 `json:"verifyTables,omitempty"`
 }
 
 // TaskErrorClass defines model for Task.ErrorClass.
 type TaskErrorClass string
 
+// TaskPlatform Auto-detected source platform (drives the recovery kit).
+type TaskPlatform string
+
 // TaskStatus defines model for Task.Status.
 type TaskStatus string
+
+// TaskVerifyStatus Restore-verification state machine. Empty only for jobs created before this field existed; pending/running are transitional; verified/failed/unsupported are verifier outcomes; skipped carries the reason in verifyDetail.
+type TaskVerifyStatus string
 
 // TaskList defines model for TaskList.
 type TaskList struct {
@@ -390,6 +437,9 @@ type ServerInterface interface {
 	// Presigned GET URL for a remotely committed backup (15 min).
 	// (GET /tasks/{id}/download-url)
 	GetTaskDownloadURL(w http.ResponseWriter, r *http.Request, id int64)
+	// Stream the generated restore.sh recovery kit for this backup.
+	// (GET /tasks/{id}/recovery-kit)
+	DownloadRecoveryKit(w http.ResponseWriter, r *http.Request, id int64)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -543,6 +593,12 @@ func (_ Unimplemented) DownloadTask(w http.ResponseWriter, r *http.Request, id i
 // Presigned GET URL for a remotely committed backup (15 min).
 // (GET /tasks/{id}/download-url)
 func (_ Unimplemented) GetTaskDownloadURL(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Stream the generated restore.sh recovery kit for this backup.
+// (GET /tasks/{id}/recovery-kit)
+func (_ Unimplemented) DownloadRecoveryKit(w http.ResponseWriter, r *http.Request, id int64) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1182,6 +1238,37 @@ func (siw *ServerInterfaceWrapper) GetTaskDownloadURL(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// DownloadRecoveryKit operation middleware
+func (siw *ServerInterfaceWrapper) DownloadRecoveryKit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadRecoveryKit(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1369,6 +1456,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/tasks/{id}/download-url", wrapper.GetTaskDownloadURL)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tasks/{id}/recovery-kit", wrapper.DownloadRecoveryKit)
 	})
 
 	return r
@@ -2407,6 +2497,51 @@ func (response GetTaskDownloadURL500JSONResponse) VisitGetTaskDownloadURLRespons
 	return json.NewEncoder(w).Encode(response)
 }
 
+type DownloadRecoveryKitRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DownloadRecoveryKitResponseObject interface {
+	VisitDownloadRecoveryKitResponse(w http.ResponseWriter) error
+}
+
+type DownloadRecoveryKit200TextxShellscriptResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response DownloadRecoveryKit200TextxShellscriptResponse) VisitDownloadRecoveryKitResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "text/x-shellscript")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type DownloadRecoveryKit404JSONResponse Error
+
+func (response DownloadRecoveryKit404JSONResponse) VisitDownloadRecoveryKitResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DownloadRecoveryKit500JSONResponse struct{ InternalJSONResponse }
+
+func (response DownloadRecoveryKit500JSONResponse) VisitDownloadRecoveryKitResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Set the age recipient (public key) used to encrypt backups.
@@ -2484,6 +2619,9 @@ type StrictServerInterface interface {
 	// Presigned GET URL for a remotely committed backup (15 min).
 	// (GET /tasks/{id}/download-url)
 	GetTaskDownloadURL(ctx context.Context, request GetTaskDownloadURLRequestObject) (GetTaskDownloadURLResponseObject, error)
+	// Stream the generated restore.sh recovery kit for this backup.
+	// (GET /tasks/{id}/recovery-kit)
+	DownloadRecoveryKit(ctx context.Context, request DownloadRecoveryKitRequestObject) (DownloadRecoveryKitResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -3174,6 +3312,32 @@ func (sh *strictHandler) GetTaskDownloadURL(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetTaskDownloadURLResponseObject); ok {
 		if err := validResponse.VisitGetTaskDownloadURLResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DownloadRecoveryKit operation middleware
+func (sh *strictHandler) DownloadRecoveryKit(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DownloadRecoveryKitRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DownloadRecoveryKit(ctx, request.(DownloadRecoveryKitRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DownloadRecoveryKit")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DownloadRecoveryKitResponseObject); ok {
+		if err := validResponse.VisitDownloadRecoveryKitResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

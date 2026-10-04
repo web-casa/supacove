@@ -37,6 +37,43 @@ docker compose exec app /app/supabackup bootstrap
 | `SB_PUBLIC_ORIGIN` | （空） | 反代部署时的外部 origin |
 | `SB_TRUSTED_PROXIES` | （空） | 信任的代理 CIDR 列表 |
 | `SB_SECRET_FILE` | `<data>/secret.key` | 主密钥文件路径 |
+| `SB_VERIFY_ENABLED` | `false` | 自动恢复验证开关（见下文"恢复验证"，须显式启用） |
+| `SB_VERIFY_IDENTITY_FILE` | （空） | age 私钥文件路径（启用验证时必填，权限须为 0600） |
+| `SB_VERIFY_PGBIN` | 自动探测 | 验证用 PostgreSQL 服务端二进制目录（如 `/usr/lib/postgresql/18/bin`） |
+
+## 恢复验证（可选，默认关闭）
+
+每次备份成功后，supabackup 可以把密文**解密并恢复进一个一次性的内嵌
+PostgreSQL 实例**，比对 manifest 声明的表数量和扩展，从而证明"这份备份
+真的能恢复"。结果以状态机形式呈现在任务 API 中：
+`pending → running → verified / failed / unsupported`，无法执行时是带原因
+的 `skipped`。
+
+**这是管理员显式决定才启用的功能**（ADR-004）：
+
+- 验证进程与 supabackup 同 UID 运行，**不是沙箱**。恢复的是备份内容本身，
+  它能读写应用可读的文件。只对您信任来源的备份启用。
+- 启用必须提供 age 私钥（`SB_VERIFY_IDENTITY_FILE`）。私钥进入实例内存 =
+  该实例可以解密所有备份。请权衡：验证带来"可恢复性证明"，代价是私钥
+  不再完全离线。
+- 需要宿主机安装 PostgreSQL **服务端**（镜像已内置 PG18；裸机部署需
+  `postgresql-18` 包或用 `SB_VERIFY_PGBIN` 指向现有安装）。
+
+启用方式（compose 示例）：
+
+```yaml
+services:
+  app:
+    environment:
+      SB_VERIFY_ENABLED: "1"
+      SB_VERIFY_IDENTITY_FILE: /run/secrets/age-identity
+    secrets:
+      - age-identity
+```
+
+启动日志会明确打印验证模式（`restore verification ENABLED` /
+`restore verification disabled`）；验证失败不会影响备份本身的提交状态，
+但会如实标记在任务上。
 
 ## 初始化流程
 
@@ -60,16 +97,31 @@ docker compose exec app /app/supabackup bootstrap
 
 ### 步骤
 
+每个成功备份都会自动生成**恢复套件**（restore.sh），包含密文校验和、
+密钥指纹与平台专属指引，可在 Web UI 的任务页下载（`GET /api/tasks/{id}/recovery-kit`）。
+推荐直接使用它——它会校验密文哈希、拒绝非空目标、拒绝把密码放进命令行，
+并在恢复后核对 manifest 声明的表数量：
+
+```bash
+AGE_IDENTITY_FILE=/secure/age-identity.txt PGPASSWORD='...' \
+  sh restore.sh "postgresql://user@host:5432/newdb" backup.dump.age
+```
+
+手动等价流程：
+
 ```bash
 # 1. 解密
 age --decrypt -i age-identity.txt -o restored.dump backup.dump.age
 
 # 2. 恢复到全新数据库
-pg_restore --exit-on-error --no-owner -d "postgresql://user:pass@host/target_db" restored.dump
+pg_restore --exit-on-error --no-owner -d "postgresql://user@host/target_db" restored.dump
 
 # 3. 验证
-psql -d "postgresql://user:pass@host/target_db" -c "SELECT count(*) FROM pg_tables"
+psql -d "postgresql://user@host/target_db" -c "SELECT count(*) FROM pg_tables"
 ```
+
+注意：连接串中**不要内嵌密码**（会暴露在 `ps` 输出里），用 `PGPASSWORD`
+环境变量传递。恢复失败时目标库可能已被部分写入——从空库重试。
 
 ## 安全注意事项
 

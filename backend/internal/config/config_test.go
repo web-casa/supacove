@@ -91,3 +91,89 @@ func repeat(s string, n int) string {
 	}
 	return string(out)
 }
+
+// TestVerifyEnablementGate: SB_VERIFY_ENABLED without the identity file is a
+// configuration ERROR (never a silent no-op); a symlinked or permissive
+// identity file is refused (ADR-004 enablement gate).
+func TestVerifyEnablementGate(t *testing.T) {
+	setEnv := func(t *testing.T, k, v string) {
+		old, had := os.LookupEnv(k)
+		if v == "" {
+			_ = os.Unsetenv(k)
+		} else {
+			_ = os.Setenv(k, v)
+		}
+		t.Cleanup(func() {
+			if had {
+				_ = os.Setenv(k, old)
+			} else {
+				_ = os.Unsetenv(k)
+			}
+		})
+	}
+
+	// Enabled without identity → error.
+	setEnv(t, "SB_VERIFY_ENABLED", "1")
+	setEnv(t, "SB_VERIFY_IDENTITY_FILE", "")
+	if _, err := Load(); err == nil || !containsStr(err.Error(), "SB_VERIFY_IDENTITY_FILE") {
+		t.Fatalf("enabled without identity must fail naming the variable, got %v", err)
+	}
+
+	// Identity missing on disk → error.
+	setEnv(t, "SB_VERIFY_IDENTITY_FILE", "/nonexistent/identity.txt")
+	if _, err := Load(); err == nil {
+		t.Fatal("missing identity file must fail")
+	}
+
+	// Permissive identity mode → error.
+	dir := t.TempDir()
+	loose := filepath.Join(dir, "identity.txt")
+	if err := os.WriteFile(loose, []byte("AGE-SECRET-KEY-1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setEnv(t, "SB_VERIFY_IDENTITY_FILE", loose)
+	if _, err := Load(); err == nil || !containsStr(err.Error(), "0600") {
+		t.Fatalf("permissive identity mode must fail, got %v", err)
+	}
+
+	// Symlinked identity → error.
+	tight := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(tight, []byte("AGE-SECRET-KEY-1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(tight, link); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	setEnv(t, "SB_VERIFY_IDENTITY_FILE", link)
+	if _, err := Load(); err == nil {
+		t.Fatal("symlinked identity must fail")
+	}
+
+	// Proper file → OK, and disabled by default.
+	setEnv(t, "SB_VERIFY_IDENTITY_FILE", tight)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("valid verification config rejected: %v", err)
+	}
+	if !c.VerifyEnabled {
+		t.Fatal("VerifyEnabled lost")
+	}
+	setEnv(t, "SB_VERIFY_ENABLED", "")
+	c, err = Load()
+	if err != nil {
+		t.Fatalf("default load failed: %v", err)
+	}
+	if c.VerifyEnabled {
+		t.Fatalf("verification must default off: %+v", c)
+	}
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

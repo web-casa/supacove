@@ -369,6 +369,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{id}/recovery-kit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream the generated restore.sh recovery kit for this backup.
+         * @description The kit is a self-contained POSIX sh script (restore.sh) embedding the ciphertext checksum, the key id and platform-specific guidance. It is generated for every successful backup and regenerated at startup if missing. Run it with `sh restore.sh`, never by executing it directly.
+         */
+        get: operations["downloadRecoveryKit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -512,6 +532,8 @@ export interface components {
             serverVersion: string;
             /** @description Persisted TLS mode for this target (round-1 review P1-09 —持续可见). */
             sslMode: string;
+            /** @description Registration-time warning when the endpoint looks like a pooled connection that pg_dump cannot use (Supabase transaction pooler, Neon '-pooler' endpoint). Present on the create response when detected; absent otherwise. */
+            poolingWarning?: string;
             lastTask?: components["schemas"]["Task"];
             /** Format: int64 */
             createdAt: number;
@@ -557,6 +579,29 @@ export interface components {
             startedAt?: number | null;
             /** Format: int64 */
             finishedAt?: number | null;
+            /**
+             * @description Auto-detected source platform (drives the recovery kit).
+             * @enum {string}
+             */
+            platform?: "supabase" | "neon" | "railway" | "generic";
+            /**
+             * @description Restore-verification state machine. Empty only for jobs created before this field existed; pending/running are transitional; verified/failed/unsupported are verifier outcomes; skipped carries the reason in verifyDetail.
+             * @enum {string}
+             */
+            verifyStatus?: "" | "pending" | "running" | "verified" | "failed" | "unsupported" | "skipped";
+            /** @description Human-readable verification outcome or skip reason (redacted). */
+            verifyDetail?: string;
+            /**
+             * Format: int64
+             * @description User tables found in the restored throwaway instance.
+             */
+            verifyTables?: number;
+            /** Format: double */
+            verifyDurationSecs?: number;
+            /** @description How verification was proven (e.g. embedded-local:18). */
+            verifyProfile?: string;
+            /** @description A generated restore.sh kit is available for download. */
+            hasRecoveryKit?: boolean;
         };
         TaskList: {
             tasks: components["schemas"]["Task"][];
@@ -1485,6 +1530,38 @@ export interface operations {
                 };
             };
             /** @description Unknown id or artifact gone. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    downloadRecoveryKit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The recovery kit script. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/x-shellscript": string;
+                };
+            };
+            /** @description Unknown id or kit not available. */
             404: {
                 headers: {
                     [name: string]: unknown;

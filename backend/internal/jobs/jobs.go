@@ -29,7 +29,6 @@ import (
 	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
 	"github.com/cloudfan/supabackup/backend/internal/stats"
 	"github.com/cloudfan/supabackup/backend/internal/storage"
-	"github.com/cloudfan/supabackup/backend/internal/verifier"
 )
 
 // dbExec is the minimal SQL execution interface shared by *sql.DB and *sql.Tx.
@@ -91,23 +90,32 @@ type Runner struct {
 	destBackends   map[int64]storage.Backend
 	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error) // initialized in NewRunner
 	statsRecorder  *stats.Recorder
-	verifier       *verifier.Verifier
+	verifier       VerifyEngine
+	// verifyQueue feeds the single verification worker (bounded; see
+	// jobs/verify.go).
+	verifyQueue    chan verifyRequest
+	verifyInFlight map[int64]bool // job IDs whose artifact a verification is reading
+	verifyIdentity string
+	verifyTimeout  time.Duration
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
 	return &Runner{
-		store:        store,
-		authDB:       store.DB,
-		stagingDir:   stagingDir,
-		cfg:          dumper.Config{StagingDir: stagingDir},
-		key:          key,
-		recipient:    recipient,
-		log:          log,
-		cancelFns:    make(map[int64]context.CancelFunc),
-		perDB:        make(map[int64]bool),
-		wake:         make(chan struct{}, 1),
-		stopDone:     make(chan struct{}),
-		destBackends: make(map[int64]storage.Backend),
+		store:          store,
+		authDB:         store.DB,
+		stagingDir:     stagingDir,
+		cfg:            dumper.Config{StagingDir: stagingDir},
+		key:            key,
+		recipient:      recipient,
+		log:            log,
+		cancelFns:      make(map[int64]context.CancelFunc),
+		perDB:          make(map[int64]bool),
+		wake:           make(chan struct{}, 1),
+		stopDone:       make(chan struct{}),
+		destBackends:   make(map[int64]storage.Backend),
+		verifyQueue:    make(chan verifyRequest, verifyQueueCap),
+		verifyInFlight: make(map[int64]bool),
+		verifyTimeout:  defaultVerifyTimeout,
 		backendFactory: func(ctx context.Context, d *Destination) (storage.Backend, error) {
 			return storage.New(ctx, d.StorageConfig(), log)
 		},
@@ -373,8 +381,9 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 	}
 }
 
-// Start launches the single-concurrency worker. v1 fixes global concurrency
-// at 1 (dev-plan Phase 2 / P4 will make it configurable).
+// Start launches the single-concurrency worker and — when a verifier is
+// configured — the single verification worker plus startup convergence for
+// verifications that were pending at shutdown (phase-5 review P1-06).
 func (r *Runner) Start(parent context.Context) {
 	r.startOnce.Do(func() {
 		r.lifeCtx, r.lifeCancel = context.WithCancel(parent)
@@ -393,6 +402,10 @@ func (r *Runner) Start(parent context.Context) {
 				}
 			}
 		}()
+		if r.verifier != nil {
+			r.startVerifyWorker(r.lifeCtx)
+			go r.ResumePendingVerifications(r.lifeCtx)
+		}
 	})
 }
 
@@ -418,9 +431,6 @@ func (r *Runner) SetLocalKeep(n int) { r.localKeep = clampKeep(n, 1) }
 
 // SetStatsRecorder wires the statistics persistence layer.
 func (r *Runner) SetStatsRecorder(sr *stats.Recorder) { r.statsRecorder = sr }
-
-// SetVerifier wires the embedded restore verification engine.
-func (r *Runner) SetVerifier(v *verifier.Verifier) { r.verifier = v }
 
 // Stop terminates the worker.
 func (r *Runner) Stop() {
@@ -649,7 +659,13 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		return
 	}
 	knownSecrets = append(knownSecrets, ci.Password)
-	fmt.Println("debug: platform detect for", ci.Host)
+	// Platform detection is host-characteristic only (never re-detected from
+	// untrusted input later); it drives the recovery kit and is persisted on
+	// the job so API consumers see the same classification the kit used.
+	detectedPlatform := platformpkg.Detect(ci.Host)
+	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); hint != "" {
+		r.log.Warn("pooling hint", "job", jobID, "database", name, "hint", hint)
+	}
 
 	// Resolve the destination EARLY (before the dump): the snapshot is used
 	// for the remote phase and MUST NOT be re-read after the dump completes
@@ -756,10 +772,15 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 			HasLargeObjects:  deps.HasLargeObjects,
 			HasForeignTables: deps.HasForeignTables,
 			ServerEncoding:   deps.ServerEncoding,
+			TableCount:       deps.TableCount,
 		},
 		Verification: manifest.Verification{
 			RestoreVerified: false,
-			Note:            "this backup has NOT been restore-verified yet; use the recovery kit and record the drill result",
+			// Snapshot semantics (P2-02): this file is written at backup
+			// time, BEFORE the asynchronous restore verification runs. The
+			// authoritative, live verification state lives on the job record
+			// (GET /api/tasks/{id}) — never in this snapshot.
+			Note: "verification SNAPSHOT AT BACKUP TIME: restore-verification had not run when this manifest was written. Check the job's verifyStatus via the API/UI for the authoritative, possibly newer outcome; use the recovery kit and record the drill result.",
 		},
 		Archive: manifest.Archive{
 			FileName:   filepath.Base(result.ArtifactPath),
@@ -807,19 +828,35 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 
 	// 6) Success record — the only path that reaches 'succeeded'. The final
 	// update is conditional (cancellation arbitration) and checks
-	// RowsAffected (round-1 reviews P1-12/P1-04).
+	// RowsAffected (round-1 reviews P1-12/P1-04). The detected platform and
+	// the initial verification state are persisted in the SAME update so no
+	// observer ever sees a succeeded job without a verification state
+	// (phase-5 review P2-02).
+	verifyStatus := "skipped"
+	verifyDetail := "restore verification is not enabled on this instance (SB_VERIFY_ENABLED; see ADR-004)"
+	if r.verifier != nil {
+		if r.verifyIdentity == "" {
+			verifyDetail = "verification enabled but no age identity provided to the instance (SB_VERIFY_IDENTITY_FILE); artifacts cannot be decrypted for automatic restore checks"
+		} else {
+			verifyStatus = "pending"
+			verifyDetail = ""
+		}
+	}
 	successSQL := `
 		UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
-		  artifact_path = ?, artifact_sha256 = ?, artifact_size = ?, manifest_path = ?
+		  artifact_path = ?, artifact_sha256 = ?, artifact_size = ?, manifest_path = ?,
+		  platform = ?, verify_status = ?, verify_detail = ?
 		WHERE id = ? AND status = 'running' AND cancel_requested = 0`
 	res, err := r.authDB.Exec(successSQL,
-		result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath, jobID)
+		result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath,
+		string(detectedPlatform), verifyStatus, verifyDetail, jobID)
 	if err != nil {
 		// SQLITE_BUSY/ENOSPC here would leave a committed artifact with a
 		// 'running' job — bounded retry, then a loud failure record.
 		time.Sleep(500 * time.Millisecond)
 		res, err = r.authDB.Exec(successSQL,
-			result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath, jobID)
+			result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath,
+			string(detectedPlatform), verifyStatus, verifyDetail, jobID)
 	}
 	if err != nil {
 		r.log.Error("job success update failed twice", "job", jobID, "err", err)
@@ -842,52 +879,43 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
 	r.pingHeartbeat()
 
-	// Generate recovery kit (Phase 5): platform-aware restore.sh
+	// Recovery kit (Phase 5): platform-aware restore.sh, persisted and
+	// referenced on the job so the API can serve it (phase-5 review P1-09).
+	// Generation failure is logged, never fails the committed backup; the
+	// startup backfill regenerates missing kits.
 	kitPath := manifestPath + ".restore.sh"
-	kit := recovery.KitInput{
+	kitScript := recovery.GenerateRestoreScriptWithTables(recovery.KitInput{
 		BackupUUID:       fmt.Sprintf("job-%d", jobID),
-		Platform:         platformpkg.Detect(ci.Host),
+		Platform:         detectedPlatform,
 		ArtifactFileName: filepath.Base(result.ArtifactPath),
 		SHA256:           result.SHA256,
-	}
-	kitScript := recovery.GenerateRestoreScript(kit)
+		KeyID:            result.EncryptedTo,
+	}, deps.TableCount)
 	if kwerr := durableWriteFile(kitPath, []byte(kitScript)); kwerr != nil {
 		r.log.Error("recovery kit generation failed", "job", jobID, "err", kwerr)
+	} else if _, uerr := r.authDB.Exec(`
+		UPDATE jobs SET recovery_kit_path = ? WHERE id = ?`, kitPath, jobID); uerr != nil {
+		r.log.Error("recovery kit reference write failed", "job", jobID, "err", uerr)
 	}
 
-	// Async restore verification (Phase 6): non-blocking, bounded timeout.
-	// Skipped when no verifier is configured (e.g. in tests without PG server
-	// binaries).
-	if r.verifier != nil {
-		go func() {
-			vCtx, vCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer vCancel()
-			vRes := r.verifier.Verify(vCtx, verifier.Input{DumpPath: result.ArtifactPath, Timeout: 5 * time.Minute})
-			vStatus := string(vRes.Status)
-			vTables := vRes.TablesFound
-			vDur := vRes.Duration.Seconds()
-			if _, uerr := r.authDB.Exec(`
-			UPDATE jobs SET verify_status = ?, verify_detail = ?,
-			  verify_tables = ?, verify_duration_secs = ?
-			WHERE id = ?`, vStatus, vRes.Detail, vTables, vDur, jobID); uerr != nil {
-				r.log.Error("verify state update failed", "job", jobID, "err", uerr)
-			}
-			if vRes.Pass() {
-				r.log.Info("restore verification passed", "job", jobID, "tables", vTables)
-			} else {
-				r.log.Warn("restore verification failed", "job", jobID, "detail", vRes.Detail)
-			}
-		}()
-	} // end if r.verifier != nil
+	// Async restore verification (Phase 6): queued to the single bound
+	// worker; states pending → running → verified/failed/unsupported, or an
+	// explicit skipped reason. No goroutine escapes the Runner lifecycle.
+	if r.verifier != nil && verifyStatus == "pending" {
+		r.enqueueVerification(jobID, redact)
+	}
 
-	// Record statistics (Phase 8): best-effort, never affects the job.
+	// Record statistics (Phase 8): best-effort, never affects the job. The
+	// verify status recorded here is the state AT RECORD TIME (pending or an
+	// explicit skip reason) — the API serves the authoritative live value
+	// from the jobs row, never this snapshot (phase-5 review P2-02).
 	if r.statsRecorder != nil {
 		dumpSz := result.SizeBytes
 		if err := r.statsRecorder.Record(ctx, stats.Entry{
 			JobID: jobID, DatabaseName: name,
 			DumpSize: dumpSz, ArtifactSize: result.SizeBytes,
 			DurationSecs: time.Since(dumpStart).Seconds(),
-			VerifyStatus: "not_run",
+			VerifyStatus: verifyStatus,
 		}); err != nil {
 			r.log.Error("stats recording failed", "job", jobID, "err", err)
 		}

@@ -256,6 +256,50 @@ func (a *apiService) DownloadTask(ctx context.Context, request api.DownloadTaskR
 	}, nil
 }
 
+// DownloadRecoveryKit streams the generated restore.sh recovery kit for a
+// succeeded backup (phase-5 review P1-09: the kit is part of the delivered
+// backup, not a leftover file). The path must resolve under the staging
+// directory, same containment rule as the artifact download.
+func (a *apiService) DownloadRecoveryKit(ctx context.Context, request api.DownloadRecoveryKitRequestObject) (api.DownloadRecoveryKitResponseObject, error) {
+	t, err := jobs.GetTask(a.srv.store.DB, request.Id)
+	if errors.Is(err, jobs.ErrNotFound) {
+		return api.DownloadRecoveryKit404JSONResponse{Code: "not_found", Message: "task not found"}, nil
+	}
+	if err != nil {
+		return api.DownloadRecoveryKit500JSONResponse{}, nil
+	}
+	if t.Status != "succeeded" || !t.HasRecoveryKit {
+		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available",
+			Message: "no recovery kit for this task"}, nil
+	}
+	stagingAbs, err := filepath.Abs(a.srv.stagingDir)
+	if err != nil {
+		return api.DownloadRecoveryKit500JSONResponse{}, nil
+	}
+	kitAbs, err := filepath.Abs(t.RecoveryKitPath)
+	if err != nil {
+		return api.DownloadRecoveryKit500JSONResponse{}, nil
+	}
+	if !strings.HasPrefix(kitAbs, stagingAbs+string(os.PathSeparator)) {
+		a.srv.log.Error("kit path escaped staging", "job", request.Id)
+		return api.DownloadRecoveryKit500JSONResponse{}, nil
+	}
+	f, err := os.Open(kitAbs)
+	if err != nil {
+		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available",
+			Message: "recovery kit file no longer present; it is regenerated at the next startup"}, nil
+	}
+	st, err := f.Stat()
+	if err != nil || st.IsDir() {
+		f.Close()
+		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available", Message: "recovery kit file no longer present"}, nil
+	}
+	return api.DownloadRecoveryKit200TextxShellscriptResponse{
+		Body:          f,
+		ContentLength: st.Size(),
+	}, nil
+}
+
 func derefString(v *string) string {
 	if v == nil {
 		return ""

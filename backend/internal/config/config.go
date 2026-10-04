@@ -48,6 +48,19 @@ type Config struct {
 	// X-Forwarded-For. Empty means no proxy is trusted and client IPs are
 	// taken from the socket address only (review P0-01).
 	TrustedProxies string
+	// VerifyEnabled turns on automatic restore verification after every
+	// successful backup (ADR-004). It is OFF by default and must be enabled
+	// deliberately by the administrator: verification restores the dump in a
+	// same-UID throwaway PostgreSQL instance (NOT a sandbox) and requires
+	// the age identity to be available to this instance.
+	VerifyEnabled bool
+	// VerifyIdentityFile is the path to the offline age identity file used
+	// to decrypt artifacts for verification. Required when VerifyEnabled.
+	// Providing the identity to the instance is an explicit trust decision.
+	VerifyIdentityFile string
+	// VerifyPGBin overrides the PostgreSQL server binary directory used by
+	// the embedded verifier. Empty auto-detects /usr/lib/postgresql/<maj>/bin.
+	VerifyPGBin string
 	// Version metadata, wired at build time.
 	Version, Commit, BuildDate string
 }
@@ -71,16 +84,19 @@ func Load() (*Config, error) {
 		quota = n
 	}
 	c := &Config{
-		DataDir:           envOr("SB_DATA_DIR", "./data"),
-		LocalKeep:         localKeep,
-		StagingQuotaBytes: quota,
-		Addr:              envOr("SB_ADDR", ":8080"),
-		SecretFile:        os.Getenv("SB_SECRET_FILE"),
-		InsecureCookie:    envBool("SB_INSECURE_COOKIE"),
-		PublicOrigin:      os.Getenv("SB_PUBLIC_ORIGIN"),
-		TrustedProxies:    os.Getenv("SB_TRUSTED_PROXIES"),
-		BootstrapTokenTTL: 15 * time.Minute,
-		SessionTTL:        7 * 24 * time.Hour,
+		DataDir:            envOr("SB_DATA_DIR", "./data"),
+		LocalKeep:          localKeep,
+		StagingQuotaBytes:  quota,
+		Addr:               envOr("SB_ADDR", ":8080"),
+		SecretFile:         os.Getenv("SB_SECRET_FILE"),
+		InsecureCookie:     envBool("SB_INSECURE_COOKIE"),
+		PublicOrigin:       os.Getenv("SB_PUBLIC_ORIGIN"),
+		TrustedProxies:     os.Getenv("SB_TRUSTED_PROXIES"),
+		VerifyEnabled:      envBool("SB_VERIFY_ENABLED"),
+		VerifyIdentityFile: os.Getenv("SB_VERIFY_IDENTITY_FILE"),
+		VerifyPGBin:        os.Getenv("SB_VERIFY_PGBIN"),
+		BootstrapTokenTTL:  15 * time.Minute,
+		SessionTTL:         7 * 24 * time.Hour,
 	}
 	c.DataDir = filepath.Clean(c.DataDir)
 	if c.SecretFile == "" {
@@ -99,6 +115,27 @@ func Load() (*Config, error) {
 	}
 	if _, err := c.TrustedProxyCIDRs(); err != nil {
 		return nil, err
+	}
+	// ADR-004 enablement gate: verification without the identity would be a
+	// silent no-op, so an inconsistent enablement is a configuration error,
+	// not a warning.
+	if c.VerifyEnabled {
+		if c.VerifyIdentityFile == "" {
+			return nil, errors.New("SB_VERIFY_ENABLED=1 requires SB_VERIFY_IDENTITY_FILE (the offline age identity); verification cannot decrypt artifacts without it")
+		}
+		st, err := os.Lstat(c.VerifyIdentityFile)
+		if err != nil {
+			return nil, fmt.Errorf("SB_VERIFY_IDENTITY_FILE %s: %w", c.VerifyIdentityFile, err)
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("SB_VERIFY_IDENTITY_FILE %s is a symlink; refusing", c.VerifyIdentityFile)
+		}
+		if !st.Mode().IsRegular() {
+			return nil, fmt.Errorf("SB_VERIFY_IDENTITY_FILE %s is not a regular file", c.VerifyIdentityFile)
+		}
+		if st.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("SB_VERIFY_IDENTITY_FILE %s has permissive mode %04o; want 0600", c.VerifyIdentityFile, st.Mode().Perm())
+		}
 	}
 	return c, nil
 }

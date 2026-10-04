@@ -51,6 +51,11 @@ type Dependencies struct {
 	HasLargeObjects  bool        `json:"hasLargeObjects"`
 	HasForeignTables bool        `json:"hasForeignTables"`
 	ServerEncoding   string      `json:"serverEncoding"`
+	// TableCount is the number of user tables at dump time. It is the
+	// expected-object-set baseline restore verification compares against
+	// (phase-5 review P1-08): a restore that completes without error but
+	// loses tables must NOT be reported as verified.
+	TableCount int64 `json:"tableCount"`
 }
 
 // CollectDependencies gathers the restore-relevant facts recorded in the
@@ -98,6 +103,12 @@ func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error
 	}
 	if err := conn.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM pg_foreign_table)`).Scan(&d.HasForeignTables); err != nil {
+		return nil, ClassifyError(err)
+	}
+	if err := conn.QueryRow(ctx,
+		`SELECT count(*) FROM pg_tables
+		 WHERE schemaname NOT IN ('pg_catalog','information_schema','pg_toast')`).
+		Scan(&d.TableCount); err != nil {
 		return nil, ClassifyError(err)
 	}
 

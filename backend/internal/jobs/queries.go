@@ -25,6 +25,19 @@ type Task struct {
 	ScheduledAt     int64  `json:"scheduledAt"`
 	StartedAt       *int64 `json:"startedAt,omitempty"`
 	FinishedAt      *int64 `json:"finishedAt,omitempty"`
+
+	// Phase 5/6 fields: detected platform, restore-verification state
+	// machine and kit availability (phase-5 review P2-02: the jobs row is
+	// the single authoritative verification status source, visible here).
+	Platform        string `json:"-"`
+	RecoveryKitPath string `json:"-"`
+
+	VerifyStatus       string  `json:"verifyStatus,omitempty"`
+	VerifyDetail       string  `json:"verifyDetail,omitempty"`
+	VerifyTables       int64   `json:"verifyTables,omitempty"`
+	VerifyDurationSecs float64 `json:"verifyDurationSecs,omitempty"`
+	VerifyProfile      string  `json:"verifyProfile,omitempty"`
+	HasRecoveryKit     bool    `json:"hasRecoveryKit"`
 }
 
 var ErrNotFound = errors.New("not found")
@@ -38,9 +51,13 @@ func scanTask(scan func(dest ...any) error) (*Task, error) {
 	var hasManifestPath string
 	var destinationID sql.NullInt64
 	var remoteState, remoteKey string
+	var verifyTables int64
+	var verifyDur float64
 	if err := scan(&t.ID, &t.DatabaseID, &t.Status, &t.Attempt, &t.CancelRequested,
 		&cls, &errMsg, &sha, &size, &hasManifestPath,
-		&t.ScheduledAt, &startedAt, &finishedAt, &destinationID, &remoteState, &remoteKey); err != nil {
+		&t.ScheduledAt, &startedAt, &finishedAt, &destinationID, &remoteState, &remoteKey,
+		&t.Platform, &t.VerifyStatus, &t.VerifyDetail, &verifyTables, &verifyDur,
+		&t.VerifyProfile, &t.RecoveryKitPath); err != nil {
 		return nil, err
 	}
 	if destinationID.Valid {
@@ -53,6 +70,9 @@ func scanTask(scan func(dest ...any) error) (*Task, error) {
 	t.ArtifactSHA256 = sha
 	t.ArtifactSize = size
 	t.HasManifest = hasManifestPath != ""
+	t.HasRecoveryKit = t.RecoveryKitPath != ""
+	t.VerifyTables = verifyTables
+	t.VerifyDurationSecs = verifyDur
 	if startedAt.Valid {
 		v := startedAt.Int64
 		t.StartedAt = &v
@@ -66,7 +86,10 @@ func scanTask(scan func(dest ...any) error) (*Task, error) {
 
 const taskColumns = `id, database_id, status, attempt, cancel_requested,
 	error_class, error_message, artifact_sha256, artifact_size, manifest_path,
-	scheduled_at, started_at, finished_at, destination_id, remote_state, remote_object_key`
+	scheduled_at, started_at, finished_at, destination_id, remote_state, remote_object_key,
+	COALESCE(platform,''), COALESCE(verify_status,''), COALESCE(verify_detail,''),
+	verify_tables, verify_duration_secs, COALESCE(verify_profile,''),
+	COALESCE(recovery_kit_path,'')`
 
 // GetTask loads one job.
 func GetTask(dbh *sql.DB, id int64) (*Task, error) {
