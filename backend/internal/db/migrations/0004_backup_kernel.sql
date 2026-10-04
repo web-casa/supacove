@@ -36,6 +36,7 @@ CREATE TABLE jobs (
     artifact_path  TEXT    NOT NULL DEFAULT '',
     artifact_sha256 TEXT   NOT NULL DEFAULT '',
     artifact_size  INTEGER NOT NULL DEFAULT 0,
+    duration_secs  REAL NOT NULL DEFAULT 0,
     manifest_path  TEXT    NOT NULL DEFAULT '',
     scheduled_at   INTEGER NOT NULL,
     started_at     INTEGER,

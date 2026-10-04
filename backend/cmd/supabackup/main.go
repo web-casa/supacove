@@ -29,6 +29,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/limiter"
 	"github.com/cloudfan/supabackup/backend/internal/scheduler"
+	"github.com/cloudfan/supabackup/backend/internal/stats"
 	"github.com/cloudfan/supabackup/backend/internal/server"
 	"github.com/cloudfan/supabackup/backend/internal/staging"
 )
@@ -210,7 +211,8 @@ func runServe() error {
 	runner.SetQuota(cfg.StagingQuotaBytes)
 	runner.SetLocalKeep(cfg.LocalKeep)
 	if hb := os.Getenv("SB_HEARTBEAT_URL"); hb != "" {
-		runner.SetHeartbeatURL(hb)
+		runner.SetLocalKeep(cfg.LocalKeep)
+	runner.SetStatsRecorder(stats.New(store.DB))
 		log.Info("heartbeat configured", "url_prefix", hb[:min(len(hb), 20)])
 	}
 	srv.SetRunner(runner, stg.Dir)

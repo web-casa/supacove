@@ -10,3 +10,6 @@ ALTER TABLE jobs ADD COLUMN manifest_version_id TEXT NOT NULL DEFAULT '';
 -- +goose Down
 ALTER TABLE jobs DROP COLUMN artifact_version_id;
 ALTER TABLE jobs DROP COLUMN manifest_version_id;
+
+-- Phase 3 round-1: duration_secs column on jobs (missing from 0004)
+ALTER TABLE jobs ADD COLUMN duration_secs REAL NOT NULL DEFAULT 0;
