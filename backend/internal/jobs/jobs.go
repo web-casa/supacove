@@ -28,6 +28,12 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/storage"
 )
 
+// dbExec is the minimal SQL execution interface shared by *sql.DB and *sql.Tx.
+type dbExec interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // Error classes (dev-plan seven classes). Stored verbatim in jobs.error_class.
 const (
 	ClassNetwork    = string(pgclient.ClassNetwork)
@@ -236,12 +242,19 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 // (idx_jobs_active_per_database) makes the no-overlap promise atomic: two
 // concurrent enqueues cannot both succeed (round-1 review P1-05).
 func (r *Runner) Enqueue(ctx context.Context, databaseID int64) (int64, error) {
+	return r.EnqueueTx(ctx, r.authDB, databaseID)
+}
+
+// EnqueueTx creates a pending job within the given DB handle, enabling the
+// scheduler to make cursor advance and job creation atomic (round-4 review
+// P1-01).
+func (r *Runner) EnqueueTx(ctx context.Context, dbh dbExec, databaseID int64) (int64, error) {
 	uuidBytes := make([]byte, 16)
 	if _, err := rand.Read(uuidBytes); err != nil {
 		return 0, fmt.Errorf("generate backup uuid: %w", err)
 	}
 	backupUUID := hex.EncodeToString(uuidBytes)
-	res, err := r.authDB.ExecContext(ctx,
+	res, err := dbh.ExecContext(ctx,
 		`INSERT INTO jobs (database_id, backup_uuid, status, scheduled_at, created_at)
 		 VALUES (?, ?, 'pending', strftime('%s','now'), strftime('%s','now'))`,
 		databaseID, backupUUID)

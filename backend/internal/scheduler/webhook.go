@@ -10,8 +10,10 @@ import (
 )
 
 // postWebhook sends a JSON POST to a webhook URL with a 10s timeout.
-// Failures are logged, never propagated (notification is best-effort).
-func (s *Scheduler) postWebhook(url string, payload map[string]any) {
+// Failures are logged WITHOUT the URL (which carries bearer credentials in
+// its path/query for most webhook providers); only the webhook name and
+// status/error category are recorded (round-4 review P1-06).
+func (s *Scheduler) postWebhook(name, url string, payload map[string]any) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	body, err := json.Marshal(payload)
@@ -21,18 +23,20 @@ func (s *Scheduler) postWebhook(url string, payload map[string]any) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		s.log.Error("webhook request", "err", err)
+		// Do not log the URL (may contain bearer tokens).
+		s.log.Error("webhook request build failed", "name", name)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Supabackup-Event", fmt.Sprintf("%v", payload["event"]))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		s.log.Error("webhook delivery failed", "url", url, "err", err)
+		// Network error may contain the URL — log only the error category.
+		s.log.Error("webhook delivery failed", "name", name, "err_type", fmt.Sprintf("%T", err))
 		return
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		s.log.Error("webhook delivery rejected", "url", url, "status", resp.StatusCode)
+		s.log.Error("webhook delivery rejected", "name", name, "status", resp.StatusCode)
 	}
 }

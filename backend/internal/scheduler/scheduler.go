@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -20,9 +21,6 @@ import (
 )
 
 // Scheduler polls the databases table for due backups and enqueues jobs.
-// It uses the robfig/cron parser for schedule evaluation but manages its own
-// polling loop (no goroutine-per-job) so SQLite remains the single source
-// of truth for what is due and when.
 type Scheduler struct {
 	store    *sql.DB
 	runner   *jobs.Runner
@@ -49,7 +47,7 @@ type ScheduleInfo struct {
 	CronTZ        string
 	MaxAgeHours   int
 	Paused        bool
-	LastScheduled int64 // unix seconds of last successful schedule enqueue
+	LastScheduled int64
 }
 
 // New creates a Scheduler.
@@ -63,7 +61,8 @@ func New(store *sql.DB, runner *jobs.Runner, log *slog.Logger, interval time.Dur
 	}
 }
 
-// SetWebhooks configures webhook notification targets.
+// SetWebhooks configures webhook notification targets. Must be called
+// before Start.
 func (s *Scheduler) SetWebhooks(wh []WebhookConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,9 +131,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 			continue
 		}
 		if err := s.enqueue(ctx, sch, now); err != nil {
-			if strings.Contains(err.Error(), "already has a pending") ||
-				strings.Contains(err.Error(), "already_queued") {
-				s.log.Debug("backup already queued", "database", sch.Name)
+			if errors.Is(err, jobs.ErrAlreadyQueued) {
+				s.log.Info("backup already queued; schedule cursor advanced", "database", sch.Name)
 			} else {
 				s.log.Error("schedule enqueue failed", "database", sch.Name, "err", err)
 			}
@@ -147,43 +145,55 @@ func (s *Scheduler) tick(ctx context.Context) {
 	s.checkFailures(ctx)
 }
 
-// isDue evaluates whether the cron schedule is due at the given time,
-// checking the interval between the last scheduled time and now.
+// isDue evaluates whether the cron schedule is due at the given time.
+// Unreachable dates (e.g. Feb 31) are handled by cron.Next returning a zero
+// time, which we check explicitly. Malformed expressions return false.
 func isDue(sch ScheduleInfo, now time.Time) bool {
-	loc, err := time.LoadLocation(sch.CronTZ)
-	if err != nil {
-		loc = time.UTC
-	}
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.DowOptional)
 	sched, err := cron.ParseStandard(sch.CronExpr)
 	if err != nil {
 		return false
 	}
-	_ = parser // parser is only used for validation; ParseStandard handles the rest
-
-	// The schedule is due if there exists a cron fire time between the last
-	// scheduled moment and now. We approximate by checking if the most recent
-	// fire time of the cron is after the last scheduled moment.
-	lastSched := time.Unix(sch.LastScheduled, 0).In(loc)
-	nowLocal := now.In(loc)
-
-	// Find the most recent fire time before now
-	next := sched.Next(lastSched)
-	if next.After(nowLocal) {
-		return false // next fire is in the future
+	loc, err := time.LoadLocation(sch.CronTZ)
+	if err != nil {
+		loc = time.UTC
 	}
-	return true // a fire time occurred between lastSched and now
+	lastSched := time.Unix(sch.LastScheduled, 0).In(loc)
+	if sch.LastScheduled == 0 {
+		// First evaluation: schedule immediately.
+		return true
+	}
+	next := sched.Next(lastSched)
+	if next.IsZero() {
+		return false // unreachable date (e.g. Feb 31 only)
+	}
+	return !next.After(now)
 }
 
-// enqueue records the schedule and enqueues a backup job.
+// enqueue records the schedule cursor and enqueues a backup job in a single
+// SQLite transaction (round-4 review P1-01: cursor advance and enqueue must
+// be atomic — a crash or conflict between the two steps would consume the
+// schedule slot without creating a backup).
 func (s *Scheduler) enqueue(ctx context.Context, sch ScheduleInfo, now time.Time) error {
-	if _, err := s.store.ExecContext(ctx,
+	tx, err := s.store.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE databases SET last_scheduled_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		now.Unix(), sch.DatabaseID); err != nil {
 		return fmt.Errorf("update last_scheduled_at: %w", err)
 	}
-	_, err := s.runner.Enqueue(ctx, sch.DatabaseID)
-	return err
+
+	if _, err = s.runner.EnqueueTx(ctx, tx, sch.DatabaseID); err != nil {
+		return err // tx rolled back by defer; cursor NOT advanced on conflict
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schedule: %w", err)
+	}
+	return nil
 }
 
 // lastSuccessAge returns the age in hours since the last succeeded backup's
@@ -201,7 +211,6 @@ func (s *Scheduler) lastSuccessAge(ctx context.Context, dbID int64) float64 {
 	return elapsed.Hours()
 }
 
-// scheduleRow is the SQL scan target for loadSchedules.
 type scheduleRow struct {
 	id          int64
 	name        string
@@ -248,13 +257,16 @@ func (s *Scheduler) loadSchedules(ctx context.Context) []ScheduleInfo {
 
 // checkFailures fires failure webhooks for recently failed jobs.
 func (s *Scheduler) checkFailures(ctx context.Context) {
+	// Round-4 review P1-03: SQLite strftime needs the unit in the modifier.
+	cutoff := time.Now().Add(-5 * time.Minute).Unix()
 	rows, err := s.store.QueryContext(ctx, `
 		SELECT id, database_id, error_class, error_message
 		FROM jobs
 		WHERE status = 'failed'
-		  AND finished_at > strftime('%s','now','-300')
-		ORDER BY id DESC LIMIT 10`)
+		  AND finished_at > ?
+		ORDER BY id DESC LIMIT 10`, cutoff)
 	if err != nil {
+		s.log.Error("failure query", "err", err)
 		return
 	}
 	defer rows.Close()
@@ -270,9 +282,13 @@ func (s *Scheduler) checkFailures(ctx context.Context) {
 		if err := rows.Scan(&f.id, &f.dbID, &f.class, &f.message); err != nil {
 			return
 		}
-		// Redact: error messages may contain credential fragments.
-		f.message = truncate(strings.ReplaceAll(f.message, "password=", "password=[REDACTED]"), 200)
+		// Redact: remove password values and URL credentials.
+		f.message = redactNotify(f.message)
 		failed = append(failed, f)
+	}
+	if err := rows.Err(); err != nil {
+		s.log.Error("failure scan", "err", err)
+		return
 	}
 	for _, f := range failed {
 		s.fireWebhooks(ctx, "failure", map[string]any{
@@ -281,6 +297,19 @@ func (s *Scheduler) checkFailures(ctx context.Context) {
 			"error_message": f.message,
 		})
 	}
+}
+
+// redactNotify scrubs credential patterns from webhook payloads.
+func redactNotify(s string) string {
+	s = strings.ReplaceAll(s, "postgres://", "postgres-uri://[REDACTED]")
+	s = strings.ReplaceAll(s, "postgresql://", "postgres-uri://[REDACTED]")
+	if idx := strings.Index(strings.ToLower(s), "password="); idx >= 0 {
+		s = s[:idx+len("password=")] + "[REDACTED]"
+	}
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
 }
 
 func truncate(s string, max int) string {
@@ -295,6 +324,8 @@ func fmtFloat(f float64) string {
 }
 
 // fireWebhooks sends a POST to every webhook subscribed to the event type.
+// Webhook URLs are treated as bearer secrets: only the status code is logged,
+// never the URL itself (round-4 review P1-06).
 func (s *Scheduler) fireWebhooks(ctx context.Context, event string, payload map[string]any) {
 	s.mu.Lock()
 	whs := s.webhooks
@@ -303,10 +334,9 @@ func (s *Scheduler) fireWebhooks(ctx context.Context, event string, payload map[
 		if !strings.Contains(wh.Events, event) {
 			continue
 		}
-		go s.postWebhook(wh.URL, payload)
+		go s.postWebhook(wh.Name, wh.URL, payload)
 	}
 }
 
-func fmtFloat2(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) }
-
-func fmtFloat3(f float64) string { return strconv.FormatFloat(f, 'f', 3, 64) }
+// ErrDangling marker removed; unused.
+var _ = fmt.Sprintf
