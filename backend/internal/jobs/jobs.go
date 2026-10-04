@@ -24,9 +24,12 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/dumper"
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
+	"github.com/cloudfan/supabackup/backend/internal/recovery"
 	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
 	"github.com/cloudfan/supabackup/backend/internal/stats"
 	"github.com/cloudfan/supabackup/backend/internal/storage"
+	"github.com/cloudfan/supabackup/backend/internal/verifier"
 )
 
 // dbExec is the minimal SQL execution interface shared by *sql.DB and *sql.Tx.
@@ -88,6 +91,7 @@ type Runner struct {
 	destBackends   map[int64]storage.Backend
 	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error) // initialized in NewRunner
 	statsRecorder  *stats.Recorder
+	verifier       *verifier.Verifier
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
@@ -415,6 +419,9 @@ func (r *Runner) SetLocalKeep(n int) { r.localKeep = clampKeep(n, 1) }
 // SetStatsRecorder wires the statistics persistence layer.
 func (r *Runner) SetStatsRecorder(sr *stats.Recorder) { r.statsRecorder = sr }
 
+// SetVerifier wires the embedded restore verification engine.
+func (r *Runner) SetVerifier(v *verifier.Verifier) { r.verifier = v }
+
 // Stop terminates the worker.
 func (r *Runner) Stop() {
 	// "Cancel once" and "every caller waits for completion" are two separate
@@ -642,6 +649,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		return
 	}
 	knownSecrets = append(knownSecrets, ci.Password)
+	fmt.Println("debug: platform detect for", ci.Host)
 
 	// Resolve the destination EARLY (before the dump): the snapshot is used
 	// for the remote phase and MUST NOT be re-read after the dump completes
@@ -833,6 +841,44 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
 		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
 	r.pingHeartbeat()
+
+	// Generate recovery kit (Phase 5): platform-aware restore.sh
+	kitPath := manifestPath + ".restore.sh"
+	kit := recovery.KitInput{
+		BackupUUID:       fmt.Sprintf("job-%d", jobID),
+		Platform:         platformpkg.Detect(ci.Host),
+		ArtifactFileName: filepath.Base(result.ArtifactPath),
+		SHA256:           result.SHA256,
+	}
+	kitScript := recovery.GenerateRestoreScript(kit)
+	if kwerr := durableWriteFile(kitPath, []byte(kitScript)); kwerr != nil {
+		r.log.Error("recovery kit generation failed", "job", jobID, "err", kwerr)
+	}
+
+	// Async restore verification (Phase 6): non-blocking, bounded timeout.
+	// Skipped when no verifier is configured (e.g. in tests without PG server
+	// binaries).
+	if r.verifier != nil {
+		go func() {
+			vCtx, vCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer vCancel()
+			vRes := r.verifier.Verify(vCtx, verifier.Input{DumpPath: result.ArtifactPath, Timeout: 5 * time.Minute})
+			vStatus := string(vRes.Status)
+			vTables := vRes.TablesFound
+			vDur := vRes.Duration.Seconds()
+			if _, uerr := r.authDB.Exec(`
+			UPDATE jobs SET verify_status = ?, verify_detail = ?,
+			  verify_tables = ?, verify_duration_secs = ?
+			WHERE id = ?`, vStatus, vRes.Detail, vTables, vDur, jobID); uerr != nil {
+				r.log.Error("verify state update failed", "job", jobID, "err", uerr)
+			}
+			if vRes.Pass() {
+				r.log.Info("restore verification passed", "job", jobID, "tables", vTables)
+			} else {
+				r.log.Warn("restore verification failed", "job", jobID, "detail", vRes.Detail)
+			}
+		}()
+	} // end if r.verifier != nil
 
 	// Record statistics (Phase 8): best-effort, never affects the job.
 	if r.statsRecorder != nil {
