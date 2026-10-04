@@ -184,11 +184,31 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 	}
 	dataDir := filepath.Join(workDir, "pgdata")
 	sockDir := filepath.Join(workDir, "pgsock")
+	sockDirPrepared := false
+	// Unix-domain sockets are capped at 107 bytes INCLUDING the socket name
+	// postgres creates (.s.PGSQL.5432) — a deeply nested base directory
+	// would make every verification fail at startup. Fall back to a short
+	// temp-dir socket location when the natural path cannot fit (found via
+	// the real end-to-end test; the pg.log tail made it diagnosable).
+	if len(sockDir)+len("/.s.PGSQL.5432") > 100 {
+		fallback, ferr := os.MkdirTemp("", "sbv-sock-")
+		if ferr != nil {
+			os.RemoveAll(workDir)
+			return fail(StatusFailed, "socket path %s exceeds the 107-byte unix-socket limit and the short-path fallback failed: %v", sockDir, ferr)
+		}
+		sockDir = fallback
+		sockDirPrepared = true       // MkdirTemp already created it
+		defer os.RemoveAll(fallback) // outside the workdir: own cleanup
+	}
 	plainPath := filepath.Join(workDir, "plaintext.dump")
-	for _, d := range []string{dataDir, sockDir} {
-		if err := os.Mkdir(d, 0o700); err != nil {
-			os.RemoveAll(workDir) // partial creation must not leak the first dir (P1-06)
-			return fail(StatusFailed, "create %s: %v", d, err)
+	if err := os.Mkdir(dataDir, 0o700); err != nil {
+		os.RemoveAll(workDir) // partial creation must not leak the first dir (P1-06)
+		return fail(StatusFailed, "create %s: %v", dataDir, err)
+	}
+	if !sockDirPrepared {
+		if err := os.Mkdir(sockDir, 0o700); err != nil {
+			os.RemoveAll(workDir)
+			return fail(StatusFailed, "create %s: %v", sockDir, err)
 		}
 	}
 	// Cleanup on every exit path. Order: stop the instance FIRST (with its
@@ -199,11 +219,13 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 	// postgres may still be writing.
 	env := minimalEnv(workDir)
 	pgStarted := false
+	preserveWorkDir := false
 	defer func() {
 		if pgStarted {
 			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			defer stopCancel()
 			if warn := v.stopConfirmed(stopCtx, env, dataDir); warn != "" {
+				preserveWorkDir = true
 				res.Detail = joinDetail(res.Detail, warn+"; work directory PRESERVED for manual cleanup: "+workDir)
 				if res.Status == StatusVerified {
 					// A verified restore whose instance could not be
@@ -215,6 +237,9 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 			}
 		}
 		os.Remove(plainPath) // most sensitive residue first
+		if preserveWorkDir {
+			return // keep the evidence (start failure or unconfirmed stop)
+		}
 		os.RemoveAll(workDir)
 	}()
 
@@ -259,7 +284,13 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 	pgCtlCancel()
 	if err != nil {
 		if !postmasterPresent(dataDir) {
-			return fail(StatusFailed, "pg_ctl start: %v", err)
+			// No live instance: still preserve the workdir — the server log
+			// is the ONLY way anyone can diagnose a start failure — and
+			// surface its tail in the result (review round-3 evidence).
+			preserveWorkDir = true
+			res := fail(StatusFailed, "pg_ctl start: %v; work directory PRESERVED for diagnosis: %s", err, workDir)
+			res.Detail += "; pg.log tail: " + v.logTail(dataDir)
+			return res
 		}
 		// The postmaster exists despite the reported failure: hand it to the
 		// deferred cleanup and report the anomaly honestly.
@@ -408,6 +439,22 @@ func (v *Verifier) stopConfirmed(ctx context.Context, env []string, dataDir stri
 		return "WARNING: embedded postgres could not be confirmed stopped (postmaster.pid still present)"
 	}
 	return ""
+}
+
+// logTail returns the tail of the throwaway instance's server log for
+// failure diagnostics (bounded, redaction not needed: the log contains no
+// secrets — the instance is trust-authenticated local-only).
+func (v *Verifier) logTail(dataDir string) string {
+	b, err := os.ReadFile(filepath.Join(dataDir, "pg.log"))
+	if err != nil {
+		return "(pg.log unreadable: " + err.Error() + ")"
+	}
+	const tail = 800
+	s := string(b)
+	if len(s) > tail {
+		s = s[len(s)-tail:]
+	}
+	return strings.TrimSpace(s)
 }
 
 // postmasterPresent reports whether a PID marker exists in the data
