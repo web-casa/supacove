@@ -7,8 +7,8 @@ package scheduler
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
