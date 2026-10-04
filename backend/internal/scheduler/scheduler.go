@@ -24,9 +24,9 @@ import (
 // polling loop (no goroutine-per-job) so SQLite remains the single source
 // of truth for what is due and when.
 type Scheduler struct {
-	store  *sql.DB
-	runner *jobs.Runner
-	log    *slog.Logger
+	store    *sql.DB
+	runner   *jobs.Runner
+	log      *slog.Logger
 	webhooks []WebhookConfig
 	interval time.Duration
 	mu       sync.Mutex
@@ -43,13 +43,13 @@ type WebhookConfig struct {
 
 // ScheduleInfo is the scheduling state read from the databases table.
 type ScheduleInfo struct {
-	DatabaseID     int64
-	Name           string
-	CronExpr       string
-	CronTZ         string
-	MaxAgeHours    int
-	Paused         bool
-	LastScheduled  int64 // unix seconds of last successful schedule enqueue
+	DatabaseID    int64
+	Name          string
+	CronExpr      string
+	CronTZ        string
+	MaxAgeHours   int
+	Paused        bool
+	LastScheduled int64 // unix seconds of last successful schedule enqueue
 }
 
 // New creates a Scheduler.
@@ -203,13 +203,13 @@ func (s *Scheduler) lastSuccessAge(ctx context.Context, dbID int64) float64 {
 
 // scheduleRow is the SQL scan target for loadSchedules.
 type scheduleRow struct {
-	id           int64
-	name         string
-	cronExpr     string
-	cronTZ       string
-	maxAgeHours  int
-	paused       int
-	lastSchedAt  int64
+	id          int64
+	name        string
+	cronExpr    string
+	cronTZ      string
+	maxAgeHours int
+	paused      int
+	lastSchedAt int64
 }
 
 func (s *Scheduler) loadSchedules(ctx context.Context) []ScheduleInfo {
