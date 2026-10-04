@@ -28,6 +28,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/db"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/limiter"
+	"github.com/cloudfan/supabackup/backend/internal/scheduler"
 	"github.com/cloudfan/supabackup/backend/internal/server"
 	"github.com/cloudfan/supabackup/backend/internal/staging"
 )
@@ -219,6 +220,11 @@ func runServe() error {
 	runner.ResumeRemotePhase(ctx)
 	runner.Start(ctx)
 	defer runner.Stop()
+
+	// Phase 4: cron scheduler for automatic backups.
+	sched := scheduler.New(store.DB, runner, log, 30*time.Second)
+	sched.Start(ctx)
+	defer sched.Stop()
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,

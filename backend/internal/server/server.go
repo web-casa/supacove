@@ -207,6 +207,10 @@ func (s *Server) Router() http.Handler {
 		g.Mount("/api", apiHandler)
 	})
 
+	// Metrics endpoint (authenticated by default-deny guard; deploy behind
+	// a reverse proxy that restricts access if you expose it to monitoring).
+	r.Get("/metrics", s.handleMetrics)
+
 	r.Handle("/*", s.staticHandler())
 	return r
 }
