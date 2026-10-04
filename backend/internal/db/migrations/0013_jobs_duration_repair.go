@@ -32,15 +32,12 @@ func upJobsDurationSecs(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
+// downJobsDurationSecs is deliberately a NO-OP (round-3 R3-P2-03): on
+// databases where 0013 repaired a missing column this migration does not
+// OWN duration_secs — the current 0004 defines it. A rollback that dropped
+// it would break v12 code that queries the column and destroy recorded
+// data. Rollback past this point is therefore not supported for that
+// column; fresh installs keep it via 0004 regardless.
 func downJobsDurationSecs(ctx context.Context, tx *sql.Tx) error {
-	var n int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name = 'duration_secs'`).Scan(&n); err != nil {
-		return err
-	}
-	if n == 0 {
-		return nil
-	}
-	_, err := tx.ExecContext(ctx, `ALTER TABLE jobs DROP COLUMN duration_secs`)
-	return err
+	return nil
 }

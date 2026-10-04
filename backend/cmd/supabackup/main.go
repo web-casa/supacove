@@ -255,12 +255,18 @@ func runServe() error {
 			return fmt.Errorf("restore verification enabled but unavailable: %w", verr)
 		}
 		if cerr := ver.CleanupResidual(); cerr != nil {
-			log.Warn("verification residual cleanup incomplete", "err", cerr)
+			// A failed residual cleanup may leave a live throwaway PG or
+			// unrecoverable state behind; starting ANOTHER instance on top
+			// would violate the one-instance budget. Disable verification
+			// loudly instead of proceeding half-cleaned (round-3 review).
+			log.Error("verification residual cleanup FAILED — restore verification stays DISABLED for this run; resolve the verify workdir manually",
+				"err", cerr)
+		} else {
+			runner.SetVerifier(ver)
+			runner.SetVerifyIdentity(strings.TrimSpace(string(identityRaw)))
+			log.Info("restore verification ENABLED (ADR-004: same-UID embedded PostgreSQL; NOT a sandbox)",
+				"pg_bin", pgBin)
 		}
-		runner.SetVerifier(ver)
-		runner.SetVerifyIdentity(strings.TrimSpace(string(identityRaw)))
-		log.Info("restore verification ENABLED (ADR-004: same-UID embedded PostgreSQL; NOT a sandbox)",
-			"pg_bin", pgBin)
 	} else {
 		log.Info("restore verification disabled (set SB_VERIFY_ENABLED=1 with SB_VERIFY_IDENTITY_FILE to enable; see ADR-004)")
 	}

@@ -93,16 +93,24 @@ func (r *Runner) initialVerifyState() (status, detail string) {
 }
 
 // acquireVerifyLease registers the artifact lease and marks the job
-// 'pending'. Called at ENQUEUE time so the lease covers the queued phase,
-// not just execution (round-2 P1-09 gap 2).
+// 'pending'. Ownership rules (round-3 R3-P1-02/R3-P2-01): a job that is
+// ALREADY leased is refused — duplicate enqueues never enter the queue, so
+// an overflow release can never drop somebody else's lease; a failed state
+// write rolls the lease back instead of leaking an ownerless block.
 func (r *Runner) acquireVerifyLease(jobID int64) bool {
 	r.mu.Lock()
+	if r.verifyInFlight[jobID] {
+		r.mu.Unlock()
+		r.log.Warn("verification already queued/running for this job; ignoring duplicate enqueue", "job", jobID)
+		return false
+	}
 	r.verifyInFlight[jobID] = true
 	r.mu.Unlock()
 	_, err := r.authDB.Exec(`
 		UPDATE jobs SET verify_status = 'pending', verify_detail = ''
 		WHERE id = ? AND (verify_status = '' OR verify_status = 'pending' OR verify_status = 'running')`, jobID)
 	if err != nil {
+		r.releaseVerifyLease(jobID) // roll back: no ownerless lease
 		r.log.Error("verify pending state write failed", "job", jobID, "err", err)
 		return false
 	}
@@ -225,27 +233,101 @@ func (r *Runner) fetchRemoteArtifact(ctx context.Context, jobID int64) (string, 
 	return local, nil
 }
 
+// fetchRemoteManifest downloads the committed remote manifest to a temp
+// file under staging for bucket-only verification runs. Caller removes the
+// returned file.
+func (r *Runner) fetchRemoteManifest(ctx context.Context, jobID int64) (string, error) {
+	var destID sql.NullInt64
+	var manKey string
+	if err := r.authDB.QueryRow(`
+		SELECT destination_id, COALESCE(remote_manifest_key,'')
+		FROM jobs WHERE id = ?`, jobID).Scan(&destID, &manKey); err != nil {
+		return "", err
+	}
+	if !destID.Valid || destID.Int64 == 0 || manKey == "" {
+		return "", errors.New("no remote manifest reference")
+	}
+	backend, err := r.BuildBackendByID(ctx, destID.Int64)
+	if err != nil {
+		return "", fmt.Errorf("build backend for manifest fetch: %w", err)
+	}
+	rc, _, err := backend.Get(ctx, manKey)
+	if err != nil {
+		return "", fmt.Errorf("remote manifest read %s: %w", manKey, err)
+	}
+	defer rc.Close()
+	local := filepath.Join(r.stagingDir, fmt.Sprintf("verify-fetch-job%d.manifest.json", jobID))
+	f, err := os.OpenFile(local, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(f, rc); err != nil {
+		f.Close()
+		os.Remove(local)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(local)
+		return "", err
+	}
+	return local, nil
+}
+
+// settleOrRequeue records a pre-run failure: a shutdown becomes a requeue
+// ('pending'), anything else an explicit skip with the lease released
+// (round-3 R3-P2-02: shutdown must never end in a terminal state).
+func (r *Runner) settleOrRequeue(lifeCtx context.Context, req verifyRequest, detail string) {
+	if lifeCtx.Err() != nil {
+		r.finishVerification(req.jobID, "pending",
+			"verification interrupted by instance shutdown; re-queued for the next startup", req.redact, nil)
+		return
+	}
+	r.releaseVerifyLease(req.jobID)
+	r.finishVerification(req.jobID, "skipped", detail, req.redact, nil)
+}
+
 // runVerification executes one queued verification and persists the result.
 func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 	jobID := req.jobID
-	if _, err := r.authDB.Exec(`
+	// Atomic claim: only the request that flips pending→running owns the
+	// run. A duplicate or already-terminal job affects 0 rows and must NOT
+	// re-execute the engine or overwrite a terminal state (round-3 R3-P1-02).
+	claim, err := r.authDB.Exec(`
 		UPDATE jobs SET verify_status = 'running', verify_detail = ''
-		WHERE id = ? AND verify_status = 'pending'`, jobID); err != nil {
+		WHERE id = ? AND verify_status = 'pending'`, jobID)
+	if err != nil {
 		r.log.Error("verify running state write failed", "job", jobID, "err", err)
+		r.releaseVerifyLease(jobID)
+		return
 	}
+	if n, _ := claim.RowsAffected(); n == 0 {
+		r.releaseVerifyLease(jobID)
+		return
+	}
+
+	// The whole run — loading, remote fetch included — lives under ONE
+	// deadline (round-3 R3-P2-02: the fetch previously escaped the budget).
+	vCtx, cancel := context.WithTimeout(lifeCtx, r.verifyTimeout)
+	defer cancel()
 
 	ciphertextPath, sha, manifestPath, _, err := r.loadVerifyFacts(jobID)
 	if err != nil {
-		r.releaseVerifyLease(jobID)
-		r.finishVerification(jobID, "skipped", "verification inputs unreadable: "+pgclient.SanitizeMessage(err.Error()), req.redact, nil)
+		r.settleOrRequeue(lifeCtx, req, "verification inputs unreadable: "+pgclient.SanitizeMessage(err.Error()))
 		return
 	}
 	fetched := false
-	if ciphertextPath == "" {
-		// Local staging copy pruned: fall back to the committed remote
-		// object so bucket-only backups still verify (round-2 P1-05).
-		local, ferr := r.fetchRemoteArtifact(lifeCtx, jobID)
+	if ciphertextPath == "" || !regularFileExists(ciphertextPath) {
+		// Local staging copy missing (pruned, or the reference points at a
+		// vanished file): fall back to the committed remote object so
+		// bucket-only backups still verify (round-2/3 P1-05).
+		local, ferr := r.fetchRemoteArtifact(vCtx, jobID)
 		if ferr != nil {
+			if lifeCtx.Err() != nil {
+				// Shutdown during load/fetch: inconclusive, requeue.
+				r.finishVerification(jobID, "pending",
+					"verification interrupted by instance shutdown; re-queued for the next startup", req.redact, nil)
+				return
+			}
 			r.releaseVerifyLease(jobID)
 			r.finishVerification(jobID, "skipped",
 				"staged artifact absent and remote fetch impossible: "+req.redact(ferr.Error()), req.redact, nil)
@@ -262,9 +344,20 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 	}()
 
 	// The manifest is the ONLY source for the expected-object baseline. If
-	// it is missing or unreadable, the verification refuses to silently
-	// downgrade its checks (round-2 P1-08): it records an honest skip.
+	// the local copy is missing, fetch the committed remote manifest before
+	// giving up (round-3 P1-05: the bucket holds both objects). A manifest
+	// that is still missing/unreadable records an honest skip — never a
+	// silent downgrade of the checks (round-2 P1-08).
 	mb, merr := os.ReadFile(manifestPath)
+	if merr != nil {
+		if local, ferr := r.fetchRemoteManifest(vCtx, jobID); ferr == nil {
+			if mb2, rerr := os.ReadFile(local); rerr == nil {
+				mb = mb2
+				merr = nil
+				defer os.Remove(local)
+			}
+		}
+	}
 	if merr != nil {
 		r.finishVerification(jobID, "skipped",
 			"manifest unreadable ("+pgclient.SanitizeMessage(merr.Error())+"); expected-object baseline unavailable — restore the manifest or verify manually with the recovery kit", req.redact, nil)
@@ -285,8 +378,6 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 		expectedExts = append(expectedExts, e.Name)
 	}
 
-	vCtx, cancel := context.WithTimeout(lifeCtx, r.verifyTimeout)
-	defer cancel()
 	res := r.verifier.Verify(vCtx, verifier.Input{
 		CiphertextPath:     ciphertextPath,
 		SHA256Hex:          sha,

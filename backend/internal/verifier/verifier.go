@@ -102,7 +102,7 @@ func (v *Verifier) CleanupResidual() error {
 		}
 		dir := filepath.Join(v.baseDir, e.Name())
 		pidFile := filepath.Join(dir, "pgdata", "postmaster.pid")
-		if fileExists(pidFile) {
+		if postmasterPresent(filepath.Dir(pidFile)) {
 			// A previous instance survived its process: stop it with a
 			// bounded, run-independent context before touching the files.
 			stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -247,14 +247,24 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 	}
 
 	// 5) start PG (Unix socket only), bounded start window. From here on the
-	// deferred cleanup owns stopping the instance on every path.
+	// deferred cleanup owns stopping the instance on every path. A FAILED
+	// start does NOT mean postgres is down: pg_ctl -w can have forked the
+	// postmaster and written the PID file before its wait timed out — so the
+	// cleanup responsibility begins at the START ATTEMPT, conditioned on the
+	// PID marker, never on the command's exit code (round-3 R2-P1-01).
 	pgCtlCtx, pgCtlCancel := context.WithTimeout(ctx, 30*time.Second)
 	err := v.run(pgCtlCtx, env, "pg_ctl",
 		"-D", dataDir, "-l", filepath.Join(dataDir, "pg.log"),
 		"-o", pgOpts, "-w", "start")
 	pgCtlCancel()
 	if err != nil {
-		return fail(StatusFailed, "pg_ctl start: %v", err)
+		if !postmasterPresent(dataDir) {
+			return fail(StatusFailed, "pg_ctl start: %v", err)
+		}
+		// The postmaster exists despite the reported failure: hand it to the
+		// deferred cleanup and report the anomaly honestly.
+		pgStarted = true
+		return fail(StatusFailed, "pg_ctl start reported failure but a postmaster is running (PID marker present); the instance will be stopped during cleanup: %v", err)
 	}
 	pgStarted = true
 
@@ -313,19 +323,22 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 	return res
 }
 
-// verifiedDetail states EXACTLY what was proven. When the manifest carried
-// no expectations (legacy manifest), the wording must not claim an
-// expected-object-set match (review round-2 P1-08/P2-02).
+// verifiedDetail states EXACTLY what was proven. The count check proves
+// the TABLE COUNT, not the full object set — object names, views, routines
+// and roles are NOT compared (no TOC capture yet), and the wording must not
+// overclaim (round-3 P1-08). Legacy manifests without tableCount say so
+// explicitly.
 func verifiedDetail(input Input, tables int64, serverVersion string) string {
 	scope := "pg_restore completed without SQL errors"
 	if input.ExpectedTables >= 0 {
-		scope = fmt.Sprintf("manifest-declared object set matched (%d user tables)", input.ExpectedTables)
+		scope = fmt.Sprintf("manifest-declared table count matched (%d user tables)", input.ExpectedTables)
+		if len(input.ExpectedExtensions) > 0 {
+			scope += fmt.Sprintf(" and %d declared extensions present", len(input.ExpectedExtensions))
+		}
+		scope += "; object NAMES beyond the table count were not compared (no TOC capture)"
 	} else {
 		scope += fmt.Sprintf("; %d user tables restored", tables)
 		scope += "; table-count cross-check unavailable (manifest carries no tableCount — legacy manifest)"
-	}
-	if len(input.ExpectedExtensions) > 0 {
-		scope += fmt.Sprintf(" and %d declared extensions present", len(input.ExpectedExtensions))
 	}
 	return fmt.Sprintf("restored into embedded PostgreSQL (%s): %s", ProfileName(serverVersion), scope)
 }
@@ -378,28 +391,38 @@ func ProfileName(serverVersion string) string {
 // no-op success, so the deferred cleanup and any explicit stop compose.
 func (v *Verifier) stopConfirmed(ctx context.Context, env []string, dataDir string) string {
 	pidFile := filepath.Join(dataDir, "postmaster.pid")
-	if !fileExists(pidFile) {
+	if !postmasterPresent(filepath.Dir(pidFile)) {
 		return "" // already stopped (or never started)
 	}
 	stopCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	err := v.run(stopCtx, env, "pg_ctl", "-D", dataDir, "-m", "fast", "-w", "stop")
 	cancel()
-	if err == nil && !fileExists(pidFile) {
+	if err == nil && !postmasterPresent(filepath.Dir(pidFile)) {
 		return ""
 	}
 	// Escalate once; then report honestly and preserve the evidence.
 	escCtx, escCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	err = v.run(escCtx, env, "pg_ctl", "-D", dataDir, "-m", "immediate", "-w", "stop")
 	escCancel()
-	if fileExists(pidFile) {
+	if postmasterPresent(filepath.Dir(pidFile)) {
 		return "WARNING: embedded postgres could not be confirmed stopped (postmaster.pid still present)"
 	}
 	return ""
 }
 
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
+// postmasterPresent reports whether a PID marker exists in the data
+// directory. Any stat error OTHER than a definitive absence is treated as
+// PRESENT (conservative): a failure to check must not cause a live
+// instance's data directory to be deleted (round-3 review on fileExists).
+func postmasterPresent(dataDir string) bool {
+	_, err := os.Stat(filepath.Join(dataDir, "postmaster.pid"))
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	return true // cannot rule out a live instance — treat as present
 }
 
 // hashFile streams the file and compares it to the expected hex digest,
@@ -446,48 +469,53 @@ func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) error {
 }
 
 // decryptToFile writes the plaintext dump at 0600 inside the restricted
-// workdir (the process umask is not relied on; the mode is explicit). The
-// decryption runs on a goroutine supervised by the context: a canceled
-// context abandons it promptly (the deferred cleanup removes the file; the
-// goroutine's eventual writes go to an unlinked-or-removed file and cannot
-// outlive the process).
+// workdir (the process umask is not relied on; the mode is explicit).
+//
+// Cancellation is REAL, not an abandoned wait (round-3 R3-P1-01): a
+// watchdog closes the source and destination files when the context is
+// done, which unblocks age's reads/writes; the caller then JOINS the
+// decryption (the function returns only after DecryptStream unwound), so
+// no background copy outlives the call. The plaintext is removed on every
+// failure path.
 func decryptToFile(ctx context.Context, identity, ciphertextPath, plainPath string) error {
-	type res struct {
-		err error
+	src, err := os.Open(ciphertextPath)
+	if err != nil {
+		return err
 	}
-	done := make(chan res, 1)
+	dst, err := os.OpenFile(plainPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_TRUNC, 0o600)
+	if err != nil {
+		src.Close()
+		return err
+	}
+	// Watchdog: closing the fds interrupts a blocked/ongoing DecryptStream.
+	// The deferred close(watchDone) guarantees the watchdog exits — and the
+	// function returns only after DecryptStream returned — so nothing
+	// decrypts in the background after cancellation.
+	watchDone := make(chan struct{})
+	defer close(watchDone)
 	go func() {
-		src, err := os.Open(ciphertextPath)
-		if err != nil {
-			done <- res{err}
-			return
-		}
-		defer src.Close()
-		dst, err := os.OpenFile(plainPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_TRUNC, 0o600)
-		if err != nil {
-			done <- res{err}
-			return
-		}
-		if err := agekey.DecryptStream(identity, src, dst); err != nil {
+		select {
+		case <-ctx.Done():
+			src.Close()
 			dst.Close()
-			os.Remove(plainPath)
-			done <- res{err}
-			return
+		case <-watchDone:
 		}
-		if err := dst.Sync(); err != nil {
-			dst.Close()
-			os.Remove(plainPath)
-			done <- res{err}
-			return
-		}
-		done <- res{err: dst.Close()}
 	}()
-	select {
-	case r := <-done:
-		return r.err
-	case <-ctx.Done():
-		return fmt.Errorf("canceled during decryption (background copy abandoned): %w", ctx.Err())
+	decErr := agekey.DecryptStream(identity, src, dst)
+	// Normal-path close (the watchdog only fires on cancellation; a double
+	// Close is harmless).
+	if cerr := dst.Close(); cerr != nil && decErr == nil {
+		decErr = cerr
 	}
+	src.Close()
+	if decErr != nil {
+		os.Remove(plainPath)
+		if ctx.Err() != nil {
+			return fmt.Errorf("decryption canceled: %w", ctx.Err())
+		}
+		return decErr
+	}
+	return ctx.Err() // non-nil only if cancellation raced the finish
 }
 
 // minimalEnv builds the subprocess environment from an explicit whitelist

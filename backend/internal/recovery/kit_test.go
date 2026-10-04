@@ -170,16 +170,27 @@ exit `+o.or(o.or("0", o.psqlExit), o.psqlNextExit)+`
 `)
 	if !o.noShaTool {
 		stub("sha256sum", "#!/bin/sh\n"+logLine+"\necho '"+sha+"'\n")
-	} else {
-		// NON-executable files: `command -v` skips them, faithfully
-		// exercising the missing-tool branch with a realistic PATH
-		// (round-2 P2-03: the old test kept a real sha256sum reachable).
-		for _, name := range []string{"sha256sum", "shasum"} {
-			if err := os.WriteFile(filepath.Join(binDir, name), []byte("# placeholder\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
+	}
+	// Absolute-path wrappers for every coreutils tool the script shells out
+	// to. With these, tests can restrict PATH to the stub dir ALONE, which
+	// makes the missing-hash-tool case genuinely reachable (round-3: the
+	// old test kept the real /usr/bin/sha256sum reachable and only ever hit
+	// the hash-mismatch branch).
+	for _, name := range []string{"mkdir", "rm", "chmod", "cut", "cat"} {
+		wrapper := "#!/bin/sh\nexec /usr/bin/" + name + " \"$@\"\n"
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(wrapper), 0o755); err != nil {
+			t.Fatal(err)
 		}
 	}
+	// mktemp -d TEMPLATE: one deterministic dir per harness (tests are
+	// sequential within a harness and the script cleans up after itself).
+	stub("mktemp", `#!/bin/sh
+# usage: mktemp -d TEMPLATE
+tpl="$2"
+d="${tpl%??????}.harness"
+mkdir "$d" 2>/dev/null || true
+echo "$d"
+`)
 	script := GenerateRestoreScriptWithTables(testKit(), o.tableCountOrUnknown())
 	scriptPath := filepath.Join(h.dir, "restore.sh")
 	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
@@ -202,7 +213,7 @@ func (h *harness) run(t *testing.T, binDir string, env []string, args ...string)
 	}
 	cmd := exec.Command("sh", append([]string{filepath.Join(h.dir, "restore.sh")}, args...)...)
 	cmd.Dir = h.dir
-	cmd.Env = append(os.Environ(), "PATH="+binDir+":/usr/bin:/bin")
+	cmd.Env = append(os.Environ(), "PATH="+binDir)
 	cmd.Env = append(cmd.Env, env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -316,6 +327,18 @@ func TestInlinePasswordRefused(t *testing.T) {
 	// libpq-legal spaced keyword form (round-2 P1-02 remainder).
 	mustFail(t, h.run(t, binDir, []string{testEnv},
 		"host=db user=backup password = 'sup3rsecret' dbname=t", testEnc), "spaced keyword password")
+	// Percent-encoded password parameter (round-3: libpq decodes ?%70assword=
+	// into a password field; the script must reject any percent escape).
+	mustFail(t, h.run(t, binDir, []string{testEnv},
+		"postgresql://db/db?%70assword=sup3rsecret", testEnc), "percent-encoded password")
+	// Unknown query parameters are refused outright (allowlist).
+	mustFail(t, h.run(t, binDir, []string{testEnv},
+		"postgresql://db/db?options=-c%20x", testEnc), "non-allowlisted query param")
+	// The allowlisted TLS/timeout parameters keep working.
+	if err := h.run(t, binDir, []string{testEnv},
+		"postgresql://backup@db/db?sslmode=require&connect_timeout=10", testEnc); err != nil {
+		t.Fatalf("allowlisted query params must be accepted: %v", err)
+	}
 	// No tool may have been invoked at all (the log file is created lazily
 	// by the first stub call — its absence proves nothing ran).
 	if b, err := os.ReadFile(h.logPath); err == nil && strings.Contains(string(b), "sup3rsecret") {

@@ -95,6 +95,14 @@ ENCRYPTED_FILE="${2:-}"
 AGE_IDENTITY_FILE="${AGE_IDENTITY_FILE:?Set AGE_IDENTITY_FILE to the offline age identity file}"
 
 case "$TARGET_URL" in
+  *%%*)
+    echo "ERROR: percent-escaped characters are not accepted in the connection string." >&2
+    echo "libpq decodes URI escapes (e.g. ?%%70assword=... is a password field), so an" >&2
+    echo "encoded password would end up in the tool argv (readable via ps). Pass the" >&2
+    echo "password via PGPASSWORD and use a plain, password-free connection string." >&2
+    exit 2 ;;
+esac
+case "$TARGET_URL" in
   *://*:*@*|*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]=*|*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][[:space:]]*=*)
     echo "ERROR: the connection string appears to contain an inline password." >&2
     echo "libpq accepts 'password = ...' with spaces and any letter case," >&2
@@ -102,6 +110,27 @@ case "$TARGET_URL" in
     echo "  PGPASSWORD='...' sh restore.sh <conninfo_without_password> <file>" >&2
     exit 2 ;;
 esac
+# URI query parameters are restricted to a TLS/timeout allowlist: libpq
+# decodes percent-escapes in parameter NAMES too, so an allowlist over the
+# raw (undecoded) key closes the encoded-password bypass.
+QUERY="${TARGET_URL#*\?}"
+if [ "$QUERY" != "$TARGET_URL" ]; then
+  REST="$QUERY"
+  while [ -n "$REST" ]; do
+    PAIR="${REST%%%%&*}"
+    case "$REST" in
+      *"&"*) REST="${REST#*&}" ;;
+      *) REST="" ;;
+    esac
+    KEY="${PAIR%%%%=*}"
+    case "$KEY" in
+      sslmode|sslcert|sslkey|sslrootcert|sslnegotiation|connect_timeout|application_name) : ;;
+      *) echo "ERROR: unsupported connection parameter '$KEY'. Only TLS/timeout parameters" >&2
+         echo "are accepted here; pass credentials via PGPASSWORD, never in the URI." >&2
+         exit 2 ;;
+    esac
+  done
+fi
 case "$AGE_IDENTITY_FILE" in
   /*) : ;;
   *) echo "ERROR: AGE_IDENTITY_FILE must be an absolute path." >&2; exit 2 ;;

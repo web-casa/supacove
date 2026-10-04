@@ -399,9 +399,11 @@ func TestFailedStopPreservesEvidence(t *testing.T) {
 	if err := os.WriteFile(s.keepPIDMark, []byte("1"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	res := v.Verify(context.Background(), verifyInput(t, v))
-	if res.Status == StatusVerified {
-		t.Fatal("an unconfirmable stop must not yield a clean verified")
+	in := verifyInput(t, v)
+	in.ExpectedTables = 3 // matches the psql stub: reach the restored state
+	res := v.Verify(context.Background(), in)
+	if res.Status != StatusFailed {
+		t.Fatalf("status = %q (%s): an unconfirmable stop must downgrade to failed", res.Status, res.Detail)
 	}
 	if !strings.Contains(res.Detail, "PRESERVED") {
 		t.Fatalf("detail must record the preserved workdir: %q", res.Detail)
@@ -441,5 +443,43 @@ func TestCleanupResidualStopsLivePID(t *testing.T) {
 	}
 	if _, err := os.Stat(residual); !os.IsNotExist(err) {
 		t.Fatal("residual dir survived cleanup")
+	}
+}
+
+// TestStartFailureWithLivePIDStillStops: pg_ctl start can fail AFTER the
+// postmaster forked (PID marker written). The instance must still be
+// stopped and the workdir reclaimed — never deleted under a live PG
+// (round-3 review: the start-failure path previously skipped the stop).
+func TestStartFailureWithLivePIDStillStops(t *testing.T) {
+	s := newPGStub(t, "0")
+	// Make pg_ctl report start failure while the PID marker stays.
+	if err := os.WriteFile(filepath.Join(s.binDir, "pg_ctl"), []byte(`#!/bin/sh
+printf 'SUB:%s\n' "$*" >> '`+s.stopLog+`'
+for a in "$@"; do
+  if [ "$a" = start ]; then
+    exit 1
+  fi
+done
+dir=""; prev=""
+for a in "$@"; do [ "$prev" = "-D" ] && dir="$a"; prev="$a"; done
+rm -f "$dir/postmaster.pid"
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v := s.verifier(t)
+	res := v.Verify(context.Background(), verifyInput(t, v))
+	if res.Status != StatusFailed {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+	if !strings.Contains(res.Detail, "postmaster is running") {
+		t.Fatalf("detail must name the live-postmaster anomaly: %q", res.Detail)
+	}
+	if s.stopCalls() == 0 {
+		t.Fatal("a start failure with a live PID must still stop the instance")
+	}
+	left, _ := os.ReadDir(s.baseDir)
+	if len(left) != 0 {
+		t.Fatalf("workdir left behind after confirmed stop: %d entries", len(left))
 	}
 }
