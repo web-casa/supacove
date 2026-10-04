@@ -25,6 +25,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/cloudfan/supabackup/backend/internal/stats"
 	"github.com/cloudfan/supabackup/backend/internal/storage"
 )
 
@@ -86,6 +87,7 @@ type Runner struct {
 	destMu         sync.Mutex
 	destBackends   map[int64]storage.Backend
 	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error) // initialized in NewRunner
+	statsRecorder  *stats.Recorder
 }
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
@@ -409,6 +411,9 @@ func (r *Runner) SetQuota(bytes int64) { r.cfg.QuotaBytes = bytes }
 // SetLocalKeep configures how many local staged artifacts per database are
 // retained (protocol D local half; newest is always protected).
 func (r *Runner) SetLocalKeep(n int) { r.localKeep = clampKeep(n, 1) }
+
+// SetStatsRecorder wires the statistics persistence layer.
+func (r *Runner) SetStatsRecorder(sr *stats.Recorder) { r.statsRecorder = sr }
 
 // Stop terminates the worker.
 func (r *Runner) Stop() {
@@ -828,6 +833,19 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
 		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
 	r.pingHeartbeat()
+
+	// Record statistics (Phase 8): best-effort, never affects the job.
+	if r.statsRecorder != nil {
+		dumpSz := result.SizeBytes
+		if err := r.statsRecorder.Record(ctx, stats.Entry{
+			JobID: jobID, DatabaseName: name,
+			DumpSize: dumpSz, ArtifactSize: result.SizeBytes,
+			DurationSecs: time.Since(dumpStart).Seconds(),
+			VerifyStatus: "not_run",
+		}); err != nil {
+			r.log.Error("stats recording failed", "job", jobID, "err", err)
+		}
+	}
 
 	// 7) Retention (protocol D, beta simple form) — runs only after a
 	// successful commit; failures are logged and never affect the job.
