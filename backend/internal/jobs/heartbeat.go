@@ -8,6 +8,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -24,20 +25,26 @@ func (r *Runner) pingHeartbeat() {
 	if r.heartbeatURL == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.heartbeatURL, nil)
-	if err != nil {
-		r.log.Error("heartbeat request build failed", "err", err)
-		return
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		r.log.Error("heartbeat ping failed", "err", err)
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		r.log.Error("heartbeat rejected", "status", resp.StatusCode)
-	}
+	// Async: never block the worker. The external service alerts on silence,
+	// so a failed ping is recoverable on the next successful backup.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.heartbeatURL, nil)
+		if err != nil {
+			r.log.Error("heartbeat request build failed", "err", err)
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			// Do NOT log the URL: it may contain bearer tokens for the
+			// external healthcheck service.
+			r.log.Error("heartbeat ping failed", "err_type", fmt.Sprintf("%T", err))
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			r.log.Error("heartbeat rejected", "status", resp.StatusCode)
+		}
+	}()
 }

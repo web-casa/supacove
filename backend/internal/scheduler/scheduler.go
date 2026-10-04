@@ -154,7 +154,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 			continue
 		}
 
-		// Freshness check
+		// Freshness check: per-database, using the latest succeeded job's
+		// snapshot start (round-4 review P2-01: started_at ≈ snapshot time).
 		if sch.MaxAgeHours > 0 {
 			age := s.lastSuccessAge(ctx, sch.DatabaseID)
 			if age > float64(sch.MaxAgeHours) {
@@ -168,6 +169,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 				})
 			}
 		}
+		_ = fmtFloat2 // reserved for future precision needs
 
 		// Schedule check
 		if sch.CronExpr == "" {
