@@ -292,43 +292,196 @@ func TestNoVerifierMeansExplicitSkip(t *testing.T) {
 	}
 }
 
-// TestPruneSkipsInFlightVerification: local pruning must not delete the
-// artifact a verification is reading (P1-09 file lease). The leased job
-// sits OUTSIDE the keep window (an older job than the anchor) so pruning
-// would otherwise delete it.
-func TestPruneSkipsInFlightVerification(t *testing.T) {
+// TestPruneSkipsVerificationLease: the lease is held from ENQUEUE through
+// execution and released when the run completes — pruning must respect it
+// in both phases (round-2 P1-09 gaps 2+4: queued protection and the
+// check-then-start TOCTOU are closed by acquiring the lease at enqueue).
+func TestPruneSkipsVerificationLease(t *testing.T) {
 	p := newPhase3Runner(t)
 	dbID := p.addLocalDatabase(t, "pdb")
 	// Seed order matters: the leased job must be OLDER than the anchor.
-	leasedJob := seedVerifiedReadyJob(t, p, dbID, "running")
+	// Seed with 'pending' so the startup sweep enqueues it.
+	leasedJob := seedVerifiedReadyJob(t, p, dbID, "pending")
 	_ = seedVerifiedReadyJob(t, p, dbID, "skipped") // newest = anchor
 
-	p.mu.Lock()
-	p.verifyInFlight[leasedJob] = true
-	p.mu.Unlock()
-	p.pruneLocalArtifacts(context.Background(), dbID, 1)
+	// A FAILED verification keeps the job outside the last-verified anchor
+	// protection, isolating the lease behavior under test.
+	engine := newFakeVerifyEngine(verifier.Result{
+		Status: verifier.StatusFailed, Detail: "stub failure", ServerVersion: "PostgreSQL 18.4 (test)",
+	})
+	engine.hangUntilRelease = true
+	p.SetVerifier(engine)
+	p.SetVerifyIdentity("AGE-SECRET-KEY-TEST")
+	p.Start(context.Background())
+	defer p.Stop()
 
+	// Wait until the queued verification is RUNNING (lease held).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status, _, _, _ := verifyRow(t, p, leasedJob)
+		if status == "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status, _, _, _ := verifyRow(t, p, leasedJob); status != "running" {
+		t.Fatal("verification never started")
+	}
+
+	// While running (lease held), pruning must skip the job.
+	p.pruneLocalArtifacts(context.Background(), dbID, 1)
 	var artifact string
 	if err := p.store.DB.QueryRow(`SELECT artifact_path FROM jobs WHERE id = ?`, leasedJob).Scan(&artifact); err != nil {
 		t.Fatal(err)
 	}
 	if artifact == "" {
-		t.Fatal("prune deleted the artifact of an in-flight verification")
-	}
-	if _, err := os.Stat(artifact); err != nil {
-		t.Fatalf("artifact file missing despite lease: %v", err)
+		t.Fatal("prune deleted the artifact while the verification lease was held")
 	}
 
-	// After the lease is released, pruning proceeds.
-	p.mu.Lock()
-	delete(p.verifyInFlight, leasedJob)
-	p.mu.Unlock()
+	// Complete the verification: the run finishes, the lease is released.
+	close(engine.release)
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		status, _, _, _ := verifyRow(t, p, leasedJob)
+		if status == "failed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status, _, _, _ := verifyRow(t, p, leasedJob); status != "failed" {
+		t.Fatal("verification never completed")
+	}
+	// Release wait: the worker unwinds (deferred lease release) before the
+	// status became visible? The lease release happens right after
+	// finishVerification in runVerification — give it a beat.
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !p.verifyBusy(leasedJob) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if p.verifyBusy(leasedJob) {
+		t.Fatal("lease not released after completion")
+	}
+
+	// Now pruning proceeds.
 	p.pruneLocalArtifacts(context.Background(), dbID, 1)
 	if err := p.store.DB.QueryRow(`SELECT artifact_path FROM jobs WHERE id = ?`, leasedJob).Scan(&artifact); err != nil {
 		t.Fatal(err)
 	}
 	if artifact != "" {
 		t.Fatalf("artifact reference kept after lease release: %q", artifact)
+	}
+}
+
+// TestQueuedVerificationProtectedFromPrune: a QUEUED (pending) job holds
+// the lease too (round-2 P1-09 gap 2).
+func TestQueuedVerificationProtectedFromPrune(t *testing.T) {
+	p := newPhase3Runner(t)
+	dbID := p.addLocalDatabase(t, "qdb")
+	queuedJob := seedVerifiedReadyJob(t, p, dbID, "")
+	_ = seedVerifiedReadyJob(t, p, dbID, "skipped") // anchor
+
+	engine := newFakeVerifyEngine(verifier.Result{Status: verifier.StatusVerified})
+	engine.hangUntilRelease = true
+	p.SetVerifier(engine)
+	p.SetVerifyIdentity("AGE-SECRET-KEY-TEST")
+
+	// Queue without starting the worker: the entry sits in the bounded
+	// queue, but the LEASE is already held.
+	p.enqueueVerification(queuedJob, pgclientSanitize)
+	if !p.verifyBusy(queuedJob) {
+		t.Fatal("enqueue did not acquire the lease")
+	}
+	p.pruneLocalArtifacts(context.Background(), dbID, 1)
+	var artifact string
+	if err := p.store.DB.QueryRow(`SELECT artifact_path FROM jobs WHERE id = ?`, queuedJob).Scan(&artifact); err != nil {
+		t.Fatal(err)
+	}
+	if artifact == "" {
+		t.Fatal("prune deleted the artifact of a QUEUED verification")
+	}
+}
+
+// TestNoVerifierSweepSettlesStaleStates: startup with a disabled verifier
+// settles historical pending/running verify states to an explicit skip
+// instead of leaving them transitional forever (round-2 P2-02).
+func TestNoVerifierSweepSettlesStaleStates(t *testing.T) {
+	p := newPhase3Runner(t) // no verifier
+	dbID := p.addLocalDatabase(t, "sdb")
+	jobID := seedVerifiedReadyJob(t, p, dbID, "pending")
+
+	p.Start(context.Background())
+	defer p.Stop()
+
+	deadline := time.Now().Add(5 * time.Second)
+	status := ""
+	for time.Now().Before(deadline) {
+		status, _, _, _ = verifyRow(t, p, jobID)
+		if status == "skipped" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if status != "skipped" {
+		t.Fatalf("stale pending state not settled: %q", status)
+	}
+	_, detail, _, _ := verifyRow(t, p, jobID)
+	if detail == "" {
+		t.Fatal("settled skip must carry the reason")
+	}
+}
+
+// TestProfilePersistedFromServerVersion: verify_profile records the actual
+// server version evidence, not a constant (round-2 P1-08).
+func TestProfilePersistedFromServerVersion(t *testing.T) {
+	p := newPhase3Runner(t)
+	dbID := p.addLocalDatabase(t, "prdb")
+	jobID := seedVerifiedReadyJob(t, p, dbID, "pending")
+
+	engine := newFakeVerifyEngine(verifier.Result{
+		Status: verifier.StatusVerified, TablesFound: 3,
+		ServerVersion: "PostgreSQL 18.4 (Debian) on aarch64",
+	})
+	close(engine.release)
+	p.SetVerifier(engine)
+	p.SetVerifyIdentity("AGE-SECRET-KEY-TEST")
+
+	p.runVerification(context.Background(), verifyRequest{jobID: jobID, redact: pgclientSanitize})
+
+	_, _, profile, _ := verifyRow(t, p, jobID)
+	if profile != "embedded-local:18.4" {
+		t.Fatalf("verify_profile = %q, want embedded-local:18.4", profile)
+	}
+}
+
+// TestManifestMissingIsHonestSkip: a succeeded job whose manifest is gone
+// must NOT be verified with degraded checks — it records an honest skip
+// (round-2 P1-08: no silent downgrade of the expected-object baseline).
+func TestManifestMissingIsHonestSkip(t *testing.T) {
+	p := newPhase3Runner(t)
+	dbID := p.addLocalDatabase(t, "mdb")
+	jobID := seedVerifiedReadyJob(t, p, dbID, "pending")
+	// Remove the manifest file the seed wrote.
+	var manifestPath string
+	if err := p.store.DB.QueryRow(`SELECT manifest_path FROM jobs WHERE id = ?`, jobID).Scan(&manifestPath); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(manifestPath)
+
+	engine := newFakeVerifyEngine(verifier.Result{Status: verifier.StatusVerified})
+	close(engine.release)
+	p.SetVerifier(engine)
+	p.SetVerifyIdentity("AGE-SECRET-KEY-TEST")
+
+	p.runVerification(context.Background(), verifyRequest{jobID: jobID, redact: pgclientSanitize})
+	status, detail, _, _ := verifyRow(t, p, jobID)
+	if status != "skipped" {
+		t.Fatalf("status = %q, want skipped (manifest missing)", status)
+	}
+	if detail == "" {
+		t.Fatal("skip must explain the missing manifest")
 	}
 }
 

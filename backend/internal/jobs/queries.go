@@ -4,7 +4,14 @@ package jobs
 import (
 	"database/sql"
 	"errors"
+	"os"
 )
+
+// regularFileExists reports whether path exists as a readable regular file.
+func regularFileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Mode().IsRegular()
+}
 
 // Task is the API-safe view of a job row.
 type Task struct {
@@ -70,7 +77,10 @@ func scanTask(scan func(dest ...any) error) (*Task, error) {
 	t.ArtifactSHA256 = sha
 	t.ArtifactSize = size
 	t.HasManifest = hasManifestPath != ""
-	t.HasRecoveryKit = t.RecoveryKitPath != ""
+	// Kit availability claims the FILE exists, not just that a path is
+	// recorded (round-2 P2-02: a stale reference must not advertise a
+	// download that 404s).
+	t.HasRecoveryKit = t.RecoveryKitPath != "" && regularFileExists(t.RecoveryKitPath)
 	t.VerifyTables = verifyTables
 	t.VerifyDurationSecs = verifyDur
 	if startedAt.Valid {

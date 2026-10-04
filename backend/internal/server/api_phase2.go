@@ -284,6 +284,13 @@ func (a *apiService) dbToAPI(d *jobs.Database) api.Database {
 	return out
 }
 
+// ranVerification reports whether the job reached a verifier outcome, so a
+// legitimate zero (tables) is not omitted from the response (round-2 P2-02:
+// verified-with-zero-tables must serialize its 0).
+func ranVerification(status string) bool {
+	return status == "verified" || status == "failed" || status == "unsupported"
+}
+
 func taskToAPI(t *jobs.Task) api.Task {
 	out := api.Task{
 		Id:         t.ID,
@@ -329,7 +336,7 @@ func taskToAPI(t *jobs.Task) api.Task {
 		vd := t.VerifyDetail
 		out.VerifyDetail = &vd
 	}
-	if t.VerifyTables > 0 {
+	if t.VerifyTables > 0 || ranVerification(t.VerifyStatus) {
 		vt := t.VerifyTables
 		out.VerifyTables = &vt
 	}

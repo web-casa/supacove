@@ -102,11 +102,13 @@ type harness struct {
 type hopt struct {
 	pgRestoreExit string // exit code for the pg_restore stub (default "0")
 	psqlExit      string // exit code for every psql call (default "0")
+	psqlNextExit  string // exit code for psql calls AFTER the first (default = psqlExit)
 	psqlFirst     string // table count for the emptiness check (default "0")
 	psqlNext      string // table count for later psql calls (default = psqlFirst)
 	sha           string // hash the sha256sum stub prints (default: the real one)
 	noShaTool     bool   // omit the sha256sum stub entirely
-	tableCount    int64  // expected tables embedded in the kit (-1 unknown)
+	tableCount    int64  // expected tables embedded in the kit (with tableCountSet)
+	tableCountSet bool   // distinguishes "expect 0" from "no expectation"
 }
 
 func (o hopt) or(def, v string) string {
@@ -117,9 +119,10 @@ func (o hopt) or(def, v string) string {
 }
 
 // tableCountOrUnknown defaults the harness to "no expectation" (-1): only
-// tests that set tableCount explicitly embed a cross-check.
+// tests that set tableCountSet embed a cross-check. A set tableCount of 0
+// is a genuine zero-table expectation (round-2 R2-P1-02).
 func (o hopt) tableCountOrUnknown() int64 {
-	if o.tableCount == 0 {
+	if !o.tableCountSet {
 		return -1
 	}
 	return o.tableCount
@@ -144,7 +147,7 @@ func newHarness(t *testing.T, o hopt) (*harness, string) {
 			t.Fatal(err)
 		}
 	}
-	logLine := fmt.Sprintf(`printf 'ARGV:[%%s]\n' "$*" >> '%s'`, h.logPath)
+	logLine := fmt.Sprintf(`printf 'TOOL:%%s ARGV:[%%s]\n' "${0##*/}" "$*" >> '%s'`, h.logPath)
 	stub("age", `#!/bin/sh
 `+logLine+`
 out=""
@@ -162,10 +165,20 @@ exit 0
 n=$(cat '`+cnt+`' 2>/dev/null || echo 0)
 echo $((n+1)) > '`+cnt+`'
 if [ "$n" = "0" ]; then echo '`+o.or("0", o.psqlFirst)+`'; else echo '`+psqlNext+`'; fi
-exit `+o.or("0", o.psqlExit)+`
+if [ "$n" = "0" ]; then exit `+o.or("0", o.psqlExit)+`; fi
+exit `+o.or(o.or("0", o.psqlExit), o.psqlNextExit)+`
 `)
 	if !o.noShaTool {
 		stub("sha256sum", "#!/bin/sh\n"+logLine+"\necho '"+sha+"'\n")
+	} else {
+		// NON-executable files: `command -v` skips them, faithfully
+		// exercising the missing-tool branch with a realistic PATH
+		// (round-2 P2-03: the old test kept a real sha256sum reachable).
+		for _, name := range []string{"sha256sum", "shasum"} {
+			if err := os.WriteFile(filepath.Join(binDir, name), []byte("# placeholder\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	script := GenerateRestoreScriptWithTables(testKit(), o.tableCountOrUnknown())
 	scriptPath := filepath.Join(h.dir, "restore.sh")
@@ -254,7 +267,7 @@ func TestHappyPath(t *testing.T) {
 	if strings.Contains(log, "sup3rsecret") {
 		t.Fatalf("password leaked into tool argv: %s", log)
 	}
-	if !strings.Contains(log, "ARGV:[--dbname="+testTarget+" --exit-on-error --no-owner") {
+	if !strings.Contains(log, "TOOL:pg_restore ARGV:[--dbname="+testTarget+" --exit-on-error --no-owner") {
 		t.Fatalf("pg_restore argv malformed (P1-01 continuation breakage?): %s", log)
 	}
 	if left := h.tempDirLeftovers(t); len(left) > 0 {
@@ -266,7 +279,7 @@ func TestHappyPath(t *testing.T) {
 func TestWrongHashRefusesDecrypt(t *testing.T) {
 	h, binDir := newHarness(t, hopt{sha: "deadbeef"})
 	mustFail(t, h.run(t, binDir, []string{testEnv}, testTarget, testEnc), "hash mismatch")
-	if strings.Contains(h.argvLog(t), "pg_restore") {
+	if strings.Contains(h.argvLog(t), "TOOL:pg_restore") {
 		t.Fatal("pg_restore ran despite hash mismatch")
 	}
 }
@@ -283,7 +296,7 @@ func TestMissingEncryptedFile(t *testing.T) {
 func TestNonEmptyTargetRefused(t *testing.T) {
 	h, binDir := newHarness(t, hopt{psqlFirst: "12"})
 	mustFail(t, h.run(t, binDir, []string{testEnv}, testTarget, testEnc), "non-empty target")
-	if strings.Contains(h.argvLog(t), "pg_restore") {
+	if strings.Contains(h.argvLog(t), "TOOL:pg_restore") {
 		t.Fatal("restore ran on a non-empty target")
 	}
 	if err := h.run(t, binDir,
@@ -300,6 +313,9 @@ func TestInlinePasswordRefused(t *testing.T) {
 		"postgresql://backup:sup3rsecret@db/db", testEnc), "inline password URI")
 	mustFail(t, h.run(t, binDir, []string{testEnv},
 		"host=db password=sup3rsecret", testEnc), "keyword password")
+	// libpq-legal spaced keyword form (round-2 P1-02 remainder).
+	mustFail(t, h.run(t, binDir, []string{testEnv},
+		"host=db user=backup password = 'sup3rsecret' dbname=t", testEnc), "spaced keyword password")
 	// No tool may have been invoked at all (the log file is created lazily
 	// by the first stub call — its absence proves nothing ran).
 	if b, err := os.ReadFile(h.logPath); err == nil && strings.Contains(string(b), "sup3rsecret") {
@@ -316,13 +332,13 @@ func TestPgRestoreFailurePartialWrite(t *testing.T) {
 // TestPostRestoreCountMismatch: manifest declares 7 tables, the restored
 // database has 3 → failure even though pg_restore exited 0 (P1-03/P1-08).
 func TestPostRestoreCountMismatch(t *testing.T) {
-	h, binDir := newHarness(t, hopt{psqlNext: "3", tableCount: 7})
+	h, binDir := newHarness(t, hopt{psqlNext: "3", tableCount: 7, tableCountSet: true})
 	mustFail(t, h.run(t, binDir, []string{testEnv}, testTarget, testEnc), "table-count mismatch")
 }
 
 // TestPostRestoreCountMatch: same scenario, matching count → success.
 func TestPostRestoreCountMatch(t *testing.T) {
-	h, binDir := newHarness(t, hopt{psqlNext: "7", tableCount: 7})
+	h, binDir := newHarness(t, hopt{psqlNext: "7", tableCount: 7, tableCountSet: true})
 	if err := h.run(t, binDir, []string{testEnv}, testTarget, testEnc); err != nil {
 		t.Fatalf("matching count must succeed: %v", err)
 	}
@@ -350,4 +366,30 @@ func TestTempDirCleanedOnError(t *testing.T) {
 	if left := h.tempDirLeftovers(t); len(left) > 0 {
 		t.Fatalf("temp dirs (with the plaintext dump!) left behind: %v", left)
 	}
+}
+
+// TestPostRestorePsqlFailure: the FINAL count query failing (after a
+// successful restore) must fail the script — not just the pre-flight check
+// (round-2 P2-03: the old test only exercised the first psql call).
+func TestPostRestorePsqlFailure(t *testing.T) {
+	h, binDir := newHarness(t, hopt{psqlNextExit: "1"})
+	mustFail(t, h.run(t, binDir, []string{testEnv}, testTarget, testEnc),
+		"post-restore psql failure")
+	if !strings.Contains(h.argvLog(t), "TOOL:pg_restore") {
+		t.Fatal("expected the restore to have run before the count check failed")
+	}
+}
+
+// TestGenuineZeroTableExpectation: a manifest declaring 0 tables with a
+// restored 0-table database must SUCCEED (round-2 R2-P1-02: known-zero must
+// not be silently treated as unknown, and unknown must not fail on 0).
+func TestGenuineZeroTableExpectation(t *testing.T) {
+	h, binDir := newHarness(t, hopt{tableCount: 0, tableCountSet: true, psqlNext: "0"})
+	if err := h.run(t, binDir, []string{testEnv}, testTarget, testEnc); err != nil {
+		t.Fatalf("zero-table expectation with zero restored tables must succeed: %v", err)
+	}
+	// Declared 0 but restored 3 → mismatch failure.
+	h2, binDir2 := newHarness(t, hopt{tableCount: 0, tableCountSet: true, psqlNext: "3"})
+	mustFail(t, h2.run(t, binDir2, []string{testEnv}, testTarget, testEnc),
+		"zero-table mismatch")
 }

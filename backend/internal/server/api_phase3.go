@@ -175,6 +175,41 @@ func (a *apiService) AssignDatabaseDestination(ctx context.Context, request api.
 	return api.AssignDatabaseDestination200JSONResponse{Status: api.Ok}, nil
 }
 
+// openUnderStaging opens path for reading, refusing to escape the staging
+// directory — including through symlinks (round-2 R2-P2-01: lexical
+// Abs+prefix containment does not resolve symlinks; os.OpenRoot uses
+// directory-relative opens that cannot traverse out of the root). The path
+// must be the staging-internal absolute path recorded in the DB.
+func openUnderStaging(stagingDir, path string) (*os.File, os.FileInfo, error) {
+	stagingAbs, err := filepath.Abs(stagingDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	rel, err := filepath.Rel(stagingAbs, pathAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return nil, nil, errors.New("path resolves outside the staging directory")
+	}
+	root, err := os.OpenRoot(stagingAbs)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer root.Close()
+	f, err := root.Open(rel)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := f.Stat()
+	if err != nil || st.IsDir() {
+		f.Close()
+		return nil, nil, errors.New("not a regular file")
+	}
+	return f, st, nil
+}
+
 // GetTaskDownloadURL returns a short-lived presigned GET URL for a
 // remotely-committed backup. The URL is a bearer secret: it is returned to
 // the authenticated caller and never logged.
@@ -229,25 +264,9 @@ func (a *apiService) DownloadTask(ctx context.Context, request api.DownloadTaskR
 		return api.DownloadTask404JSONResponse{Code: "not_available",
 			Message: "no local artifact for this task"}, nil
 	}
-	stagingAbs, err := filepath.Abs(a.srv.stagingDir)
+	f, st, err := openUnderStaging(a.srv.stagingDir, artifactPath)
 	if err != nil {
-		return api.DownloadTask500JSONResponse{}, nil
-	}
-	artifactAbs, err := filepath.Abs(artifactPath)
-	if err != nil {
-		return api.DownloadTask500JSONResponse{}, nil
-	}
-	if !strings.HasPrefix(artifactAbs, stagingAbs+string(os.PathSeparator)) {
-		a.srv.log.Error("download path escaped staging", "job", request.Id)
-		return api.DownloadTask500JSONResponse{}, nil
-	}
-	f, err := os.Open(artifactAbs)
-	if err != nil {
-		return api.DownloadTask404JSONResponse{Code: "not_available", Message: "artifact file no longer present"}, nil
-	}
-	st, err := f.Stat()
-	if err != nil || st.IsDir() {
-		f.Close()
+		a.srv.log.Error("download open failed (containment or absence)", "job", request.Id, "err", err)
 		return api.DownloadTask404JSONResponse{Code: "not_available", Message: "artifact file no longer present"}, nil
 	}
 	return api.DownloadTask200ApplicationoctetStreamResponse{
@@ -272,27 +291,11 @@ func (a *apiService) DownloadRecoveryKit(ctx context.Context, request api.Downlo
 		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available",
 			Message: "no recovery kit for this task"}, nil
 	}
-	stagingAbs, err := filepath.Abs(a.srv.stagingDir)
+	f, st, err := openUnderStaging(a.srv.stagingDir, t.RecoveryKitPath)
 	if err != nil {
-		return api.DownloadRecoveryKit500JSONResponse{}, nil
-	}
-	kitAbs, err := filepath.Abs(t.RecoveryKitPath)
-	if err != nil {
-		return api.DownloadRecoveryKit500JSONResponse{}, nil
-	}
-	if !strings.HasPrefix(kitAbs, stagingAbs+string(os.PathSeparator)) {
-		a.srv.log.Error("kit path escaped staging", "job", request.Id)
-		return api.DownloadRecoveryKit500JSONResponse{}, nil
-	}
-	f, err := os.Open(kitAbs)
-	if err != nil {
+		a.srv.log.Error("kit open failed (containment or absence)", "job", request.Id, "err", err)
 		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available",
 			Message: "recovery kit file no longer present; it is regenerated at the next startup"}, nil
-	}
-	st, err := f.Stat()
-	if err != nil || st.IsDir() {
-		f.Close()
-		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available", Message: "recovery kit file no longer present"}, nil
 	}
 	return api.DownloadRecoveryKit200TextxShellscriptResponse{
 		Body:          f,

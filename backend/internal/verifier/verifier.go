@@ -83,7 +83,9 @@ func New(cfg Config) (*Verifier, error) {
 
 // CleanupResidual removes leftover working directories from a previous
 // crash (phase-5 review P1-06: startup recovery of verification residue).
-// Errors are collected and returned; they never panic.
+// A residual data directory with a live postmaster.pid is stopped FIRST
+// (its pg_ctl, bounded) — never deleted under a running instance. Errors
+// are collected and returned; they never panic.
 func (v *Verifier) CleanupResidual() error {
 	entries, err := os.ReadDir(v.baseDir)
 	if os.IsNotExist(err) {
@@ -92,12 +94,26 @@ func (v *Verifier) CleanupResidual() error {
 	if err != nil {
 		return err
 	}
+	env := minimalEnv(v.baseDir)
 	var errs []error
 	for _, e := range entries {
 		if !strings.HasPrefix(e.Name(), "verify-") {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(v.baseDir, e.Name())); err != nil {
+		dir := filepath.Join(v.baseDir, e.Name())
+		pidFile := filepath.Join(dir, "pgdata", "postmaster.pid")
+		if fileExists(pidFile) {
+			// A previous instance survived its process: stop it with a
+			// bounded, run-independent context before touching the files.
+			stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if warn := v.stopConfirmed(stopCtx, env, filepath.Join(dir, "pgdata")); warn != "" {
+				errs = append(errs, fmt.Errorf("residual %s: %s; directory PRESERVED", e.Name(), warn))
+				cancel()
+				continue
+			}
+			cancel()
+		}
+		if err := os.RemoveAll(dir); err != nil {
 			errs = append(errs, fmt.Errorf("remove residual %s: %w", e.Name(), err))
 		}
 	}
@@ -131,7 +147,14 @@ type Input struct {
 //	pg_ctl start (Unix socket only) → extension availability check →
 //	pg_restore --exit-on-error → expected-object-set check →
 //	pg_ctl stop (confirmed) → cleanup
-func (v *Verifier) Verify(ctx context.Context, input Input) Result {
+//
+// The deferred cleanup stops the throwaway instance on EVERY exit path
+// after a successful start — restore failures, extension mismatches and
+// canceled contexts included (review round-2 R2-P1-01: the old deferred
+// stop must never regress away). When the instance cannot be confirmed
+// stopped, the working directory is PRESERVED (never deleted under a
+// possibly-running postgres) and the failure is reported in the result.
+func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 	start := time.Now()
 	fail := func(status Status, format string, args ...any) Result {
 		msg := fmt.Sprintf(format, args...)
@@ -168,17 +191,36 @@ func (v *Verifier) Verify(ctx context.Context, input Input) Result {
 			return fail(StatusFailed, "create %s: %v", d, err)
 		}
 	}
-	// Plaintext FIRST: it is the most sensitive residue. Then the whole
-	// workdir (which includes the plaintext anyway, but order documents
-	// intent and bounds exposure if RemoveAll were interrupted).
-	defer os.Remove(plainPath)
-	defer os.RemoveAll(workDir)
-
+	// Cleanup on every exit path. Order: stop the instance FIRST (with its
+	// own bounded context, independent of the run context that may already
+	// be canceled), remove the plaintext next, then the workdir. If the
+	// stop cannot be confirmed, PRESERVE the directory as recovery evidence
+	// and surface the failure — never delete a data directory that a live
+	// postgres may still be writing.
 	env := minimalEnv(workDir)
+	pgStarted := false
+	defer func() {
+		if pgStarted {
+			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer stopCancel()
+			if warn := v.stopConfirmed(stopCtx, env, dataDir); warn != "" {
+				res.Detail = joinDetail(res.Detail, warn+"; work directory PRESERVED for manual cleanup: "+workDir)
+				if res.Status == StatusVerified {
+					// A verified restore whose instance could not be
+					// confirmed stopped is NOT a clean verification.
+					res.Status = StatusFailed
+					res.ErrorMessage = res.Detail
+				}
+				return // keep the workdir as evidence
+			}
+		}
+		os.Remove(plainPath) // most sensitive residue first
+		os.RemoveAll(workDir)
+	}()
 
 	// 1) Ciphertext integrity (covers the exact committed bytes; this is
 	// error detection, not a signature).
-	if err := hashFile(input.CiphertextPath, input.SHA256Hex); err != nil {
+	if err := hashFile(ctx, input.CiphertextPath, input.SHA256Hex); err != nil {
 		return fail(StatusFailed, "ciphertext check: %v", err)
 	}
 	// 2) Disk budget (phase-5 review P1-06): the restore peak needs the
@@ -190,7 +232,7 @@ func (v *Verifier) Verify(ctx context.Context, input Input) Result {
 	}
 
 	// 3) Decrypt into the restricted temp file (0600 by umask-enforced mode).
-	if err := decryptToFile(input.Identity, input.CiphertextPath, plainPath); err != nil {
+	if err := decryptToFile(ctx, input.Identity, input.CiphertextPath, plainPath); err != nil {
 		return fail(StatusFailed, "age decrypt: %v", err)
 	}
 
@@ -204,7 +246,8 @@ func (v *Verifier) Verify(ctx context.Context, input Input) Result {
 		return fail(StatusFailed, "initdb: %v", err)
 	}
 
-	// 5) start PG (Unix socket only), bounded start window.
+	// 5) start PG (Unix socket only), bounded start window. From here on the
+	// deferred cleanup owns stopping the instance on every path.
 	pgCtlCtx, pgCtlCancel := context.WithTimeout(ctx, 30*time.Second)
 	err := v.run(pgCtlCtx, env, "pg_ctl",
 		"-D", dataDir, "-l", filepath.Join(dataDir, "pg.log"),
@@ -213,6 +256,7 @@ func (v *Verifier) Verify(ctx context.Context, input Input) Result {
 	if err != nil {
 		return fail(StatusFailed, "pg_ctl start: %v", err)
 	}
+	pgStarted = true
 
 	// 6) Extension availability — BEFORE restoring: a manifest requiring
 	// extensions this PG build cannot provide is 'unsupported', not a
@@ -257,22 +301,41 @@ func (v *Verifier) Verify(ctx context.Context, input Input) Result {
 	}
 	serverVersion := v.serverVersion(ctx, env, sockDir)
 
-	// 9) Confirmed stop: fast stop, verify postmaster.pid is gone, escalate
-	// to immediate; a still-running instance is reported, never silent.
-	stopWarn := v.stopConfirmed(ctx, env, dataDir)
-
-	res := Result{
+	// The deferred cleanup stops the instance; a failure there downgrades
+	// the result and preserves the workdir (see the deferred func above).
+	res = Result{
 		Status:        StatusVerified,
 		TablesFound:   tables,
 		Duration:      time.Since(start),
 		ServerVersion: serverVersion,
-		Detail: fmt.Sprintf("restored %d user tables into embedded PostgreSQL (%s); expected-object set matched",
-			tables, profileName(serverVersion)),
-	}
-	if stopWarn != "" {
-		res.Detail += "; " + stopWarn
+		Detail:        verifiedDetail(input, tables, serverVersion),
 	}
 	return res
+}
+
+// verifiedDetail states EXACTLY what was proven. When the manifest carried
+// no expectations (legacy manifest), the wording must not claim an
+// expected-object-set match (review round-2 P1-08/P2-02).
+func verifiedDetail(input Input, tables int64, serverVersion string) string {
+	scope := "pg_restore completed without SQL errors"
+	if input.ExpectedTables >= 0 {
+		scope = fmt.Sprintf("manifest-declared object set matched (%d user tables)", input.ExpectedTables)
+	} else {
+		scope += fmt.Sprintf("; %d user tables restored", tables)
+		scope += "; table-count cross-check unavailable (manifest carries no tableCount — legacy manifest)"
+	}
+	if len(input.ExpectedExtensions) > 0 {
+		scope += fmt.Sprintf(" and %d declared extensions present", len(input.ExpectedExtensions))
+	}
+	return fmt.Sprintf("restored into embedded PostgreSQL (%s): %s", ProfileName(serverVersion), scope)
+}
+
+// joinDetail appends an annotation to a detail string.
+func joinDetail(detail, annotation string) string {
+	if detail == "" {
+		return annotation
+	}
+	return detail + "; " + annotation
 }
 
 // checkDiskBudget refuses to start when free space on the verifier base
@@ -296,9 +359,9 @@ func checkDiskBudget(baseDir, ciphertextPath string) error {
 	return nil
 }
 
-// profileName derives the persisted verify_profile label: the embedded
+// ProfileName derives the persisted verify_profile label: the embedded
 // profile (local throwaway instance) plus the server major it ran on.
-func profileName(serverVersion string) string {
+func ProfileName(serverVersion string) string {
 	ver := strings.TrimSpace(serverVersion)
 	if ver == "" {
 		return "embedded-local:unknown"
@@ -311,20 +374,25 @@ func profileName(serverVersion string) string {
 }
 
 // stopConfirmed stops the throwaway instance and confirms it is gone.
+// Idempotent: an instance that is already down (no postmaster.pid) is a
+// no-op success, so the deferred cleanup and any explicit stop compose.
 func (v *Verifier) stopConfirmed(ctx context.Context, env []string, dataDir string) string {
+	pidFile := filepath.Join(dataDir, "postmaster.pid")
+	if !fileExists(pidFile) {
+		return "" // already stopped (or never started)
+	}
 	stopCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	err := v.run(stopCtx, env, "pg_ctl", "-D", dataDir, "-m", "fast", "-w", "stop")
 	cancel()
-	pidFile := filepath.Join(dataDir, "postmaster.pid")
 	if err == nil && !fileExists(pidFile) {
 		return ""
 	}
-	// Escalate once; then report honestly.
+	// Escalate once; then report honestly and preserve the evidence.
 	escCtx, escCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	err = v.run(escCtx, env, "pg_ctl", "-D", dataDir, "-m", "immediate", "-w", "stop")
 	escCancel()
 	if fileExists(pidFile) {
-		return "WARNING: embedded postgres may still be running (postmaster.pid present after stop)"
+		return "WARNING: embedded postgres could not be confirmed stopped (postmaster.pid still present)"
 	}
 	return ""
 }
@@ -334,15 +402,16 @@ func fileExists(p string) bool {
 	return err == nil
 }
 
-// hashFile streams the file and compares it to the expected hex digest.
-func hashFile(path, wantHex string) error {
+// hashFile streams the file and compares it to the expected hex digest,
+// observing the context so a shutdown/timeout cuts the read short.
+func hashFile(ctx context.Context, path, wantHex string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if err := copyWithContext(ctx, h, f); err != nil {
 		return err
 	}
 	got := hex.EncodeToString(h.Sum(nil))
@@ -352,29 +421,73 @@ func hashFile(path, wantHex string) error {
 	return nil
 }
 
+// copyWithContext copies in bounded chunks, checking the context between
+// chunks so large artifacts cannot outlive their budget (review round-2
+// P1-06: file copies must observe the wall-time/Stop limits).
+func copyWithContext(ctx context.Context, dst io.Writer, src io.Reader) error {
+	buf := make([]byte, 1<<20)
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("canceled during copy: %w", err)
+		}
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return werr
+			}
+		}
+		if rerr == io.EOF {
+			return nil
+		}
+		if rerr != nil {
+			return rerr
+		}
+	}
+}
+
 // decryptToFile writes the plaintext dump at 0600 inside the restricted
-// workdir (the process umask is not relied on; the mode is explicit).
-func decryptToFile(identity, ciphertextPath, plainPath string) error {
-	src, err := os.Open(ciphertextPath)
-	if err != nil {
-		return err
+// workdir (the process umask is not relied on; the mode is explicit). The
+// decryption runs on a goroutine supervised by the context: a canceled
+// context abandons it promptly (the deferred cleanup removes the file; the
+// goroutine's eventual writes go to an unlinked-or-removed file and cannot
+// outlive the process).
+func decryptToFile(ctx context.Context, identity, ciphertextPath, plainPath string) error {
+	type res struct {
+		err error
 	}
-	defer src.Close()
-	dst, err := os.OpenFile(plainPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
+	done := make(chan res, 1)
+	go func() {
+		src, err := os.Open(ciphertextPath)
+		if err != nil {
+			done <- res{err}
+			return
+		}
+		defer src.Close()
+		dst, err := os.OpenFile(plainPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_TRUNC, 0o600)
+		if err != nil {
+			done <- res{err}
+			return
+		}
+		if err := agekey.DecryptStream(identity, src, dst); err != nil {
+			dst.Close()
+			os.Remove(plainPath)
+			done <- res{err}
+			return
+		}
+		if err := dst.Sync(); err != nil {
+			dst.Close()
+			os.Remove(plainPath)
+			done <- res{err}
+			return
+		}
+		done <- res{err: dst.Close()}
+	}()
+	select {
+	case r := <-done:
+		return r.err
+	case <-ctx.Done():
+		return fmt.Errorf("canceled during decryption (background copy abandoned): %w", ctx.Err())
 	}
-	if err := agekey.DecryptStream(identity, src, dst); err != nil {
-		dst.Close()
-		os.Remove(plainPath)
-		return err
-	}
-	if err := dst.Sync(); err != nil {
-		dst.Close()
-		os.Remove(plainPath)
-		return err
-	}
-	return dst.Close()
 }
 
 // minimalEnv builds the subprocess environment from an explicit whitelist

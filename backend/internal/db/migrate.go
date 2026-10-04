@@ -68,12 +68,19 @@ func (s *Store) Migrate(ctx context.Context) error {
 // migrationProvider builds a goose v3 provider from the embedded migrations.
 // The instance provider avoids the package-level SetBaseFS/SetDialect global
 // state (review P1-08 recommendation).
+//
+// Out-of-order is REQUIRED for legacy convergence (review round-2 migration
+// audit): databases built by binaries that predate the Go migrations carry
+// goose version rows {1,4,5,…} with no 3, so the conditionally-added Go
+// migrations (0003, 0013) must be allowed to apply late. Both are written
+// as conditional no-ops when their columns already exist, so out-of-order
+// application is idempotent.
 func (s *Store) migrationProvider() (*goose.Provider, error) {
 	fsys, err := fs.Sub(s.migrations, "migrations")
 	if err != nil {
 		return nil, fmt.Errorf("embed migrations: %w", err)
 	}
-	return goose.NewProvider(goose.DialectSQLite3, s.DB, fsys)
+	return goose.NewProvider(goose.DialectSQLite3, s.DB, fsys, goose.WithAllowOutofOrder(true))
 }
 
 // SchemaReady reports whether at least one migration has been applied — the

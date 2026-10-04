@@ -207,3 +207,97 @@ func TestCLIReloadsPendingSchema(t *testing.T) {
 		t.Fatal("pending migrations must block CLI writes")
 	}
 }
+
+// original0004 is the 0004_backup_kernel.sql exactly as shipped at 13a26c1,
+// BEFORE duration_secs was retro-edited into its Up section (a violation of
+// the historical-migration convention this test guards against). Databases
+// built from it migrate to the current schema via the conditional 0013
+// repair, which must leave duration_secs present and usable by stats.
+const original0004 = `-- +goose Up
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE databases (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT    NOT NULL UNIQUE,
+    platform       TEXT    NOT NULL DEFAULT 'generic',
+    env_tag        TEXT    NOT NULL DEFAULT '',
+    conn_encrypted TEXT    NOT NULL,
+    server_version TEXT    NOT NULL DEFAULT '',
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+);
+
+CREATE TABLE jobs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    database_id    INTEGER NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+    status         TEXT    NOT NULL
+                   CHECK (status IN ('pending','running','succeeded','failed','canceled','interrupted')),
+    attempt        INTEGER NOT NULL DEFAULT 1,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    error_class    TEXT    NOT NULL DEFAULT '',
+    error_message  TEXT    NOT NULL DEFAULT '',
+    artifact_path  TEXT    NOT NULL DEFAULT '',
+    artifact_sha256 TEXT   NOT NULL DEFAULT '',
+    artifact_size  INTEGER NOT NULL DEFAULT 0,
+    manifest_path  TEXT    NOT NULL DEFAULT '',
+    scheduled_at   INTEGER NOT NULL,
+    started_at     INTEGER,
+    finished_at    INTEGER,
+    created_at     INTEGER NOT NULL
+);
+
+CREATE INDEX idx_jobs_database_created ON jobs(database_id, created_at DESC);
+CREATE INDEX idx_jobs_status ON jobs(status) WHERE status IN ('pending','running');
+
+-- +goose Down
+DROP INDEX idx_jobs_status;
+DROP INDEX idx_jobs_database_created;
+DROP TABLE jobs;
+DROP TABLE databases;
+DROP TABLE settings;
+`
+
+// TestUpgradeFromOriginal0004 (review round-2 migration audit): databases
+// built by the ORIGINAL 0004 (without duration_secs) upgrade to the current
+// schema and END UP WITH duration_secs — the conditional 0013 repair closes
+// the "no such column" failure stats queries hit on legacy upgrades.
+func TestUpgradeFromOriginal0004(t *testing.T) {
+	dir := t.TempDir()
+	legacy := legacyMigrations{
+		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
+		"0004_backup_kernel.sql": &fstest.MapFile{Data: []byte(original0004)},
+	}
+	buildLegacyDB(t, dir, legacy)
+
+	// Fixture sanity: the legacy jobs table must NOT have duration_secs.
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := ro.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('jobs') WHERE name = 'duration_secs'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	ro.Close()
+	if n != 0 {
+		t.Fatal("fixture unexpectedly has duration_secs — the fixture is not the pre-edit 0004")
+	}
+
+	// Upgrade with the CURRENT migration set.
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate legacy database: %v", err)
+	}
+	if err := store.DB.QueryRow(
+		`SELECT COALESCE(MAX(duration_secs), 0) FROM jobs`).Err(); err != nil {
+		t.Fatalf("duration_secs missing after legacy upgrade: %v", err)
+	}
+}

@@ -369,11 +369,25 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 			r.fail(j.id, ClassStorageUp, pgclient.SanitizeMessage(uerr.Error()))
 			continue
 		}
-		// Success record
+		// Success record — mirrors runJob's terminal write: platform and
+		// the initial verification state ride along so a resumed commit
+		// never produces a succeeded job with an empty verify status
+		// (round-2 P2-02). Its verification is queued by the startup
+		// sweep (ResumePendingVerifications) once the worker is running.
+		verifyStatus, verifyDetail := r.initialVerifyState()
+		detected := platformpkg.Generic
+		if _, _, _, connEnc, lerr := r.loadDatabase(ctx, j.dbID); lerr == nil {
+			if plainPlain, derr := crypto.Decrypt(r.key, connEnc); derr == nil {
+				if ci, perr := pgclient.ParseURI(string(plainPlain)); perr == nil {
+					detected = platformpkg.Detect(ci.Host)
+				}
+			}
+		}
 		if _, uerr := r.authDB.Exec(`
 			UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
-			  manifest_path = ?
-			WHERE id = ? AND status = 'running' AND cancel_requested = 0`, j.manifestPath, j.id); uerr != nil {
+			  manifest_path = ?, platform = ?, verify_status = ?, verify_detail = ?
+			WHERE id = ? AND status = 'running' AND cancel_requested = 0`,
+			j.manifestPath, string(detected), verifyStatus, verifyDetail, j.id); uerr != nil {
 			r.log.Error("resume: success update failed", "job", j.id, "err", uerr)
 		} else {
 			r.log.Info("resumed remote commit completed", "job", j.id)
@@ -404,8 +418,15 @@ func (r *Runner) Start(parent context.Context) {
 		}()
 		if r.verifier != nil {
 			r.startVerifyWorker(r.lifeCtx)
-			go r.ResumePendingVerifications(r.lifeCtx)
 		}
+		// The startup sweep runs even without a verifier: it settles stale
+		// pending/running states to an explicit skip in that case. It joins
+		// the WaitGroup, so Stop waits for its writes (round-2 P1-06/P2-02).
+		r.wg.Add(1)
+		go func() {
+			defer r.wg.Done()
+			r.ResumePendingVerifications(r.lifeCtx)
+		}()
 	})
 }
 
@@ -832,16 +853,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// the initial verification state are persisted in the SAME update so no
 	// observer ever sees a succeeded job without a verification state
 	// (phase-5 review P2-02).
-	verifyStatus := "skipped"
-	verifyDetail := "restore verification is not enabled on this instance (SB_VERIFY_ENABLED; see ADR-004)"
-	if r.verifier != nil {
-		if r.verifyIdentity == "" {
-			verifyDetail = "verification enabled but no age identity provided to the instance (SB_VERIFY_IDENTITY_FILE); artifacts cannot be decrypted for automatic restore checks"
-		} else {
-			verifyStatus = "pending"
-			verifyDetail = ""
-		}
-	}
+	verifyStatus, verifyDetail := r.initialVerifyState()
 	successSQL := `
 		UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
 		  artifact_path = ?, artifact_sha256 = ?, artifact_size = ?, manifest_path = ?,

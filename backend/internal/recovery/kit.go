@@ -95,9 +95,10 @@ ENCRYPTED_FILE="${2:-}"
 AGE_IDENTITY_FILE="${AGE_IDENTITY_FILE:?Set AGE_IDENTITY_FILE to the offline age identity file}"
 
 case "$TARGET_URL" in
-  *://*:*@*|*password=*)
-    echo "ERROR: the connection string contains an inline password." >&2
-    echo "Passwords in argv are readable by every local user via ps. Use:" >&2
+  *://*:*@*|*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]=*|*[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][[:space:]]*=*)
+    echo "ERROR: the connection string appears to contain an inline password." >&2
+    echo "libpq accepts 'password = ...' with spaces and any letter case," >&2
+    echo "and passwords in argv are readable by every local user via ps. Use:" >&2
     echo "  PGPASSWORD='...' sh restore.sh <conninfo_without_password> <file>" >&2
     exit 2 ;;
 esac

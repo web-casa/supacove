@@ -75,10 +75,12 @@ type Deps struct {
 	HasForeignTables bool          `json:"hasForeignTables"`
 	ServerEncoding   string        `json:"serverEncoding,omitempty"`
 	// TableCount is the user-table count at dump time — the expected-object
-	// baseline for restore verification (phase-5 review P1-08). Zero-value
-	// on manifests written before this field existed; verifiers must treat
-	// a missing count as unknown, never as "zero tables expected".
-	TableCount int64 `json:"tableCount,omitempty"`
+	// baseline for restore verification (phase-5 review P1-08). Serialized
+	// WITHOUT omitempty deliberately: a genuine zero-table database must
+	// stay distinguishable from a legacy manifest that lacks the field
+	// (review round-2 R2-P1-02 — omitempty turned known-zero into unknown).
+	// Consumers use HasTableCount to tell them apart.
+	TableCount int64 `json:"tableCount"`
 }
 
 // PgExtension mirrors pgclient.Extension without importing it here.

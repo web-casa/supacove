@@ -264,6 +264,9 @@ func (r *Runner) runRemoteRetention(ctx context.Context, dest *Destination, back
 		if i == 0 || i == lastVerifiedIdx {
 			continue // anchor and last verified restore proof
 		}
+		if c.verifyState == "pending" || c.verifyState == "running" {
+			continue // a queued/in-flight verification still needs its inputs
+		}
 		tooMany := i >= keep
 		tooOld := !cutoff.IsZero() && time.Unix(c.at, 0).Before(cutoff)
 		if !tooMany && !tooOld {
@@ -280,8 +283,15 @@ const verifierStatusVerified = "verified"
 
 // deleteRemoteBackup removes one backup's remote objects (per-object error
 // handling; a partial delete is recorded, never silent) and its local
-// staged files, then marks the job remote_state='deleted'.
+// staged files, then marks the job remote_state='deleted'. Jobs whose
+// artifact a verification is reading or about to read (queued) are SKIPPED:
+// deleting the local ciphertext/manifest under a verification destroys its
+// input (round-2 P1-09 gap 3).
 func (r *Runner) deleteRemoteBackup(ctx context.Context, backend storage.Backend, destID, jobID int64, objKey, manKey string) {
+	if r.verifyBusy(jobID) {
+		r.log.Info("retention skipped: verification holds this job's artifact lease", "job", jobID)
+		return
+	}
 	for _, key := range []string{objKey, manKey} {
 		if key == "" {
 			continue
@@ -345,12 +355,14 @@ func (r *Runner) deleteWithRetry(ctx context.Context, backend storage.Backend, k
 // pruneLocalArtifacts trims local staged ciphertexts for a database beyond
 // the newest keep (protocol D local half; the newest succeeded job's local
 // artifact is always protected). Jobs whose artifact a verification is
-// currently reading are skipped (phase-5 review P1-09 file lease): deleting
-// under a live pg_restore would corrupt the verification. Recovery-kit
-// files are never pruned here — they are tiny text and stay downloadable.
+// reading or about to read (queued lease) are skipped (phase-5 review
+// P1-09 file lease), as is the newest VERIFIED backup when newer backups
+// are unverified (round-2 P1-09: the local restore proof is an anchor
+// too). Recovery-kit files are never pruned here — they are tiny text and
+// stay downloadable.
 func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) {
 	rows, err := r.authDB.QueryContext(ctx, `
-		SELECT id, artifact_path, manifest_path, remote_state
+		SELECT id, artifact_path, manifest_path, remote_state, COALESCE(verify_status,'')
 		FROM jobs
 		WHERE database_id = ? AND status = 'succeeded'
 		ORDER BY id DESC`, dbID)
@@ -362,11 +374,12 @@ func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) 
 		id                 int64
 		artifact, manifest string
 		remoteState        string
+		verifyState        string
 	}
 	var succeeded []job
 	for rows.Next() {
 		var j job
-		if err := rows.Scan(&j.id, &j.artifact, &j.manifest, &j.remoteState); err != nil {
+		if err := rows.Scan(&j.id, &j.artifact, &j.manifest, &j.remoteState, &j.verifyState); err != nil {
 			rows.Close()
 			return
 		}
@@ -374,15 +387,25 @@ func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) 
 	}
 	rows.Close()
 
+	// The newest verified backup keeps its local artifact even when it is
+	// outside the keep window: until a newer backup passes verification it
+	// is the only restore-proven copy (round-2 P1-09 gap 1).
+	lastVerifiedIdx := -1
 	for i, j := range succeeded {
-		if i == 0 || i < keep {
-			continue // anchor and within-keep jobs keep their local files
+		if j.verifyState == "verified" {
+			lastVerifiedIdx = i
+			break
+		}
+	}
+	for i, j := range succeeded {
+		if i == 0 || i < keep || i == lastVerifiedIdx {
+			continue // anchor, within-keep, and last verified restore proof
 		}
 		if j.remoteState == "uploading" {
 			continue // never delete a file an upload may still reference
 		}
-		if r.verifyBusy(j.id) {
-			continue // a verification is reading this artifact right now
+		if j.verifyState == "pending" || j.verifyState == "running" || r.verifyBusy(j.id) {
+			continue // a queued or in-flight verification needs this artifact
 		}
 		for _, p := range []string{j.artifact, j.manifest} {
 			if p == "" || !strings.HasPrefix(p, r.stagingDir+string(os.PathSeparator)) {
