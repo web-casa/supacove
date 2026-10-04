@@ -204,12 +204,9 @@ func (s *Server) Router() http.Handler {
 	r.Group(func(g chi.Router) {
 		g.Use(s.cookieJar) // lets strict handlers set cookies before the response is written
 		g.Use(s.guard)     // auth + CSRF + origin + API hygiene (default-deny)
+		g.Get("/metrics", s.handleMetrics)
 		g.Mount("/api", apiHandler)
 	})
-
-	// Metrics endpoint (authenticated by default-deny guard; deploy behind
-	// a reverse proxy that restricts access if you expose it to monitoring).
-	r.Get("/metrics", s.handleMetrics)
 
 	r.Handle("/*", s.staticHandler())
 	return r

@@ -50,6 +50,25 @@ type ScheduleInfo struct {
 	LastScheduled int64
 }
 
+// LoadWebhooks reads webhook configurations from the webhooks table.
+func LoadWebhooks(ctx context.Context, dbh *sql.DB) ([]WebhookConfig, error) {
+	rows, err := dbh.QueryContext(ctx,
+		`SELECT name, url, events FROM webhooks WHERE deleted_at IS NULL ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WebhookConfig
+	for rows.Next() {
+		var w WebhookConfig
+		if err := rows.Scan(&w.Name, &w.URL, &w.Events); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // New creates a Scheduler.
 func New(store *sql.DB, runner *jobs.Runner, log *slog.Logger, interval time.Duration) *Scheduler {
 	return &Scheduler{
@@ -69,9 +88,29 @@ func (s *Scheduler) SetWebhooks(wh []WebhookConfig) {
 	s.webhooks = wh
 }
 
+// ValidateCronExpr checks a cron expression for parse errors and reachability.
+func ValidateCronExpr(expr string) error {
+	if strings.TrimSpace(expr) == "" {
+		return nil // empty = no schedule
+	}
+	sched, err := cron.ParseStandard(strings.TrimSpace(expr))
+	if err != nil {
+		return fmt.Errorf("invalid cron expression %q: %w", expr, err)
+	}
+	if sched.Next(time.Now()).IsZero() {
+		return fmt.Errorf("cron expression %q has no reachable fire time", expr)
+	}
+	return nil
+}
+
 // Start launches the scheduling loop. Non-blocking; call Stop to terminate.
 func (s *Scheduler) Start(ctx context.Context) {
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				s.log.Error("scheduler panic recovered", "panic", rec)
+			}
+		}()
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 		for {
@@ -81,7 +120,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-s.stopCh:
 				return
 			case <-ticker.C:
-				s.tick(ctx)
+				func() {
+					defer func() {
+						if rec := recover(); rec != nil {
+							s.log.Error("tick panic recovered", "panic", rec)
+						}
+					}()
+					s.tick(ctx)
+				}()
 			}
 		}
 	}()

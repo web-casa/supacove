@@ -82,6 +82,7 @@ type Runner struct {
 	startOnce      sync.Once
 	stopOnce       sync.Once
 	stopDone       chan struct{}
+	heartbeatURL   string
 	destMu         sync.Mutex
 	destBackends   map[int64]storage.Backend
 	backendFactory func(ctx context.Context, dest *Destination) (storage.Backend, error) // initialized in NewRunner
@@ -826,6 +827,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	r.log.Info("backup succeeded", "job", jobID, "database", name,
 		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
 		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
+	r.pingHeartbeat()
 
 	// 7) Retention (protocol D, beta simple form) — runs only after a
 	// successful commit; failures are logged and never affect the job.

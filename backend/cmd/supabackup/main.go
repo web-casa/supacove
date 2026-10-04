@@ -209,6 +209,10 @@ func runServe() error {
 		func(ctx context.Context) (string, error) { return srv.RecipientFor(ctx) }, log)
 	runner.SetQuota(cfg.StagingQuotaBytes)
 	runner.SetLocalKeep(cfg.LocalKeep)
+	if hb := os.Getenv("SB_HEARTBEAT_URL"); hb != "" {
+		runner.SetHeartbeatURL(hb)
+		log.Info("heartbeat configured", "url_prefix", hb[:min(len(hb), 20)])
+	}
 	srv.SetRunner(runner, stg.Dir)
 	if n, err := runner.RecoverInterrupted(ctx); err != nil {
 		return fmt.Errorf("recover interrupted jobs: %w", err)
@@ -223,6 +227,10 @@ func runServe() error {
 
 	// Phase 4: cron scheduler for automatic backups.
 	sched := scheduler.New(store.DB, runner, log, 30*time.Second)
+	if whs, werr := scheduler.LoadWebhooks(ctx, store.DB); werr == nil && len(whs) > 0 {
+		sched.SetWebhooks(whs)
+		log.Info("webhooks loaded", "count", len(whs))
+	}
 	sched.Start(ctx)
 	defer sched.Stop()
 
