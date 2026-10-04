@@ -169,7 +169,6 @@ func (s *Scheduler) tick(ctx context.Context) {
 				})
 			}
 		}
-		_ = fmtFloat2 // reserved for future precision needs
 
 		// Schedule check
 		if sch.CronExpr == "" {
