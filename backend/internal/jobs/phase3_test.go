@@ -331,7 +331,7 @@ func TestUploadProtocolCCommittedPipeline(t *testing.T) {
 		manifestPath:  manifest,
 		manifestBytes: []byte(fmt.Sprintf(`{"backupId":"job-%d"}`, jobID)),
 	}
-	if err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload); err != nil {
+	if err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload, dest); err != nil {
 		t.Fatalf("uploadAndCommitRemote: %v", err)
 	}
 
@@ -379,7 +379,11 @@ func TestUploadVerifyMismatchDeletesRemote(t *testing.T) {
 		manifestPath:  manifest,
 		manifestBytes: []byte(`{}`),
 	}
-	err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload)
+	dest, derr := p.GetDestination(context.Background(), destID)
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload, dest)
 	if err == nil {
 		t.Fatal("verification mismatch must fail")
 	}
@@ -410,6 +414,11 @@ func TestUploadFailureRetainsArtifact(t *testing.T) {
 	objKey := fmt.Sprintf("dest/databases/%d/backup-%d.dump.age", dbID, jobID)
 	p.backend.failPut[objKey] = 99 // all attempts fail
 
+	dest3, derr3 := p.GetDestination(context.Background(), destID)
+	if derr3 != nil {
+		t.Fatal(derr3)
+	}
+
 	upload := &uploadedArtifact{
 		artifactPath:  artifact,
 		artifactSize:  13,
@@ -417,7 +426,7 @@ func TestUploadFailureRetainsArtifact(t *testing.T) {
 		manifestPath:  manifest,
 		manifestBytes: []byte(`{}`),
 	}
-	err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload)
+	err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload, dest3)
 	if err == nil {
 		t.Fatal("upload must fail")
 	}

@@ -306,20 +306,27 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 			r.log.Warn("resume: staged artifact gone, job stays interrupted", "job", j.id, "path", j.artifactPath)
 			continue
 		}
-		if _, rerr := os.Stat(j.artifactPath); rerr != nil {
-			r.log.Warn("resume: staged artifact gone", "job", j.id)
-			continue
-		}
 		mb, merr := os.ReadFile(j.manifestPath)
 		if merr != nil {
 			r.log.Error("resume: manifest unreadable", "job", j.id, "err", merr)
 			continue
 		}
+		dest, derr := r.GetDestination(ctx, j.destID.Int64)
+		if derr != nil {
+			r.log.Error("resume: destination gone", "job", j.id, "err", derr)
+			continue
+		}
 		// Restore to running so the remote phase can execute with the
 		// production contract, then re-run it.
 		if _, err := r.authDB.ExecContext(ctx,
-			`UPDATE jobs SET status = 'running' WHERE id = ?`, j.id); err != nil {
+			`UPDATE jobs SET status = 'running' WHERE id = ? AND cancel_requested = 0`, j.id); err != nil {
 			r.log.Error("resume: restore running", "job", j.id, "err", err)
+			continue
+		}
+		var cancelReq int
+		if err := r.authDB.QueryRowContext(ctx,
+			`SELECT cancel_requested FROM jobs WHERE id = ?`, j.id).Scan(&cancelReq); err == nil && cancelReq == 1 {
+			r.finalizeCanceled(j.id)
 			continue
 		}
 		upload := &uploadedArtifact{
@@ -329,7 +336,7 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 			manifestPath:  j.manifestPath,
 			manifestBytes: mb,
 		}
-		if uerr := r.uploadAndCommitRemote(ctx, j.id, j.dbID, upload); uerr != nil {
+		if uerr := r.uploadAndCommitRemote(ctx, j.id, j.dbID, upload, dest); uerr != nil {
 			r.log.Error("resume: remote phase failed", "job", j.id, "err", uerr)
 			r.fail(j.id, ClassStorageUp, pgclient.SanitizeMessage(uerr.Error()))
 			continue
@@ -338,7 +345,7 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 		if _, uerr := r.authDB.Exec(`
 			UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
 			  manifest_path = ?
-			WHERE id = ? AND status = 'running'`, j.manifestPath, j.id); uerr != nil {
+			WHERE id = ? AND status = 'running' AND cancel_requested = 0`, j.manifestPath, j.id); uerr != nil {
 			r.log.Error("resume: success update failed", "job", j.id, "err", uerr)
 		} else {
 			r.log.Info("resumed remote commit completed", "job", j.id)
@@ -617,6 +624,23 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 	knownSecrets = append(knownSecrets, ci.Password)
 
+	// Resolve the destination EARLY (before the dump): the snapshot is used
+	// for the remote phase and MUST NOT be re-read after the dump completes
+	// (round-3 phase-3 review P1-02: a concurrent un-assign could redirect
+	// the upload or cause the job to be wrongly reported as succeeded).
+	destSnapshot, destErr := r.DestinationForDatabase(ctx, dbID)
+	if destErr != nil {
+		if ctx.Err() != nil && r.ranToCancellation(jobID) {
+			r.finalizeCanceled(jobID)
+			return
+		}
+		r.fail(jobID, ClassUnknown, redact("resolve destination: "+destErr.Error()))
+		return
+	}
+	if destSnapshot != nil {
+		knownSecrets = append(knownSecrets, destSnapshot.Secrets()...)
+	}
+
 	recipient, err := r.recipient(ctx)
 	if err != nil {
 		if ctx.Err() != nil && r.ranToCancellation(jobID) {
@@ -745,7 +769,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		manifestPath:  manifestPath,
 		manifestBytes: mb,
 	}
-	if err := r.uploadAndCommitRemote(ctx, jobID, dbID, upload); err != nil {
+	if err := r.uploadAndCommitRemote(ctx, jobID, dbID, upload, destSnapshot); err != nil {
 		if ctx.Err() != nil && r.ranToCancellation(jobID) {
 			r.finalizeCanceled(jobID)
 			return
