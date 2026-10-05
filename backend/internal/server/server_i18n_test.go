@@ -14,6 +14,28 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/limiter"
 )
 
+// newI18nProbeServer builds a full Server with a nil auth store so the login
+// handler panics deterministically — used to exercise the real Router chain.
+func newI18nProbeServer(t *testing.T) *Server {
+	t.Helper()
+	store, err := db.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("db open: %v", err)
+	}
+	t.Cleanup(func() { store.DB.Close() })
+	return New(store, nil, &config.Config{}, make([]byte, 32), limiter.New(),
+		slog.New(slog.NewTextHandler(io.Discard, nil)), BuildInfo{Version: "test"})
+}
+
+func httptestRequest(method, path, body, acceptLanguage string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if acceptLanguage != "" {
+		req.Header.Set("Accept-Language", acceptLanguage)
+	}
+	return req
+}
+
 // Regression for review P2-02: the language middleware must wrap the
 // recoverer (outer), or a panicked /api request answers in English no matter
 // what Accept-Language said — the recoverer writes its 500 from the outer

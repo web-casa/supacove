@@ -105,7 +105,7 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 		// Deliberately FIXED-TEXT: url.Error and friends embed the full URI
 		// with credentials — never echo parse failures back (round-1 P1-02).
 		return api.CreateDatabase400JSONResponse{Code: "invalid_request",
-			Message: i18n.T(ctx, "connectionUri is not a valid, supported postgres:// URI (", "connectionUri 不是有效且受支持的 postgres:// URI（") + err.Error() + ")"}, nil
+			Message: i18n.T(ctx, "connectionUri is not a valid, supported postgres:// URI (", "connectionUri 不是有效且受支持的 postgres:// URI（") + pgURIMsg(ctx, err) + i18n.T(ctx, ")", "）")}, nil
 	}
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {

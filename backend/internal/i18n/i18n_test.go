@@ -33,6 +33,11 @@ func TestFromRequest(t *testing.T) {
 		{"zh;q=1.000", ZhCN},              // three decimals on 1 is valid
 		{"zh;q=0.999,en;q=0.998", ZhCN},   // three decimals below 1 is valid
 		{"zh ; Q=0.9 , en ; q=0.8", ZhCN}, // whitespace and capital Q
+		// review R2-P2-03: the parameter NAME must be q
+		{"zh;foo=1,en;q=0.9", En}, // unknown parameter → tag skipped
+		{"zh;=1,en;q=0.9", En},    // empty parameter name → tag skipped
+		{"zh;q = 1,en;q=0.9", En}, // whitespace inside the qvalue is invalid
+		{"zh;,en;q=0.9", En},      // trailing semicolon → tag skipped
 	}
 	for _, tc := range cases {
 		r, _ := http.NewRequest("GET", "/", nil)

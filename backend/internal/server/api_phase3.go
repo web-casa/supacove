@@ -86,10 +86,11 @@ func (a *apiService) CreateDestination(ctx context.Context, request api.CreateDe
 	case errors.Is(err, jobs.ErrDestinationNameExists):
 		return api.CreateDestination409JSONResponse{Code: "name_exists", Message: i18n.T(ctx, "a destination with this name already exists", "同名目的地已存在")}, nil
 	default:
-		// Live-test or validation failure. The error text may contain the
-		// endpoint (not secret) — but the secret key is redacted from any
-		// wrapped provider error before returning.
-		msg := redact.Secrets([]string{in.SecretKey, in.AccessKey}, err.Error())
+		// Live-test or validation failure. App-owned validation texts are
+		// localized first (they never contain secrets); everything else —
+		// provider diagnostics that may echo the endpoint — is secret
+		// -redacted before returning.
+		msg := destinationMsg(ctx, err, []string{in.SecretKey, in.AccessKey})
 		if strings.Contains(msg, "diagnostic test failed") {
 			return api.CreateDestination422JSONResponse{Code: "diagnostic_test_failed",
 				Message: msg}, nil

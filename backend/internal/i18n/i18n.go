@@ -34,6 +34,12 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// WithLang returns a context carrying an explicit language — for tests and
+// for the rare non-HTTP path that must pick a language up front.
+func WithLang(ctx context.Context, lang Lang) context.Context {
+	return context.WithValue(ctx, ctxKey{}, lang)
+}
+
 // FromContext returns the request language chosen by Middleware (English
 // outside an i18n-aware chain, e.g. in background jobs or tests).
 func FromContext(ctx context.Context) Lang {
@@ -87,9 +93,11 @@ func FromRequest(r *http.Request) Lang {
 		if part == "" {
 			continue
 		}
-		tag, params, _ := strings.Cut(part, ";")
+		tag, params, hasParams := strings.Cut(part, ";")
 		q := 1.0
-		if strings.TrimSpace(params) != "" {
+		if hasParams {
+			// A trailing or malformed parameter ("zh;", "zh;foo=1") makes the
+			// whole tag invalid — skip it instead of guessing its weight.
 			v, err := parseQ(params)
 			if err != nil {
 				continue
@@ -113,14 +121,15 @@ func FromRequest(r *http.Request) Lang {
 // qvalueRe matches an HTTP qvalue: 0–1 with at most three decimals.
 var qvalueRe = regexp.MustCompile(`^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$`)
 
-// parseQ extracts and validates the q parameter from "; q=…" (parameters may
-// appear in any case; only q carries meaning here).
+// parseQ validates the "; q=…" parameter: the name must be q (case
+// -insensitive), the value must match the qvalue grammar (0–1, at most
+// three decimals, no surrounding whitespace). Anything else is an error so
+// the caller skips the tag.
 func parseQ(params string) (float64, error) {
-	_, value, ok := strings.Cut(strings.ToLower(strings.TrimSpace(params)), "=")
-	if !ok {
-		return 0, errors.New("no q value")
+	name, value, ok := strings.Cut(strings.TrimSpace(params), "=")
+	if !ok || strings.ToLower(strings.TrimSpace(name)) != "q" {
+		return 0, errors.New("not a q parameter")
 	}
-	value = strings.TrimSpace(value)
 	if !qvalueRe.MatchString(value) {
 		return 0, errors.New("malformed qvalue")
 	}
