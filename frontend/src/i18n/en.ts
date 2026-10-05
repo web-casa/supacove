@@ -185,6 +185,7 @@ const raw = {
   "providers.railway.s2": "Copy DATABASE_PUBLIC_URL (host ends in .proxy.rlwy.net).",
   "providers.railway.s3": "Do not use DATABASE_URL: its *.railway.internal host only resolves inside Railway.",
   "providers.railway.s4": "Railway’s string sets no TLS mode, so one is added from the selector below.",
+  "providers.generic.label": "Self-hosted / other",
   "providers.generic.tagline": "Any PostgreSQL server",
   "providers.generic.s1": "The host must be reachable from the supabackup container. localhost means the container itself; for the Docker host use host.docker.internal or its LAN address.",
   "providers.generic.s2": "Use a role that can read everything pg_dump exports: the database owner, or a member of pg_read_all_data (PostgreSQL 14+).",
@@ -343,8 +344,10 @@ const raw = {
   "status.delivery.delivered": "delivered",
   "status.delivery.dead": "dead",
   "status.delivery.delivering": "delivering",
+  "status.delivery.pending": "pending",
 
   // ---- formatting helpers ----------------------------------------------------------------
+  "ui.loading": "Loading",
   "fmt.requestFailed": "Request failed",
 };
 

@@ -25,10 +25,10 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
 	"github.com/cloudfan/supabackup/backend/internal/config"
 	"github.com/cloudfan/supabackup/backend/internal/db"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/limiter"
 	"github.com/cloudfan/supabackup/backend/internal/web"
 	"github.com/go-chi/chi/v5"
@@ -139,9 +139,10 @@ func New(store *db.Store, authStore *auth.Store, cfg *config.Config, key []byte,
 // Router assembles the full HTTP handler.
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
-	r.Use(chimw.RequestID, s.requestLogger, s.recoverer, s.secureHeaders)
-	// Response language for every handler and guard error (Accept-Language).
-	r.Use(i18n.Middleware)
+	// Response language must be established BEFORE the recoverer: the
+	// recoverer writes the 500 body from its own (outer) request, whose
+	// context never sees what an inner middleware added via WithContext.
+	r.Use(chimw.RequestID, i18n.Middleware, s.requestLogger, s.recoverer, s.secureHeaders)
 	// Only trust X-Forwarded-For from explicitly configured proxy ranges
 	// (review P0-01: unconditional RealIP let any client rotate spoofed
 	// headers to bypass login rate limiting).
@@ -408,7 +409,7 @@ func (s *Server) readWholeJSON(w http.ResponseWriter, req *http.Request) ([]byte
 	// current container and would accept trailing garbage (review round 3,
 	// P0-02 remainder).
 	if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
-		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain exactly one JSON value")
+		writeError(w, http.StatusBadRequest, "invalid_request", i18n.T(req.Context(), "request body must contain exactly one JSON value", "请求体必须恰好包含一个 JSON 值"))
 		return nil, false
 	}
 	req.Body = io.NopCloser(bytes.NewReader(raw))

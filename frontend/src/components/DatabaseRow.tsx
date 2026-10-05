@@ -3,7 +3,7 @@ import { CalendarClock, Pause, Play, Trash2 } from "lucide-react";
 import { api, type OverviewEntry, type Task } from "../api/client";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/format";
-import { lastSuccessUnix, protectionMeta, rowTone, verifyMeta } from "../lib/status";
+import { lastSuccessUnix, protectionMeta, rowTone, taskStatusMeta, verifyMeta } from "../lib/status";
 import { useToast } from "../lib/toast";
 import { RunPulse } from "./RunPulse";
 import { ScheduleForm } from "./ScheduleForm";
@@ -90,7 +90,7 @@ export function DatabaseRow({ entry, tasks, scheduleOpen, onToggleSchedule, onCl
           )}
           {inFlight && (
             <span className="muted cell-note">
-              <Spinner size={11} /> {t("dbrow.backupState", { state: entry.lastJobStatus ?? "" })}
+              <Spinner size={11} /> {t("dbrow.backupState", { state: entry.lastJobStatus ? t(taskStatusMeta(entry.lastJobStatus).label) : "" })}
             </span>
           )}
         </div>

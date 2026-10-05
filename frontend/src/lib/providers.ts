@@ -7,7 +7,10 @@ import type { Provider, SslMode } from "./connection";
 
 export interface ProviderInfo {
   id: Provider;
-  label: string;
+  /** Brand name (untranslated), unless labelKey is set. */
+  label?: string;
+  /** i18n key for non-brand category names. */
+  labelKey?: string;
   /** i18n key for the one-line summary under the brand name. */
   taglineKey: string;
   icon: LucideIcon;
@@ -53,7 +56,7 @@ export const PROVIDERS: ProviderInfo[] = [
   },
   {
     id: "generic",
-    label: "Self-hosted / other",
+    labelKey: "providers.generic.label",
     taglineKey: "providers.generic.tagline",
     icon: Server,
     example: "postgresql://backup:<password>@db.internal:5432/app?sslmode=verify-full",

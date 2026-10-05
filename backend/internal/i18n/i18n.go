@@ -9,7 +9,9 @@ package i18n
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -67,7 +69,9 @@ func T(ctx context.Context, en, zh string) string {
 // FromRequest picks the response language from Accept-Language. The tag with
 // the highest q-value wins (earlier position breaks ties); any zh* variant
 // maps to the single supported Chinese catalog, everything else to English.
-// A missing or unparseable header yields English.
+// A missing or unparseable header yields English. Weights are validated per
+// RFC 9110 §12.4.2 (case-insensitive "q", 0–1, at most three decimals);
+// malformed entries skip their tag rather than guess.
 func FromRequest(r *http.Request) Lang {
 	if r == nil {
 		return En
@@ -85,12 +89,12 @@ func FromRequest(r *http.Request) Lang {
 		}
 		tag, params, _ := strings.Cut(part, ";")
 		q := 1.0
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(params), "q="); ok {
-			if v, err := strconv.ParseFloat(strings.TrimSpace(rest), 64); err == nil {
-				q = v
-			} else {
-				continue // malformed q-value: skip the tag rather than guess
+		if strings.TrimSpace(params) != "" {
+			v, err := parseQ(params)
+			if err != nil {
+				continue
 			}
+			q = v
 		}
 		if q > bestQ {
 			bestQ = q
@@ -104,4 +108,21 @@ func FromRequest(r *http.Request) Lang {
 		return ZhCN
 	}
 	return En
+}
+
+// qvalueRe matches an HTTP qvalue: 0–1 with at most three decimals.
+var qvalueRe = regexp.MustCompile(`^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$`)
+
+// parseQ extracts and validates the q parameter from "; q=…" (parameters may
+// appear in any case; only q carries meaning here).
+func parseQ(params string) (float64, error) {
+	_, value, ok := strings.Cut(strings.ToLower(strings.TrimSpace(params)), "=")
+	if !ok {
+		return 0, errors.New("no q value")
+	}
+	value = strings.TrimSpace(value)
+	if !qvalueRe.MatchString(value) {
+		return 0, errors.New("malformed qvalue")
+	}
+	return strconv.ParseFloat(value, 64)
 }

@@ -186,6 +186,7 @@ export const zhCN: Dict = {
   "providers.railway.s2": "复制 DATABASE_PUBLIC_URL（主机以 .proxy.rlwy.net 结尾）。",
   "providers.railway.s3": "不要使用 DATABASE_URL：其 *.railway.internal 主机只在 Railway 内部可解析。",
   "providers.railway.s4": "Railway 的连接串不带 TLS 模式，会按下方选择器补上一个。",
+  "providers.generic.label": "自托管 / 其他",
   "providers.generic.tagline": "任意 PostgreSQL 服务器",
   "providers.generic.s1": "主机必须能从 supabackup 容器访问。localhost 指容器自身；要访问 Docker 宿主机上的数据库，请用 host.docker.internal 或其局域网地址。",
   "providers.generic.s2": "使用能读取 pg_dump 全部导出内容的角色：数据库属主，或 pg_read_all_data 的成员（PostgreSQL 14+）。",
@@ -344,7 +345,9 @@ export const zhCN: Dict = {
   "status.delivery.delivered": "已送达",
   "status.delivery.dead": "已死亡",
   "status.delivery.delivering": "投递中",
+  "status.delivery.pending": "等待投递",
 
   // ---- formatting helpers ----------------------------------------------------------------
+  "ui.loading": "加载中",
   "fmt.requestFailed": "请求失败",
 };

@@ -114,7 +114,7 @@ func (a *apiService) DeleteDestination(ctx context.Context, request api.DeleteDe
 	case errors.Is(err, jobs.ErrDestinationNotFound):
 		return api.DeleteDestination404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil
 	default:
-		return api.DeleteDestination409JSONResponse{Code: "upload_in_flight", Message: err.Error()}, nil
+		return api.DeleteDestination409JSONResponse{Code: "upload_in_flight", Message: uploadInFlightMsg(ctx, err)}, nil
 	}
 }
 
@@ -165,7 +165,7 @@ func (a *apiService) AssignDatabaseDestination(ctx context.Context, request api.
 	}
 	if err := a.srv.runner.AssignDestination(ctx, request.Id, destID); err != nil {
 		if strings.Contains(err.Error(), "not found or a job is active") {
-			return api.AssignDatabaseDestination409JSONResponse{Code: "not_assignable", Message: err.Error()}, nil
+			return api.AssignDatabaseDestination409JSONResponse{Code: "not_assignable", Message: assignMsg(ctx, err)}, nil
 		}
 		if errors.Is(err, jobs.ErrDestinationNotFound) {
 			return api.AssignDatabaseDestination409JSONResponse{Code: "not_assignable", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil

@@ -8,8 +8,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 )
 
 // errJSON builds a populated contract Error for the generated wrapper types.
@@ -68,10 +68,10 @@ func (a *apiService) PostAuthBootstrap(ctx context.Context, request api.PostAuth
 		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "token, username and password are required", "token、用户名和密码为必填项")}, nil
 	}
 	if err := auth.ValidateUsername(body.Username); err != nil {
-		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
+		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: authMsg(ctx, err)}, nil
 	}
 	if err := auth.ValidatePassword(body.Password); err != nil {
-		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
+		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: authMsg(ctx, err)}, nil
 	}
 
 	// Bootstrap creates the admin AND the first session in one transaction;
@@ -83,10 +83,10 @@ func (a *apiService) PostAuthBootstrap(ctx context.Context, request api.PostAuth
 	case errors.Is(err, auth.ErrInvalidToken):
 		return api.PostAuthBootstrap403JSONResponse{Code: "invalid_bootstrap_token", Message: i18n.T(ctx, "bootstrap token is invalid, already used, or expired", "引导令牌无效、已被使用或已过期")}, nil
 	case errors.Is(err, auth.ErrKDFBusy):
-		return api.PostAuthBootstrap429JSONResponse{RateLimitedJSONResponse: api.RateLimitedJSONResponse(errJSON("rate_limited", "too many attempts, try again later"))}, nil
+		return api.PostAuthBootstrap429JSONResponse{RateLimitedJSONResponse: api.RateLimitedJSONResponse(errJSON("rate_limited", i18n.T(ctx, "too many attempts, try again later", "尝试次数过多，请稍后再试")))}, nil
 	case err != nil:
 		a.srv.log.Error("bootstrap", "err", err)
-		return api.PostAuthBootstrap500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", "bootstrap failed")))}, nil
+		return api.PostAuthBootstrap500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", i18n.T(ctx, "bootstrap failed", "初始化失败"))))}, nil
 	}
 
 	if jar := jarFrom(ctx); jar != nil {
@@ -120,17 +120,17 @@ func (a *apiService) PostAuthLogin(ctx context.Context, request api.PostAuthLogi
 		// guard from the response status.
 		return api.PostAuthLogin401JSONResponse{Code: "invalid_credentials", Message: i18n.T(ctx, "invalid username or password", "用户名或密码错误")}, nil
 	case errors.Is(err, auth.ErrKDFBusy):
-		return api.PostAuthLogin503JSONResponse{OverloadedJSONResponse: api.OverloadedJSONResponse(api.Error(errJSON("overloaded", "password hashing busy, try again")))}, nil
+		return api.PostAuthLogin503JSONResponse{OverloadedJSONResponse: api.OverloadedJSONResponse(api.Error(errJSON("overloaded", i18n.T(ctx, "password hashing busy, try again", "密码哈希繁忙，请稍后再试"))))}, nil
 	case err != nil:
 		a.srv.log.Error("login", "err", err)
-		return api.PostAuthLogin500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", "login failed")))}, nil
+		return api.PostAuthLogin500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", i18n.T(ctx, "login failed", "登录失败"))))}, nil
 	}
 
 	jar := jarFrom(ctx)
 	if jar == nil {
 		// Session could not be attached: refuse to claim login success.
 		a.srv.log.Error("login: cookie jar missing")
-		return api.PostAuthLogin500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", "login failed")))}, nil
+		return api.PostAuthLogin500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", i18n.T(ctx, "login failed", "登录失败"))))}, nil
 	}
 	for _, c := range a.srv.newSessionCookies(sessionRaw, auth.SessionTTL()) {
 		jar.SetCookie(c)
@@ -145,7 +145,7 @@ func (a *apiService) PostAuthLogout(ctx context.Context, _ api.PostAuthLogoutReq
 			// Server-side revocation failed: do NOT report success even if the
 			// browser clears its cookie (review P1-02).
 			a.srv.log.Error("logout", "err", err)
-			return api.PostAuthLogout500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", "logout could not be completed server-side; the session is still active")))}, nil
+			return api.PostAuthLogout500JSONResponse{InternalJSONResponse: api.InternalJSONResponse(api.Error(errJSON("internal", i18n.T(ctx, "logout could not be completed server-side; the session is still active", "服务端无法完成注销；会话仍然有效"))))}, nil
 		}
 	}
 	if jar := jarFrom(ctx); jar != nil {

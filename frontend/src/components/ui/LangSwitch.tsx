@@ -1,4 +1,5 @@
-import { LANGS, useI18n } from "../../i18n";
+import { useI18n } from "../../i18n";
+import { LANGS } from "../../i18n/core";
 
 /** Compact EN / 中文 segmented toggle. */
 export function LangSwitch() {

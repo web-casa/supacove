@@ -56,6 +56,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
   });
 
   const info = providerInfo(provider);
+  const infoLabel = info.labelKey ? t(info.labelKey) : (info.label ?? "");
   const fieldsComplete = fields.host.trim() !== "" && fields.database.trim() !== "" && fields.user.trim() !== "";
   const source = mode === "uri" ? uri : fieldsComplete ? buildUri(fields, sslMode) : "";
   const analysis = source.trim() === "" ? null : analyze(source, sslMode);
@@ -124,12 +125,12 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="providers" role="radiogroup" aria-label={t("reg.providerAria")}>
-        {PROVIDERS.map(({ id, label, taglineKey, icon: Icon }) => (
+        {PROVIDERS.map(({ id, label, labelKey, taglineKey, icon: Icon }) => (
           <label className="provider" key={id}>
             <input type="radio" name="provider" checked={provider === id} onChange={() => chooseProvider(id)} />
             <Icon size={16} aria-hidden />
             <span className="provider-text">
-              <span className="provider-label">{label}</span>
+              <span className="provider-label">{labelKey ? t(labelKey) : label}</span>
               <span className="provider-tagline">{t(taglineKey)}</span>
             </span>
           </label>
@@ -250,10 +251,10 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <aside className="guide" aria-label={t("reg.guide.aria", { label: info.label })} key={provider}>
+        <aside className="guide" aria-label={t("reg.guide.aria", { label: infoLabel })} key={provider}>
           <h4>
             <info.icon size={14} aria-hidden />
-            {t("reg.guide.title", { label: info.label })}
+            {t("reg.guide.title", { label: infoLabel })}
           </h4>
           <ol>
             {info.stepKeys.map((key) => (

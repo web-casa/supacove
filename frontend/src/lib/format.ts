@@ -2,7 +2,7 @@
 // unix seconds. Language-sensitive helpers read the active language via
 // i18n/getLang() so plain (non-React) call sites stay localized too; React
 // components re-render through useI18n() when it changes.
-import { getLang, translate } from "../i18n";
+import { getLang, translate } from "../i18n/core";
 
 export function relativeTime(unixSecs: number, nowMs: number = Date.now()): string {
   const s = Math.max(0, Math.round(nowMs / 1000 - unixSecs));
@@ -21,7 +21,7 @@ export function relativeTime(unixSecs: number, nowMs: number = Date.now()): stri
 }
 
 export function absoluteTime(unixSecs: number): string {
-  return new Date(unixSecs * 1000).toLocaleString(getLang() === "zh-CN" ? "zh-CN" : undefined, {
+  return new Date(unixSecs * 1000).toLocaleString(getLang() === "zh-CN" ? "zh-CN" : "en", {
     year: "numeric",
     month: "short",
     day: "numeric",

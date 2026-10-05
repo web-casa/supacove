@@ -110,7 +110,7 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "cronExpr too long", "cronExpr 过长")}, nil
 		}
 		if err := scheduler.ValidateCronExpr(expr); err != nil {
-			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
+			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: cronMsg(ctx, err)}, nil
 		}
 		c.CronExpr = expr
 	}
@@ -144,7 +144,7 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "heartbeatUrl too long", "heartbeatUrl 过长")}, nil
 			}
 			if err := validateWebhookURL(hb); err != nil {
-				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "heartbeatUrl: " + err.Error()}, nil
+				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "heartbeatUrl: ", "heartbeatUrl：") + webhookURLMsg(ctx, err)}, nil
 			}
 		}
 		c.HeartbeatURL = hb
@@ -226,7 +226,7 @@ func (a *apiService) CreateWebhook(ctx context.Context, request api.CreateWebhoo
 		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "request body required", "缺少请求体")}, nil
 	}
 	if err := validateWebhookURL(body.Url); err != nil {
-		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: "url: " + err.Error()}, nil
+		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "url: ", "url：") + webhookURLMsg(ctx, err)}, nil
 	}
 	w, err := jobs.CreateWebhook(ctx, a.srv.store.DB, body.Name, body.Url, webhookEventsFromAPI(body.Events))
 	switch {
@@ -235,7 +235,7 @@ func (a *apiService) CreateWebhook(ctx context.Context, request api.CreateWebhoo
 		// The sentinel's text is fixed English; localize the response here.
 		return api.CreateWebhook409JSONResponse{Code: "name_exists", Message: i18n.T(ctx, "a webhook with this name already exists", "同名 webhook 已存在")}, nil
 	default:
-		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
+		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: webhookCreateMsg(ctx, err)}, nil
 	}
 	a.srv.log.Info("webhook created", "id", w.ID, "name", w.Name)
 	return api.CreateWebhook201JSONResponse(webhookToAPI(w)), nil
@@ -263,7 +263,7 @@ func (a *apiService) TestWebhook(ctx context.Context, request api.TestWebhookReq
 		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "url is required", "url 为必填项")}, nil
 	}
 	if err := validateWebhookURL(body.Url); err != nil {
-		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: "url: " + err.Error()}, nil
+		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "url: ", "url：") + webhookURLMsg(ctx, err)}, nil
 	}
 	name := body.Name
 	if name == "" {
@@ -278,7 +278,8 @@ func (a *apiService) TestWebhook(ctx context.Context, request api.TestWebhookReq
 	delivered, detail := a.srv.testWebhookDelivery(ctx, body.Url, "webhook_test", "test-"+time.Now().UTC().Format("20060102T150405.000000000"), string(payloadBytes))
 	res := api.WebhookTestResult{Delivered: delivered}
 	if detail != "" {
-		res.Detail = &detail
+		localized := deliveryDetailMsg(ctx, detail)
+		res.Detail = &localized
 	}
 	if !delivered {
 		return api.TestWebhook422JSONResponse(res), nil

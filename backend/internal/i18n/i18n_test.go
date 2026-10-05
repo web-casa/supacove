@@ -20,11 +20,19 @@ func TestFromRequest(t *testing.T) {
 		{"zh-TW", ZhCN}, // any zh* maps to the one Chinese catalog
 		{"zh-CN,zh;q=0.9,en;q=0.8", ZhCN},
 		{"en;q=0.5,zh;q=0.9", ZhCN},
-		{"fr,de;q=0.7", En},  // unsupported languages fall back to English
-		{"zh;q=0", En},       // explicitly excluded
+		{"fr,de;q=0.7", En}, // unsupported languages fall back to English
+		{"zh;q=0", En},      // explicitly excluded
 		{"en;q=0.5,zh;q=0", En},
 		{"zh;q=abc", En}, // malformed q skipped, no tags left
 		{" , ;;", En},
+		// RFC 9110 boundaries (review P2-03)
+		{"zh;q=2,en;q=1", En},             // out-of-range weight is invalid → skipped
+		{"zh;q=+Inf,en;q=1", En},          // infinite weight is invalid → skipped
+		{"zh;Q=0,en;q=0.9", En},           // parameter names are case-insensitive
+		{"zh;q=0.1234,en;q=0.1", En},      // more than three decimals is invalid
+		{"zh;q=1.000", ZhCN},              // three decimals on 1 is valid
+		{"zh;q=0.999,en;q=0.998", ZhCN},   // three decimals below 1 is valid
+		{"zh ; Q=0.9 , en ; q=0.8", ZhCN}, // whitespace and capital Q
 	}
 	for _, tc := range cases {
 		r, _ := http.NewRequest("GET", "/", nil)

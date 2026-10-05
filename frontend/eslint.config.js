@@ -20,4 +20,12 @@ export default tseslint.config([
       globals: globals.browser,
     },
   },
+  {
+    // Context modules export their hook beside the provider by React
+    // convention (i18n/index.tsx); that export does not break fast refresh.
+    files: ["src/i18n/**/*.tsx"],
+    rules: {
+      "react-refresh/only-export-components": ["error", { allowExportNames: ["useI18n"] }],
+    },
+  },
 ]);

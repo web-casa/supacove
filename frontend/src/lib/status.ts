@@ -89,6 +89,8 @@ export function deliveryMeta(state: DeliveryState): StatusMeta {
       return { label: "status.delivery.dead", tone: "danger", icon: MailX };
     case "delivering":
       return { label: "status.delivery.delivering", tone: "info", icon: LoaderCircle, spin: true };
+    case "pending":
+      return { label: "status.delivery.pending", tone: "neutral", icon: Clock };
     default:
       return { label: state, tone: "neutral", icon: Clock };
   }

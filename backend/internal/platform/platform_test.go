@@ -37,31 +37,31 @@ func TestDetectPlatforms(t *testing.T) {
 }
 
 func TestPoolingHints(t *testing.T) {
-	if h := PoolingHint("pooler.supabase.com", "6543"); h.En == "" {
-		t.Error("Supabase transaction pooler must produce a warning")
+	// A warning must carry BOTH languages; no warning means a truly empty Msg.
+	expectWarn := func(name, host, port string) {
+		t.Helper()
+		h := PoolingHint(host, port)
+		if h.Empty() || h.En == "" || h.Zh == "" {
+			t.Errorf("%s must warn in both languages, got %+v", name, h)
+		}
 	}
-	if h := PoolingHint("pooler.supabase.com", "5432"); h.En != "" {
-		t.Errorf("Supabase session pooler should be OK: %q", h)
+	expectOK := func(name, host, port string) {
+		t.Helper()
+		if h := PoolingHint(host, port); !h.Empty() {
+			t.Errorf("%s should not warn: %+v", name, h)
+		}
 	}
-	if h := PoolingHint("db.ref.supabase.co", "6543"); h.En != "" {
-		t.Errorf("direct Supabase host should not warn on 6543: %q", h)
-	}
+	expectWarn("Supabase transaction pooler", "pooler.supabase.com", "6543")
+	expectOK("Supabase session pooler", "pooler.supabase.com", "5432")
+	expectOK("direct Supabase host", "db.ref.supabase.co", "6543")
 	// Neon port marker
-	if h := PoolingHint("ep-name.neon.tech", "6543"); h.En == "" {
-		t.Error("Neon pooled connection must produce a warning")
-	}
+	expectWarn("Neon pooled port", "ep-name.neon.tech", "6543")
 	// Neon -pooler HOSTNAME marker on the default port (P2-01: the review's
 	// exact false-negative case — pooled endpoint, port 5432, no warning).
-	if h := PoolingHint("ep-cool-123456-pooler.eu-central-1.aws.neon.tech", "5432"); h.En == "" {
-		t.Error("Neon '-pooler' endpoint must warn even on port 5432")
-	}
-	if h := PoolingHint("ep-cool-123456.eu-central-1.aws.neon.tech", "5432"); h.En != "" {
-		t.Errorf("Neon direct endpoint should not warn: %q", h)
-	}
+	expectWarn("Neon -pooler endpoint", "ep-cool-123456-pooler.eu-central-1.aws.neon.tech", "5432")
+	expectOK("Neon direct endpoint", "ep-cool-123456.eu-central-1.aws.neon.tech", "5432")
 	// lookalike hosts must not inherit platform hints
-	if h := PoolingHint("pooler.supabase.com.evil.invalid", "6543"); h.En != "" {
-		t.Errorf("lookalike host must not warn: %q", h)
-	}
+	expectOK("lookalike host", "pooler.supabase.com.evil.invalid", "6543")
 }
 
 func TestRecoveryNotesScope(t *testing.T) {

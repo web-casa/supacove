@@ -1,7 +1,7 @@
 // Typed API client generated from the OpenAPI contract (types) plus a thin
 // runtime wrapper. Generated types do not replace server-side validation.
 import type { operations } from "./schema.d";
-import { getLang } from "../i18n";
+import { getLang } from "../i18n/core";
 
 type User = operations["getAuthMe"]["responses"]["200"]["content"]["application/json"];
 type HealthDetails = operations["getHealthDetails"]["responses"]["200"]["content"]["application/json"];
