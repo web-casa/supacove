@@ -1,9 +1,9 @@
 -- Phase 7: notification outbox (dev-plan P7-1) and per-database dead-man
 -- switch configuration (P7-2). Includes the UPGRADE path for the Phase-4
--- webhook vocabulary (round-1 review P1-02/P2-04): legacy subscriptions
--- "failure,expired" are converted to the new event names, and legacy
--- duplicate live names are deterministically renamed before the unique
--- index lands.
+-- webhook vocabulary (round-1 review P1-02): legacy subscriptions like
+-- "failure,expired" are converted to the new event names with a per-token,
+-- idempotent replacement. Live-name uniqueness is enforced at the API layer
+-- (a plain partial index here; legacy duplicates stay legal).
 -- +goose Up
 CREATE TABLE notification_outbox (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,16 +25,22 @@ CREATE INDEX idx_outbox_due ON notification_outbox(state, next_attempt_at);
 -- Legacy subscription vocabulary (0009 default "failure,expired") must keep
 -- delivering after the upgrade: exact new-vocabulary matching would silently
 -- zero every target and the empty-target path would mark events delivered.
--- The guard makes the conversion TOKEN-EXACT and re-entrant (round-2 review
--- R2-P1-01: a naive REPLACE re-hits 'expired' inside 'backup_expired' on a
--- Down→Up cycle, producing backup_backup_expired).
+--
+-- The conversion is PER-TOKEN (round-3 review on R2-P1-01): each CSV token
+-- is delimited with commas before replacement, so
+--   * it is idempotent ('expired' inside 'backup_expired' can never match
+--     the delimited token ',expired,'),
+--   * mixed subscriptions (backup events + verification_failed) convert the
+--     backup tokens while verification_failed — which has no old equivalent —
+--     passes through untouched,
+--   * re-running Up after a Down re-converts cleanly.
 UPDATE webhooks
-SET events = REPLACE(REPLACE(events, 'failure', 'backup_failed'), 'expired', 'backup_expired')
-WHERE deleted_at IS NULL
-  AND events NOT LIKE '%backup_failed%'
-  AND events NOT LIKE '%backup_expired%'
-  AND events NOT LIKE '%verification_failed%'
-  AND (events LIKE '%failure%' OR events LIKE '%expired%');
+SET events = TRIM(
+    REPLACE(REPLACE(
+      ',' || events || ',',
+    ',failure,', ',backup_failed,'), ',expired,', ',backup_expired,'),
+  ',')
+WHERE deleted_at IS NULL;
 
 -- Live webhook names are unique among LIVE rows — enforced at the API layer
 -- with an atomic INSERT..WHERE NOT EXISTS (round-2 review P2-04: a unique
@@ -49,16 +55,19 @@ ALTER TABLE databases ADD COLUMN heartbeat_grace_hours INTEGER NOT NULL DEFAULT 
 ALTER TABLE databases ADD COLUMN last_heartbeat_at INTEGER NOT NULL DEFAULT 0;
 
 -- +goose Down
--- Restore the LEGACY vocabulary: the binary this rollback lands on matches
--- subscriptions with the old event words ('failure', 'expired'); leaving
--- the converted names would silently stop failure notifications after a
--- rollback (round-2 review R2-P1-01). Rows created with the new
--- 'verification_failed' event have no old equivalent and stay as-is.
+-- Restore the LEGACY vocabulary with the same per-token technique: the
+-- binary this rollback lands on matches subscriptions with the old event
+-- words ('failure', 'expired'); leaving the converted names would silently
+-- stop failure notifications after a rollback (round-2 review R2-P1-01).
+-- verification_failed has no old equivalent and stays as-is.
 DROP INDEX IF EXISTS idx_webhooks_live_name;
 UPDATE webhooks
-SET events = REPLACE(REPLACE(events, 'backup_failed', 'failure'), 'backup_expired', 'expired')
-WHERE deleted_at IS NULL
-  AND (events LIKE '%backup_failed%' OR events LIKE '%backup_expired%');
+SET events = TRIM(
+    REPLACE(REPLACE(
+      ',' || events || ',',
+    ',backup_failed,', ',failure,'), ',backup_expired,', ',expired,'),
+  ',')
+WHERE deleted_at IS NULL;
 ALTER TABLE databases DROP COLUMN last_heartbeat_at;
 ALTER TABLE databases DROP COLUMN heartbeat_grace_hours;
 ALTER TABLE databases DROP COLUMN heartbeat_period_hours;

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -462,5 +463,156 @@ func TestLegacyDuplicateWebhookNamesSurvive(t *testing.T) {
 	}
 	if n != 4 {
 		t.Fatalf("webhook rows = %d, want 4 (all preserved untouched)", n)
+	}
+}
+
+// TestWebhookVocabularyAllCombinationsCycle (phase-7 round-3 closure): every
+// non-empty combination of the three supported events must survive a full
+// Up→Down→Up cycle with its subscription set semantically intact — backup
+// tokens convert both directions; verification_failed (no old equivalent)
+// passes through untouched. This pins the per-token conversion against the
+// mixed-subscription gap the two-token fixtures could not expose.
+func TestWebhookVocabularyAllCombinationsCycle(t *testing.T) {
+	type combo struct {
+		name string
+		evs  []string
+	}
+	all := []combo{
+		{"backup_failed", []string{"backup_failed"}},
+		{"backup_expired", []string{"backup_expired"}},
+		{"verification_failed", []string{"verification_failed"}},
+		{"bf+be", []string{"backup_failed", "backup_expired"}},
+		{"bf+vf", []string{"backup_failed", "verification_failed"}},
+		{"be+vf", []string{"backup_expired", "verification_failed"}},
+		{"all-three", []string{"backup_failed", "backup_expired", "verification_failed"}},
+	}
+	// legacyOf is the pre-migration subscription a combo would have upgraded
+	// FROM (backup events had old names; verification_failed has no old
+	// equivalent and can only exist in new-vocabulary rows).
+	legacyOf := func(evs []string) string {
+		var parts []string
+		for _, e := range evs {
+			switch e {
+			case "backup_failed":
+				parts = append(parts, "failure")
+			case "backup_expired":
+				parts = append(parts, "expired")
+			default:
+				parts = append(parts, e)
+			}
+		}
+		return strings.Join(parts, ",")
+	}
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "supabackup.db")
+
+	legacy := legacyMigrations{
+		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
+		"0004_backup_kernel.sql": &fstest.MapFile{Data: []byte(original0004)},
+		"0009_scheduling.sql":    &fstest.MapFile{Data: []byte(readEmbedded(t, "0009_scheduling.sql"))},
+	}
+	buildLegacyDB(t, dir, legacy)
+	ro, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range all {
+		if _, err := ro.Exec(
+			`INSERT INTO webhooks (name, url, events, created_at) VALUES (?, 'https://old.example/h', ?, 0)`,
+			c.name, legacyOf(c.evs)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ro.Close()
+
+	readAll := func() map[string]string {
+		t.Helper()
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		out := map[string]string{}
+		rows, err := db.Query(`SELECT name, events FROM webhooks`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, events string
+			if err := rows.Scan(&name, &events); err != nil {
+				t.Fatal(err)
+			}
+			out[name] = events
+		}
+		return out
+	}
+
+	// Up: every combination converts to its exact new-vocabulary set.
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	afterUp := readAll()
+	for _, c := range all {
+		if got := afterUp[c.name]; got != strings.Join(c.evs, ",") {
+			t.Fatalf("after Up %s: %q, want %q", c.name, got, strings.Join(c.evs, ","))
+		}
+	}
+	store.Close()
+
+	// Down: backup tokens restore, verification_failed stays.
+	mfs := os.DirFS(filepath.Join(".", "migrations"))
+	ro, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, ro, mfs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Down(context.Background()); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	afterDown := readAll()
+	for _, c := range all {
+		want := map[string]bool{}
+		for _, e := range c.evs {
+			switch e {
+			case "backup_failed":
+				want["failure"] = true
+			case "backup_expired":
+				want["expired"] = true
+			case "verification_failed":
+				want["verification_failed"] = true
+			}
+		}
+		var parts []string
+		for _, e := range strings.Split(afterDown[c.name], ",") {
+			parts = append(parts, e)
+		}
+		if len(parts) != len(want) {
+			t.Fatalf("after Down %s: %q, want %d tokens", c.name, afterDown[c.name], len(want))
+		}
+		for _, p := range parts {
+			if !want[p] {
+				t.Fatalf("after Down %s: unexpected token %q in %q", c.name, p, afterDown[c.name])
+			}
+		}
+	}
+
+	// Up again: exact restoration (idempotent, no double conversion).
+	if _, err := provider.Up(context.Background()); err != nil {
+		t.Fatalf("re-up: %v", err)
+	}
+	ro.Close()
+	afterReUp := readAll()
+	for _, c := range all {
+		if got := afterReUp[c.name]; got != strings.Join(c.evs, ",") {
+			t.Fatalf("after Down→Up %s: %q, want %q", c.name, got, strings.Join(c.evs, ","))
+		}
 	}
 }
