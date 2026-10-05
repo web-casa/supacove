@@ -1,0 +1,201 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+}
+
+/* Ambient backdrop: a dot grid that fades out below the fold. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.055) 1px, transparent 1.5px) 50% 0 / 26px 26px;
+  mask-image: radial-gradient(ellipse 75% 60% at 50% 0%, #000, transparent);
+  pointer-events: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--signal) 30%, transparent);
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+}
+
+code,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+code {
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  overflow-wrap: anywhere;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+    filter: blur(4px);
+  }
+}
+
+@keyframes ping {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  to {
+    opacity: 0;
+    transform: scale(3.2);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Entrance choreography: children of a .stagger container arrive in order.
+   fill-mode is `backwards` so nothing stays promoted once it has landed. */
+.stagger > * {
+  animation: reveal 0.6s var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 8) * 55ms);
+}
+.stagger > :nth-child(1) {
+  --i: 0;
+}
+.stagger > :nth-child(2) {
+  --i: 1;
+}
+.stagger > :nth-child(3) {
+  --i: 2;
+}
+.stagger > :nth-child(4) {
+  --i: 3;
+}
+.stagger > :nth-child(5) {
+  --i: 4;
+}
+.stagger > :nth-child(6) {
+  --i: 5;
+}
+.stagger > :nth-child(7) {
+  --i: 6;
+}
+.stagger > :nth-child(8) {
+  --i: 7;
+}
+
+/* View switches cross-fade the page area only; the top bar stays put. */
+::view-transition-old(page) {
+  animation: fade-out 0.12s ease-in both;
+}
+::view-transition-new(page) {
+  animation: fade-in 0.25s var(--ease-out) both;
+}
+::view-transition-group(page) {
+  animation-duration: 0.25s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

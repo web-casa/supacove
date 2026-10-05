@@ -1,0 +1,809 @@
+/* Reusable primitives: badge, chip, button, tooltip, messages, form
+   controls, panel, empty state, skeleton, toast. */
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+.text-danger {
+  color: var(--danger);
+}
+
+/* ---- Badge / chip ------------------------------------------------------ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--tone-soft);
+  color: var(--tone);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge.tone-neutral {
+  color: var(--text-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--neutral-soft);
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* ---- Button ------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s var(--ease),
+    border-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.985);
+}
+
+.btn svg {
+  flex: none;
+  transition: transform 0.25s var(--ease-out);
+}
+
+.btn:hover:not(:disabled) svg:not(.spin) {
+  transform: scale(1.12);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn-sm {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+}
+
+.btn-icon {
+  width: 34px;
+  padding: 0;
+}
+
+.btn-icon.btn-sm {
+  width: 28px;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+/* Primary is neutral-light so colour stays reserved for status. */
+.btn-primary {
+  background: linear-gradient(#f4f6f9, #d9dee6);
+  box-shadow: inset 0 1px 0 #fff;
+  color: #0f1216;
+  transition:
+    box-shadow 0.25s var(--ease-out),
+    transform 0.1s var(--ease);
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 0 0 1px var(--signal),
+    0 6px 24px color-mix(in srgb, var(--signal) 28%, transparent);
+}
+
+.btn-secondary {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #2a313b;
+  border-color: rgb(255 255 255 / 0.2);
+}
+
+.btn-ghost {
+  color: var(--text-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--neutral-soft);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.btn-danger:hover:not(:disabled),
+.btn-danger-hover:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger);
+}
+
+/* ---- Tooltip (absolute time, icon-button names, stat explanations) ----- */
+
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  z-index: var(--z-tip);
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: rise 0.12s var(--ease);
+}
+
+/* Near the right edge the bubble grows leftwards instead of off-screen. */
+.tip-end [data-tip]::after,
+[data-tip].tip-end::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.reltime {
+  border-bottom: 1px dotted var(--faint);
+  cursor: default;
+  white-space: nowrap;
+}
+
+/* ---- Beacon (status dot with an optional radiating ping) --------------- */
+
+.beacon {
+  flex: none;
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.beacon-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--tone);
+  animation: ping 2.6s var(--ease-out) infinite;
+}
+
+.beacon-live.tone-danger::after {
+  animation-duration: 1.3s;
+}
+
+/* ---- Waveform (monitor trace) ------------------------------------------ */
+
+.waveform {
+  position: relative;
+  height: 100%;
+}
+
+.wave-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 3px;
+}
+
+.wave-seg {
+  flex: 1;
+  min-width: 0;
+  background: var(--tone);
+  mask: var(--wave) 0 50% / 96px 100% repeat-x;
+}
+
+.wave-beat {
+  --wave: var(--wave-beat);
+}
+.wave-bump {
+  --wave: var(--wave-bump);
+}
+.wave-flat {
+  --wave: var(--wave-flat);
+}
+.wave-dash {
+  --wave: var(--wave-dash);
+}
+
+.wave-base {
+  opacity: 0.3;
+}
+
+/* A flatline is an alarm: it blinks instead of sitting quietly. */
+.wave-base .wave-flat {
+  animation: blink 1.3s ease-in-out infinite;
+}
+
+.wave-sweep {
+  mask: linear-gradient(90deg, transparent, #000 75%, #000 94%, transparent) 0 0 / 34% 100% no-repeat;
+  animation: sweep 4.2s linear infinite;
+}
+
+@keyframes sweep {
+  from {
+    mask-position: -52% 0;
+  }
+  to {
+    mask-position: 152% 0;
+  }
+}
+
+/* ---- Cursor spotlight (pointer position arrives via --mx / --my) ------- */
+
+.spotlight {
+  position: relative;
+}
+
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    380px circle at var(--mx, 50%) var(--my, 0%),
+    color-mix(in srgb, var(--tone, var(--signal)) 9%, transparent),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.5s var(--ease);
+  pointer-events: none;
+}
+
+.spotlight:hover::before {
+  opacity: 1;
+}
+
+/* ---- Inline messages --------------------------------------------------- */
+
+.inline-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  color: var(--tone);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inline-msg svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.inline-msg-banner {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--tone-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 35%, transparent);
+}
+
+.callout {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.callout svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.callout code {
+  display: block;
+  margin: 6px 0;
+  padding: 6px 8px;
+}
+
+/* ---- Forms ------------------------------------------------------------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 14px 16px;
+  align-items: start;
+}
+
+.form-grid-register {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.form-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.form-grid-conn {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.form-grid-conn > :last-child {
+  grid-column: 1 / -1;
+}
+
+/* Input with a trailing control (show / hide). */
+.input-affix {
+  position: relative;
+}
+
+.input-affix input {
+  padding-right: 40px;
+}
+
+.input-affix .btn {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+}
+
+/* Segmented control. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.segmented button {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.2s var(--ease),
+    color 0.2s var(--ease);
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button[aria-selected="true"] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.field > label,
+.field > legend {
+  padding: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.field > legend {
+  margin-bottom: 6px;
+}
+
+.field-msg {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field-error {
+  color: var(--danger);
+}
+
+input:not([type="checkbox"], [type="radio"]),
+select {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  transition:
+    border-color 0.15s var(--ease),
+    box-shadow 0.15s var(--ease);
+}
+
+input.mono,
+input.num {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+input::placeholder {
+  color: var(--faint);
+}
+
+input:not([type="checkbox"], [type="radio"]):hover,
+select:hover {
+  border-color: rgb(255 255 255 / 0.2);
+}
+
+input:not([type="checkbox"], [type="radio"]):focus,
+select:focus {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 22%, transparent);
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.check:has(input:checked) {
+  background: var(--neutral-soft);
+  border-color: rgb(255 255 255 / 0.22);
+  color: var(--text);
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--signal);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.switch-track {
+  flex: none;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  transition: background-color 0.15s var(--ease);
+}
+
+.switch-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform 0.15s var(--ease),
+    background-color 0.15s var(--ease);
+}
+
+.switch input:checked + .switch-track {
+  background: var(--signal);
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(14px);
+  background: #0f1216;
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+/* ---- Panel / nested sub-panel ------------------------------------------ */
+
+.panel {
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.panel-title h2 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.panel-title p {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-wrap: pretty;
+}
+
+.panel > .inline-msg,
+.panel > .skeleton-rows {
+  padding: 4px 20px 20px;
+}
+
+.panel-foot {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.subpanel {
+  margin: 0 12px 12px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  animation: rise 0.18s var(--ease);
+}
+
+.subpanel-head h3 {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.subpanel-head p {
+  margin-top: 2px;
+  font-size: 12.5px;
+}
+
+/* ---- Empty state ------------------------------------------------------- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 12px;
+  padding: 40px 24px 44px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
+.empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  border-radius: 12px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.empty h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.empty p {
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: 13px;
+  text-wrap: balance;
+}
+
+.empty .btn {
+  margin-top: 10px;
+}
+
+/* ---- Skeleton ---------------------------------------------------------- */
+
+.skeleton {
+  display: block;
+  height: 12px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-3) 25%, #2c333d 50%, var(--surface-3) 75%) 0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.skeleton-inline {
+  display: inline-block;
+  width: 14ch;
+  max-width: 100%;
+  height: 0.8em;
+  vertical-align: middle;
+}
+
+.skeleton-inline.skeleton-short {
+  width: 4ch;
+}
+
+.skeleton-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 0.6fr;
+  gap: 24px;
+}
+
+/* ---- Confirm step ------------------------------------------------------ */
+
+.confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  animation: rise 0.12s var(--ease);
+}
+
+.confirm-prompt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+/* ---- Toasts ------------------------------------------------------------ */
+
+.toasts {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: calc(100vw - 40px);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-pop);
+  font-size: 13px;
+  position: relative;
+  overflow: hidden;
+  animation: reveal 0.4s var(--ease-out);
+}
+
+.toast svg {
+  flex: none;
+  color: var(--tone);
+}
+
+/* Remaining lifetime. */
+.toast::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: var(--tone);
+  transform-origin: left;
+  animation: toast-life 4.5s linear both;
+}
+
+@keyframes toast-life {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (max-width: 900px) {
+  .form-grid-register,
+  .form-grid-3,
+  .form-grid-conn {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel-head {
+    padding: 14px 16px;
+  }
+}

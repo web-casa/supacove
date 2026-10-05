@@ -40,9 +40,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = (await resp.json().catch(() => ({}))) as {
     code?: string;
     message?: string;
+    detail?: string;
   };
   if (!resp.ok) {
-    throw new ApiError(resp.status, body.code ?? "unknown", body.message ?? resp.statusText);
+    // Error bodies carry `message`; a failed webhook test (422) carries the
+    // receiver's outcome in `detail` instead.
+    throw new ApiError(resp.status, body.code ?? "unknown", body.message ?? body.detail ?? resp.statusText);
   }
   return body as T;
 }
