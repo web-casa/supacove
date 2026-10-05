@@ -209,7 +209,8 @@ func (n *Notifier) Stop() {
 // recoverStuck resets 'delivering' rows to 'pending' (crash convergence).
 func (n *Notifier) recoverStuck(ctx context.Context) {
 	res, err := n.store.ExecContext(ctx, `
-		UPDATE notification_outbox SET state = 'pending'
+		UPDATE notification_outbox SET state = 'pending',
+		       next_attempt_at = strftime('%s','now')
 		WHERE state = 'delivering'`)
 	if err != nil {
 		n.log.Error("outbox stuck-state recovery failed", "err", err)
@@ -389,7 +390,15 @@ func execRetry(ctx context.Context, db *sql.DB, query string, args []any, onFail
 		if _, err = db.ExecContext(ctx, query, args...); err == nil {
 			return
 		}
-		time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		if attempt == 3 {
+			break // never sleep after the final attempt
+		}
+		select {
+		case <-ctx.Done():
+			onFail(ctx.Err())
+			return
+		case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+		}
 	}
 	onFail(err)
 }

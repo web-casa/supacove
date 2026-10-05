@@ -70,6 +70,21 @@ func TestPhase7ScheduleAPI(t *testing.T) {
 		t.Fatalf("max_age_hours = %d, want 26", maxAge)
 	}
 
+	// The "-" disable marker is ACCEPTED and needs no period (round-2:
+	// the API used to reject the documented disable value as an invalid URL).
+	code, _ = env.do7(t, http.MethodPut, "/api/databases/"+itoa(dbID)+"/schedule",
+		map[string]any{"heartbeatUrl": "-", "heartbeatPeriodHours": 24})
+	if code != 200 {
+		t.Fatalf("disable marker status = %d, want 200", code)
+	}
+	var hb string
+	if err := env.store.DB.QueryRow(`SELECT heartbeat_url FROM databases WHERE id = ?`, dbID).Scan(&hb); err != nil {
+		t.Fatal(err)
+	}
+	if hb != "-" {
+		t.Fatalf("disable marker not persisted: %q", hb)
+	}
+
 	// Unknown database → 404.
 	code, _ = env.do7(t, http.MethodPut, "/api/databases/999999/schedule",
 		map[string]any{"maxAgeHours": 5})
@@ -102,7 +117,7 @@ func TestPhase7WebhookAPI(t *testing.T) {
 	if code != 201 {
 		t.Fatalf("create status = %d (%v), want 201", code, body)
 	}
-	// Duplicate name → 409.
+	// Duplicate name → 409 (atomic API-layer uniqueness).
 	code, _ = env.do7(t, http.MethodPost, "/api/webhooks",
 		map[string]any{"name": "ops", "url": receiver.URL})
 	if code != 409 {

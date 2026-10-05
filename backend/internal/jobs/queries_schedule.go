@@ -107,14 +107,20 @@ func CreateWebhook(ctx context.Context, dbh *sql.DB, name, url string, events []
 			return nil, errors.New("unknown event type: " + e)
 		}
 	}
+	// Uniqueness among LIVE rows is enforced ATOMICALLY here (the schema
+	// intentionally has no unique index: legacy duplicate names were legal
+	// data and a renaming migration could collide — round-2 review P2-04).
 	res, err := dbh.ExecContext(ctx, `
 		INSERT INTO webhooks (name, url, events, created_at)
-		VALUES (?, ?, ?, strftime('%s','now'))`, name, url, strings.Join(events, ","))
+		SELECT ?, ?, ?, strftime('%s','now')
+		WHERE NOT EXISTS (
+			SELECT 1 FROM webhooks WHERE name = ? AND deleted_at IS NULL
+		)`, name, url, strings.Join(events, ","), name)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed: webhooks.name") {
-			return nil, ErrWebhookNameExists
-		}
 		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrWebhookNameExists
 	}
 	id, err := res.LastInsertId()
 	if err != nil {

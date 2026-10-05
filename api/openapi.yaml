@@ -913,7 +913,11 @@ components:
             disables the heartbeat for this database.
         heartbeatPeriodHours:
           type: integer
-          description: Expected backup period for the dead-man switch; 0 disables the age gate.
+          description: >
+            Expected backup period for the dead-man switch. 0 means success
+            pings are NOT sent (without a period there are no silence
+            semantics to vouch for); fail pings still fire. A heartbeatUrl
+            (except the "-" disable marker) requires a positive period.
         heartbeatGraceHours:
           type: integer
           description: Extra tolerance added to the period before silence alarms.

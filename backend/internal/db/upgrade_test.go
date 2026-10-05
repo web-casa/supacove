@@ -342,10 +342,88 @@ func TestUpgradeWebhookVocabulary(t *testing.T) {
 	}
 }
 
-// TestUpgradeDuplicateWebhookNames (phase-7 round-1 review P2-04): legacy
-// duplicate LIVE names are deterministically renamed (never deleted) so the
-// unique index can land and the upgrade is not blocked.
-func TestUpgradeDuplicateWebhookNames(t *testing.T) {
+// TestWebhookVocabularyDownUpCycle (phase-7 round-2 review R2-P1-01): the
+// legacy-vocabulary conversion must be re-entrant — a Down (which restores
+// the OLD vocabulary so the rolled-back binary keeps matching) followed by
+// another Up must NOT double-convert ('expired' inside 'backup_expired').
+func TestWebhookVocabularyDownUpCycle(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "supabackup.db")
+
+	// Legacy base at v9 (0001+0004+0009), one webhook with the old words.
+	legacy := legacyMigrations{
+		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
+		"0004_backup_kernel.sql": &fstest.MapFile{Data: []byte(original0004)},
+		"0009_scheduling.sql":    &fstest.MapFile{Data: []byte(readEmbedded(t, "0009_scheduling.sql"))},
+	}
+	buildLegacyDB(t, dir, legacy)
+	ro, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ro.Exec(
+		`INSERT INTO webhooks (name, url, events, created_at) VALUES ('ops', 'https://old.example/h', 'failure,expired', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	ro.Close()
+
+	eventsAt := func() string {
+		t.Helper()
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var events string
+		if err := db.QueryRow(`SELECT events FROM webhooks WHERE name='ops'`).Scan(&events); err != nil {
+			t.Fatal(err)
+		}
+		return events
+	}
+
+	// Full current migration set: Up (via Open+Migrate).
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := eventsAt(); got != "backup_failed,backup_expired" {
+		t.Fatalf("after Up: %q", got)
+	}
+	store.Close()
+
+	// Down one version (14→13) with a dedicated provider over the same dir.
+	fs := os.DirFS(filepath.Join(".", "migrations"))
+	ro, err = sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, ro, fs,
+		goose.WithDisableGlobalRegistry(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Down(context.Background()); err != nil {
+		t.Fatalf("down: %v", err)
+	}
+	if got := eventsAt(); got != "failure,expired" {
+		t.Fatalf("after Down: %q, want restored legacy vocabulary", got)
+	}
+	if _, err := provider.Up(context.Background()); err != nil {
+		t.Fatalf("re-up: %v", err)
+	}
+	ro.Close()
+	if got := eventsAt(); got != "backup_failed,backup_expired" {
+		t.Fatalf("after Down→Up: %q, want single clean conversion (no backup_backup_expired)", got)
+	}
+}
+
+// TestLegacyDuplicateWebhookNamesSurvive (phase-7 round-2 review P2-04):
+// legacy duplicate live names are LEGAL data — the upgrade must not rename
+// or delete them (uniqueness is enforced at the API layer instead).
+func TestLegacyDuplicateWebhookNamesSurvive(t *testing.T) {
 	dir := t.TempDir()
 	legacy := legacyMigrations{
 		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
@@ -363,6 +441,11 @@ func TestUpgradeDuplicateWebhookNames(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A row that a naive rename would collide with.
+	if _, err := ro.Exec(
+		`INSERT INTO webhooks (name, url, events, created_at) VALUES ('dup #2', 'https://old.example/x', 'failure', 0)`); err != nil {
+		t.Fatal(err)
+	}
 	ro.Close()
 
 	store, err := Open(dir)
@@ -374,17 +457,10 @@ func TestUpgradeDuplicateWebhookNames(t *testing.T) {
 		t.Fatalf("migrate with duplicate live names: %v", err)
 	}
 	var n int
-	if err := store.DB.QueryRow(`SELECT COUNT(*) FROM webhooks WHERE deleted_at IS NULL`).Scan(&n); err != nil {
+	if err := store.DB.QueryRow(`SELECT COUNT(*) FROM webhooks`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 3 {
-		t.Fatalf("live webhook rows = %d, want 3 (renamed, never deleted)", n)
-	}
-	var distinct int
-	if err := store.DB.QueryRow(`SELECT COUNT(DISTINCT name) FROM webhooks WHERE deleted_at IS NULL`).Scan(&distinct); err != nil {
-		t.Fatal(err)
-	}
-	if distinct != 3 {
-		t.Fatalf("distinct names = %d, want 3", distinct)
+	if n != 4 {
+		t.Fatalf("webhook rows = %d, want 4 (all preserved untouched)", n)
 	}
 }

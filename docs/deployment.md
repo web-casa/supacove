@@ -33,7 +33,7 @@ docker compose exec app /app/supabackup bootstrap
 | `SB_LOG_LEVEL` | `info` | debug/warn/error |
 | `SB_LOCAL_KEEP` | `5` | 每库本地保留的 artifact 数量 |
 | `SB_STAGING_QUOTA_BYTES` | `0`（不限） | 暂存目录硬配额（字节） |
-| `SB_HEARTBEAT_URL` | （空） | 死人开关外部心跳 URL |
+| `SB_HEARTBEAT_URL` | （空） | **回退**死人开关心跳 URL（未单独配置心跳的库继承；共享回退端点意味着多库共同消除同一个 silence，不是每库独立监控）。单独配置某库心跳用 `PUT /api/databases/{id}/schedule`；显式禁用某库填 `"-"`。成功 ping 要求 `heartbeatPeriodHours > 0` 且快照年龄 ≤ period+grace；失败 ping 发送到 `URL/fail`。beta 无 start 信号（v1.0）。 |
 | `SB_PUBLIC_ORIGIN` | （空） | 反代部署时的外部 origin |
 | `SB_TRUSTED_PROXIES` | （空） | 信任的代理 CIDR 列表 |
 | `SB_SECRET_FILE` | `<data>/secret.key` | 主密钥文件路径 |

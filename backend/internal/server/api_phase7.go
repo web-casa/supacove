@@ -133,7 +133,11 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 	}
 	if body.HeartbeatUrl != nil {
 		hb := strings.TrimSpace(*body.HeartbeatUrl)
-		if hb != "" {
+		// "-" is the reserved explicit-DISABLE marker (review round-2: the
+		// API previously rejected it as an invalid URL, so the documented
+		// disable path was unreachable). It needs no period and no
+		// URL validation; everything else is a real URL.
+		if hb != "-" && hb != "" {
 			if len(hb) > 500 {
 				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "heartbeatUrl too long"}, nil
 			}
@@ -155,8 +159,9 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 		}
 		c.HeartbeatGraceHours = *body.HeartbeatGraceHours
 	}
-	// A heartbeat URL without a period has no silence semantics.
-	if c.HeartbeatURL != "" && c.HeartbeatPeriodHours == 0 {
+	// A real heartbeat URL without a period has no silence semantics
+	// (the "-" disable marker and empty inherit are exempt).
+	if c.HeartbeatURL != "" && c.HeartbeatURL != "-" && c.HeartbeatPeriodHours == 0 {
 		return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request",
 			Message: "heartbeatPeriodHours is required when a heartbeatUrl is set (the dead-man switch needs an expected period)"}, nil
 	}

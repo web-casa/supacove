@@ -403,11 +403,25 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 	}
 	if res.Pass() || (res.Status != verifier.StatusFailed && res.Status != verifier.StatusUnsupported) {
 		r.finishVerification(jobID, string(res.Status), res.Detail, req.redact, &res)
-	} else if !r.finishVerificationWithNotify(jobID, string(res.Status), res.Detail, req.redact, &res) {
-		// The terminal state did not commit: the next startup sweep re-queues
-		// the verification and the reconciliation covers the notification —
-		// never emit a notification for state that was not persisted (P1-03).
-		return
+	} else {
+		// The terminal failure and its notification commit as ONE
+		// transaction, retried as a whole (round-2 review R2-P2-01: a
+		// transient SQLite failure must not discard an already-computed
+		// result — but atomicity is never split to force it through).
+		committed := false
+		for attempt := 1; attempt <= 3; attempt++ {
+			if r.finishVerificationWithNotify(jobID, string(res.Status), res.Detail, req.redact, &res) {
+				committed = true
+				break
+			}
+			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		}
+		if !committed {
+			// Startup convergence re-queues the verification and the
+			// scheduler reconciliation covers the notification — never emit
+			// a notification for state that was not persisted (P1-03).
+			return
+		}
 	}
 
 	if res.Pass() {

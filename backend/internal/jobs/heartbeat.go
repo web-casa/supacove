@@ -31,11 +31,13 @@ import (
 )
 
 // heartbeatDecision captures why a success ping was (not) sent — logged so
-// silence is always explainable from the server logs.
+// silence is always explainable from the server logs. disabled is explicit
+// (the "-" marker) and also silences fail pings; a plain skip never does.
 type heartbeatDecision struct {
-	url    string
-	skip   string // non-empty = skipped with this reason
-	lateBy time.Duration
+	url      string
+	skip     string // non-empty = skipped with this reason
+	disabled bool   // explicit "-" marker: no success AND no fail signal
+	lateBy   time.Duration
 }
 
 // heartbeatFor loads the per-database heartbeat config and applies the
@@ -54,6 +56,7 @@ func (r *Runner) heartbeatFor(dbID int64, dumpStart time.Time, remoteCommitted, 
 	}
 	url := strings.TrimSpace(dbURL)
 	if url == "-" {
+		dec.disabled = true
 		dec.skip = "heartbeat explicitly disabled for this database"
 		return dec
 	}
@@ -128,7 +131,7 @@ func (r *Runner) pingSuccess(dbID int64, dec heartbeatDecision) {
 // pingFail signals a backup failure to the dead-man switch (url+"/fail").
 func (r *Runner) pingFail(dbID int64) {
 	dec := r.heartbeatFor(dbID, time.Now(), true, false)
-	if dec.url == "" || dec.skip == "heartbeat explicitly disabled for this database" {
+	if dec.url == "" || dec.disabled {
 		return
 	}
 	// The fail signal ignores the freshness gate (a failing backup is

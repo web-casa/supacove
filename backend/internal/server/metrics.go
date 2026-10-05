@@ -49,9 +49,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		var kvs []kv
 		for rows.Next() {
 			var x kv
-			if rows.Scan(&x.status, &x.n) == nil {
-				kvs = append(kvs, x)
+			if err := rows.Scan(&x.status, &x.n); err != nil {
+				failed("jobs")
+				break
 			}
+			kvs = append(kvs, x)
+		}
+		if rows.Err() != nil {
+			failed("jobs")
 		}
 		rows.Close()
 		fmt.Fprintf(w, "# HELP supabackup_jobs_total Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).\n")
@@ -79,10 +84,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		   COALESCE(SUM(CASE WHEN remote_state IN ('committed','deleted') THEN 1 END), 0),
 		   COALESCE(SUM(CASE WHEN status = 'failed' AND error_class = 'storage_upload' THEN 1 END), 0)
 		 FROM jobs`).Scan(&committed, &uploadFailed); err != nil {
-		failed("remote")
+		failed("remote") // omit the gauges: a query outage must not read as 0
+	} else {
+		gauge("supabackup_remote_commits_total", "Backups remotely committed (or deleted after a committed lifetime).", committed)
+		gauge("supabackup_remote_upload_failures_total", "Jobs failed in the storage_upload class.", uploadFailed)
 	}
-	gauge("supabackup_remote_commits_total", "Backups remotely committed (or deleted after a committed lifetime).", committed)
-	gauge("supabackup_remote_upload_failures_total", "Jobs failed in the storage_upload class.", uploadFailed)
 
 	// Verification status distribution over succeeded backups.
 	vrows, err := s.store.DB.QueryContext(ctx, `
@@ -99,9 +105,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		var kvs []kv
 		for vrows.Next() {
 			var x kv
-			if vrows.Scan(&x.status, &x.n) == nil {
-				kvs = append(kvs, x)
+			if err := vrows.Scan(&x.status, &x.n); err != nil {
+				failed("verification")
+				break
 			}
+			kvs = append(kvs, x)
+		}
+		if vrows.Err() != nil {
+			failed("verification")
 		}
 		vrows.Close()
 		fmt.Fprintf(w, "# HELP supabackup_verification_total Restore-verification states of succeeded backups.\n")
@@ -118,6 +129,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		JOIN jobs j ON j.database_id = d.id AND j.status = 'succeeded'
 		WHERE d.deleted_at IS NULL
 		GROUP BY d.id, d.name`)
+	if err != nil {
+		failed("last_success")
+	}
 	if err == nil {
 		type kv struct {
 			name string
@@ -126,9 +140,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		var kvs []kv
 		for lrows.Next() {
 			var x kv
-			if lrows.Scan(&x.name, &x.at) == nil {
-				kvs = append(kvs, x)
+			if err := lrows.Scan(&x.name, &x.at); err != nil {
+				failed("last_success")
+				break
 			}
+			kvs = append(kvs, x)
+		}
+		if lrows.Err() != nil {
+			failed("last_success")
 		}
 		lrows.Close()
 		fmt.Fprintf(w, "# HELP supabackup_last_success_timestamp Last successful backup snapshot per database (unix seconds).\n")
@@ -139,7 +158,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Staging disk usage (bounded by retention; best-effort walk).
-	gauge("supabackup_staging_bytes", "Bytes currently staged in the local staging directory.", s.stagingBytes())
+	stagingBytes, stagingErr := s.stagingBytes()
+	gauge("supabackup_staging_bytes", "Bytes currently staged in the local staging directory.", stagingBytes)
+	if stagingErr {
+		failed("staging")
+	}
 
 	// Notification outbox health.
 	pending, dead, err := outbox.Counts(ctx, s.store.DB)
@@ -165,8 +188,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			var id, maxAge int64
 			var name string
 			var started *int64
-			if orows.Scan(&id, &name, &maxAge, &started) != nil {
-				continue
+			if err := orows.Scan(&id, &name, &maxAge, &started); err != nil {
+				failed("protection")
+				break
 			}
 			state := "never"
 			if started != nil && *started > 0 {
@@ -177,6 +201,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			counts[state]++
+		}
+		if orows.Err() != nil {
+			failed("protection")
 		}
 		orows.Close()
 		fmt.Fprintf(w, "# HELP supabackup_databases_protection Databases by protection state (fresh/expired/never).\n")
@@ -203,19 +230,29 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 // stagingBytes walks the staging directory summing regular file sizes.
-func (s *Server) stagingBytes() int64 {
+func (s *Server) stagingBytes() (int64, bool) {
 	if s.stagingDir == "" {
-		return 0
+		return 0, false
 	}
 	var total int64
-	_ = filepath.WalkDir(s.stagingDir, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil // skip unreadable entries/dirs; best-effort metric
+	var stagingWalkFailed bool
+	err := filepath.WalkDir(s.stagingDir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			stagingWalkFailed = true
+			return nil // keep walking other entries; the failure is surfaced
+		}
+		if d.IsDir() {
+			return nil
 		}
 		if info, err := d.Info(); err == nil {
 			total += info.Size()
+		} else {
+			stagingWalkFailed = true
 		}
 		return nil
 	})
-	return total
+	if err != nil {
+		stagingWalkFailed = true
+	}
+	return total, stagingWalkFailed
 }
