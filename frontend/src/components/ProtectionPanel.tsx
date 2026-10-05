@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DatabaseZap, Plus } from "lucide-react";
+import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/format";
 import { overviewQuery, tasksQuery } from "../lib/queries";
 import { bySeverity } from "../lib/status";
@@ -14,6 +15,7 @@ import { SkeletonRows } from "./ui/Skeleton";
 
 // Overview: which databases lack a fresh, verified, successful backup.
 export function ProtectionPanel() {
+  const { t } = useI18n();
   const overview = useQuery(overviewQuery);
   const tasks = useQuery(tasksQuery);
   const [adding, setAdding] = useState(false);
@@ -22,13 +24,13 @@ export function ProtectionPanel() {
 
   return (
     <Panel
-      title="Protection overview"
-      description="Protection derives from the last successful backup; a failed retry never counts as fresh."
+      title={t("panel.protection.title")}
+      description={t("panel.protection.desc")}
       actions={
         !adding &&
         dbs.length > 0 && (
           <Button variant="primary" size="sm" icon={Plus} onClick={() => setAdding(true)}>
-            Add database
+            {t("panel.protection.add")}
           </Button>
         )
       }
@@ -37,34 +39,33 @@ export function ProtectionPanel() {
 
       {overview.isPending && <SkeletonRows />}
       {overview.isError && !overview.data && (
-        <InlineMessage>Overview unavailable: {errorMessage(overview.error)}</InlineMessage>
+        <InlineMessage>{t("health.unavailable", { msg: errorMessage(overview.error) })}</InlineMessage>
       )}
 
       {overview.data && dbs.length === 0 && !adding && (
         <EmptyState
           icon={DatabaseZap}
-          title="No databases yet"
+          title={t("panel.protection.empty.title")}
           action={
             <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>
-              Register your first database
+              {t("panel.protection.empty.cta")}
             </Button>
           }
         >
-          Connect a Supabase, Neon, Railway or any PostgreSQL database with its connection string.
-          Backups are age-encrypted before they leave this server.
+          {t("panel.protection.empty.body")}
         </EmptyState>
       )}
 
       {dbs.length > 0 && (
-        <div className="table table-dbs stagger" role="table" aria-label="Databases">
+        <div className="table table-dbs stagger" role="table" aria-label={t("table.aria.databases")}>
           <div className="thead" role="row">
-            <span role="columnheader">Database</span>
-            <span role="columnheader">Protection</span>
-            <span role="columnheader">Verification</span>
-            <span role="columnheader">Recent runs</span>
-            <span role="columnheader">Last success</span>
+            <span role="columnheader">{t("table.col.database")}</span>
+            <span role="columnheader">{t("table.col.protection")}</span>
+            <span role="columnheader">{t("table.col.verification")}</span>
+            <span role="columnheader">{t("table.col.recentRuns")}</span>
+            <span role="columnheader">{t("table.col.lastSuccess")}</span>
             <span role="columnheader" className="sr-only">
-              Actions
+              {t("table.col.actions")}
             </span>
           </div>
           {dbs.map((d) => (

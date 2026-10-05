@@ -1,4 +1,5 @@
 import { CircleAlert, CircleCheck, Info, TriangleAlert, Wand2 } from "lucide-react";
+import { useI18n } from "../i18n";
 import type { Analysis, Finding, HostPatch } from "../lib/connection";
 import { Button } from "./ui/Button";
 
@@ -16,11 +17,12 @@ interface Props {
 
 /** What the pre-flight found, and exactly what will be sent (password masked). */
 export function ConnectionPreflight({ analysis, onFix }: Props) {
+  const { t } = useI18n();
   return (
-    <div className="preflight" role="status" aria-label="Connection pre-flight">
+    <div className="preflight" role="status" aria-label={t("preflight.aria")}>
       {analysis.redacted && (
         <p className="preflight-target">
-          <span className="muted">Will register</span>
+          <span className="muted">{t("preflight.willRegister")}</span>
           <code>{analysis.redacted}</code>
         </p>
       )}
@@ -28,12 +30,12 @@ export function ConnectionPreflight({ analysis, onFix }: Props) {
         {analysis.findings.map((f) => {
           const { tone, icon: Icon } = LOOK[f.level];
           return (
-            <li className={`finding tone-${tone}`} key={f.text}>
+            <li className={`finding tone-${tone}`} key={f.key}>
               <Icon size={14} aria-hidden />
-              <span>{f.text}</span>
+              <span>{t(f.key, f.vars)}</span>
               {f.fix && (
                 <Button size="sm" icon={Wand2} onClick={() => onFix(f.fix!.patch)}>
-                  {f.fix.label}
+                  {t(f.fix.labelKey)}
                 </Button>
               )}
             </li>

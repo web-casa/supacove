@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { BellPlus, Plus, Send, Trash2, Webhook as WebhookIcon } from "lucide-react";
 import { api, type Webhook, type WebhookCreate, type WebhookTest } from "../api/client";
+import { useI18n } from "../i18n";
 import { control, hasErrors, isHttpUrl, shown } from "../lib/form";
 import { errorMessage } from "../lib/format";
 import { webhooksQuery } from "../lib/queries";
@@ -19,25 +20,27 @@ const EVENT_TYPES: EventType[] = ["backup_failed", "backup_expired", "verificati
 
 /** Outcome of a test delivery, from either the response body or a thrown error. */
 function TestResult({ result, error }: { result?: WebhookTest; error: unknown }) {
-  if (error) return <InlineMessage>Test failed: {errorMessage(error)}</InlineMessage>;
+  const { t } = useI18n();
+  if (error) return <InlineMessage>{t("wh.test.failed", { msg: errorMessage(error) })}</InlineMessage>;
   if (!result) return null;
   return result.delivered ? (
-    <InlineMessage tone="ok">Test delivered.</InlineMessage>
+    <InlineMessage tone="ok">{t("wh.test.delivered")}</InlineMessage>
   ) : (
-    <InlineMessage>Test failed: {result.detail ?? "unknown"}</InlineMessage>
+    <InlineMessage>{t("wh.test.failed", { msg: result.detail ?? t("wh.test.unknown") })}</InlineMessage>
   );
 }
 
 function WebhookRow({ hook }: { hook: Webhook }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { t } = useI18n();
   const test = useMutation({
     mutationFn: () => api.testWebhook({ name: hook.name, url: hook.url, events: [...(hook.events ?? [])] }),
   });
   const del = useMutation({
     mutationFn: () => api.deleteWebhook(hook.id),
     onSuccess: () => {
-      toast("ok", `Removed webhook “${hook.name}”.`);
+      toast("ok", t("wh.toast.removed", { name: hook.name }));
       qc.invalidateQueries({ queryKey: ["webhooks"] });
     },
   });
@@ -62,13 +65,13 @@ function WebhookRow({ hook }: { hook: Webhook }) {
         </div>
         <div className="cell cell-actions tip-end" role="cell">
           <Button size="sm" icon={Send} loading={test.isPending} onClick={() => test.mutate()}>
-            Send test
+            {t("wh.sendTest")}
           </Button>
           <ConfirmButton
             icon={Trash2}
-            tip="Remove webhook"
-            prompt={`Remove “${hook.name}”?`}
-            confirmLabel="Remove"
+            tip={t("wh.removeTip")}
+            prompt={t("wh.removePrompt", { name: hook.name })}
+            confirmLabel={t("common.remove")}
             pending={del.isPending}
             onConfirm={() => del.mutate()}
           />
@@ -87,6 +90,7 @@ function WebhookRow({ hook }: { hook: Webhook }) {
 function AddWebhook({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<EventType[]>(["backup_failed", "backup_expired"]);
@@ -95,7 +99,7 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
   const create = useMutation({
     mutationFn: (body: WebhookCreate) => api.createWebhook(body),
     onSuccess: (hook) => {
-      toast("ok", `Webhook “${hook.name}” added.`);
+      toast("ok", t("wh.toast.added", { name: hook.name }));
       qc.invalidateQueries({ queryKey: ["webhooks"] });
       onClose();
     },
@@ -109,11 +113,11 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
 
   const trimmedUrl = url.trim();
   const urlError =
-    trimmedUrl === "" ? "Enter the webhook URL." : !isHttpUrl(trimmedUrl) ? "Must be an http:// or https:// URL." : null;
+    trimmedUrl === "" ? t("wh.error.url") : !isHttpUrl(trimmedUrl) ? t("wh.error.urlScheme") : null;
   const errors = {
-    name: name.trim() === "" ? "Name this webhook." : null,
+    name: name.trim() === "" ? t("wh.error.name") : null,
     url: urlError,
-    events: events.length === 0 ? "Pick at least one event." : null,
+    events: events.length === 0 ? t("wh.error.events") : null,
   };
   const visible = shown(errors, submitted);
 
@@ -125,13 +129,13 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label="Add webhook">
+    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label={t("wh.addForm.aria")}>
       <div className="subpanel-head">
-        <h3>Add webhook</h3>
-        <p className="muted">A JSON POST is sent for each selected event, with retries.</p>
+        <h3>{t("wh.add")}</h3>
+        <p className="muted">{t("wh.addForm.desc")}</p>
       </div>
       <div className="form-grid form-grid-register">
-        <Field label="Name" htmlFor="wh-name" error={visible.name}>
+        <Field label={t("wh.field.name")} htmlFor="wh-name" error={visible.name}>
           <input
             {...control("wh-name", visible.name)}
             value={name}
@@ -141,7 +145,7 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
             onChange={(e) => setName(e.target.value)}
           />
         </Field>
-        <Field label="Webhook URL (http/https)" htmlFor="wh-url" error={visible.url}>
+        <Field label={t("wh.field.url")} htmlFor="wh-url" error={visible.url}>
           <input
             {...control("wh-url", visible.url)}
             type="password"
@@ -156,7 +160,7 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
         </Field>
       </div>
       <fieldset className={`field${visible.events ? " field-invalid" : ""}`}>
-        <legend>Events</legend>
+        <legend>{t("wh.fieldset.events")}</legend>
         <div className="check-row">
           {EVENT_TYPES.map((ev) => (
             <label className="check" key={ev}>
@@ -177,7 +181,7 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
 
       <div className="form-actions">
         <Button type="submit" variant="primary" icon={Plus} loading={create.isPending}>
-          Add webhook
+          {t("wh.add")}
         </Button>
         <Button
           icon={Send}
@@ -185,10 +189,10 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
           disabled={urlError !== null}
           onClick={() => test.mutate({ name: name.trim() || "test", url: trimmedUrl, events })}
         >
-          Test this URL
+          {t("wh.testThisUrl")}
         </Button>
         <Button variant="ghost" onClick={onClose} disabled={create.isPending}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </form>
@@ -197,48 +201,50 @@ function AddWebhook({ onClose }: { onClose: () => void }) {
 
 // Webhooks: list / add / test / remove.
 export function WebhooksPanel() {
+  const { t } = useI18n();
   const hooks = useQuery(webhooksQuery);
   const [adding, setAdding] = useState(false);
   const list = hooks.data?.webhooks ?? [];
 
   return (
     <Panel
-      title="Notifications"
-      description="Webhooks receive backup_failed / backup_expired / verification_failed events with retries."
+      title={t("wh.title")}
+      description={t("wh.desc")}
       actions={
         !adding &&
         list.length > 0 && (
           <Button variant="primary" size="sm" icon={BellPlus} onClick={() => setAdding(true)}>
-            Add webhook
+            {t("wh.add")}
           </Button>
         )
       }
     >
       {adding && <AddWebhook onClose={() => setAdding(false)} />}
       {hooks.isPending && <SkeletonRows rows={2} />}
-      {hooks.isError && !hooks.data && <InlineMessage>Webhooks unavailable: {errorMessage(hooks.error)}</InlineMessage>}
+      {hooks.isError && !hooks.data && (
+        <InlineMessage>{t("wh.unavailable", { msg: errorMessage(hooks.error) })}</InlineMessage>
+      )}
       {hooks.data && list.length === 0 && !adding && (
         <EmptyState
           icon={WebhookIcon}
-          title="No webhooks yet"
+          title={t("wh.empty.title")}
           action={
             <Button variant="primary" icon={BellPlus} onClick={() => setAdding(true)}>
-              Add your first webhook
+              {t("wh.empty.cta")}
             </Button>
           }
         >
-          Without a webhook, a failed or expired backup is only visible on this page. Point one at Slack,
-          Discord or your pager.
+          {t("wh.empty.body")}
         </EmptyState>
       )}
       {list.length > 0 && (
-        <div className="table table-hooks stagger" role="table" aria-label="Webhooks">
+        <div className="table table-hooks stagger" role="table" aria-label={t("wh.aria")}>
           <div className="thead" role="row">
-            <span role="columnheader">Name</span>
-            <span role="columnheader">Events</span>
-            <span role="columnheader">URL</span>
+            <span role="columnheader">{t("wh.col.name")}</span>
+            <span role="columnheader">{t("wh.col.events")}</span>
+            <span role="columnheader">{t("wh.col.url")}</span>
             <span role="columnheader" className="sr-only">
-              Actions
+              {t("table.col.actions")}
             </span>
           </div>
           {list.map((w) => (

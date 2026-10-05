@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, KeyRound, Terminal } from "lucide-react";
 import { api, ApiError } from "../api/client";
+import { useI18n } from "../i18n";
 import { control, hasErrors, shown } from "../lib/form";
 import { errorMessage } from "../lib/format";
 import { spotlight } from "../lib/motion";
@@ -9,11 +10,13 @@ import { SplashLayout } from "./SplashLayout";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
 import { InlineMessage } from "./ui/InlineMessage";
+import { LangSwitch } from "./ui/LangSwitch";
 
 const MIN_PASSWORD = 12;
 
 export function AuthScreen() {
   const qc = useQueryClient();
+  const { t } = useI18n();
   const [mode, setMode] = useState<"login" | "bootstrap">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -37,7 +40,7 @@ export function AuthScreen() {
     onError: (e) => {
       if (e instanceof ApiError && e.status === 409) {
         switchTo("login");
-        setNotice("This instance already has an admin account — sign in instead.");
+        setNotice(t("auth.notice.adminExists"));
       }
     },
   });
@@ -53,13 +56,13 @@ export function AuthScreen() {
   const isBootstrap = mode === "bootstrap";
   const errors = shown(
     {
-      token: isBootstrap && token.trim() === "" ? "Paste the token printed by the bootstrap command." : null,
-      username: username.trim() === "" ? "Enter a username." : null,
+      token: isBootstrap && token.trim() === "" ? t("auth.error.token") : null,
+      username: username.trim() === "" ? t("auth.error.username") : null,
       password:
         password === ""
-          ? "Enter a password."
+          ? t("auth.error.password")
           : isBootstrap && password.length < MIN_PASSWORD
-            ? `Use at least ${MIN_PASSWORD} characters (${password.length} so far).`
+            ? t("auth.error.passwordShort", { n: MIN_PASSWORD, len: password.length })
             : null,
     },
     submitted,
@@ -85,30 +88,27 @@ export function AuthScreen() {
       <div className="auth-card spotlight" key={mode} onPointerMove={spotlight}>
         {isBootstrap ? (
           <>
-            <h1>Initialize this instance</h1>
-            <p className="muted">
-              Create the admin account with a one-time token. The first visitor can never claim the
-              instance without it.
-            </p>
+            <h1>{t("auth.bootstrap.title")}</h1>
+            <p className="muted">{t("auth.bootstrap.sub")}</p>
             <div className="callout">
               <Terminal size={14} aria-hidden />
               <div>
-                <p>Run on the server to print a token:</p>
+                <p>{t("auth.bootstrap.runOnServer")}</p>
                 <code>docker exec &lt;container&gt; /app/supabackup bootstrap</code>
-                <p className="muted">Valid for 15 minutes, usable once.</p>
+                <p className="muted">{t("auth.bootstrap.validFor")}</p>
               </div>
             </div>
           </>
         ) : (
           <>
-            <h1>Sign in</h1>
-            <p className="muted">Sign in to your instance.</p>
+            <h1>{t("auth.signIn.title")}</h1>
+            <p className="muted">{t("auth.signIn.sub")}</p>
           </>
         )}
 
         <form className="form" onSubmit={onSubmit} noValidate>
           {isBootstrap && (
-            <Field label="Bootstrap token" htmlFor="token" error={errors.token}>
+            <Field label={t("auth.field.token")} htmlFor="token" error={errors.token}>
               <input
                 {...control("token", errors.token)}
                 className="mono"
@@ -119,7 +119,11 @@ export function AuthScreen() {
               />
             </Field>
           )}
-          <Field label={isBootstrap ? "Admin username" : "Username"} htmlFor="username" error={errors.username}>
+          <Field
+            label={isBootstrap ? t("auth.field.adminUsername") : t("auth.field.username")}
+            htmlFor="username"
+            error={errors.username}
+          >
             <input
               {...control("username", errors.username)}
               value={username}
@@ -128,10 +132,10 @@ export function AuthScreen() {
             />
           </Field>
           <Field
-            label="Password"
+            label={t("auth.field.password")}
             htmlFor="password"
             error={errors.password}
-            hint={isBootstrap ? `Minimum ${MIN_PASSWORD} characters.` : undefined}
+            hint={isBootstrap ? t("auth.field.passwordHint", { n: MIN_PASSWORD }) : undefined}
           >
             <input
               {...control("password", errors.password)}
@@ -146,23 +150,26 @@ export function AuthScreen() {
           <Button type="submit" variant="primary" block loading={active.isPending}>
             {isBootstrap
               ? bootstrap.isPending
-                ? "Creating admin…"
-                : "Create admin account"
+                ? t("auth.action.creatingAdmin")
+                : t("auth.action.createAdmin")
               : login.isPending
-                ? "Signing in…"
-                : "Sign in"}
+                ? t("auth.action.signingIn")
+                : t("auth.action.signIn")}
           </Button>
         </form>
       </div>
-      {isBootstrap ? (
-        <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => switchTo("login")}>
-          Back to sign in
-        </Button>
-      ) : (
-        <Button variant="ghost" size="sm" icon={KeyRound} onClick={() => switchTo("bootstrap")}>
-          Initialize a fresh instance with a CLI token
-        </Button>
-      )}
+      <div className="splash-foot">
+        {isBootstrap ? (
+          <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => switchTo("login")}>
+            {t("auth.action.backToSignIn")}
+          </Button>
+        ) : (
+          <Button variant="ghost" size="sm" icon={KeyRound} onClick={() => switchTo("bootstrap")}>
+            {t("auth.action.bootstrapEntry")}
+          </Button>
+        )}
+        <LangSwitch />
+      </div>
     </SplashLayout>
   );
 }

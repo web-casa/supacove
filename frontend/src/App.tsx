@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ServerCrash } from "lucide-react";
 import { api, type User } from "./api/client";
+import { useI18n } from "./i18n";
 import { AuthScreen } from "./components/AuthScreen";
 import { Dashboard } from "./components/Dashboard";
 import { SplashLayout } from "./components/SplashLayout";
@@ -16,6 +17,7 @@ import { ToastProvider } from "./components/ui/Toaster";
 // here and renders the login screen.
 
 export default function App() {
+  const { t } = useI18n();
   const me = useQuery<User | null, Error>({
     queryKey: ["me"],
     queryFn: api.me,
@@ -33,7 +35,7 @@ export default function App() {
     return (
       <SplashLayout>
         <p className="muted splash-status">
-          <Spinner /> Checking instance…
+          <Spinner /> {t("app.checking")}
         </p>
       </SplashLayout>
     );
@@ -43,8 +45,8 @@ export default function App() {
       <SplashLayout>
         <div className="auth-card">
           <ServerCrash size={22} className="muted" aria-hidden />
-          <h1>Service unavailable</h1>
-          <InlineMessage>The backend is not answering its readiness probe — retrying every 5s.</InlineMessage>
+          <h1>{t("app.serviceUnavailable")}</h1>
+          <InlineMessage>{t("app.backendDown")}</InlineMessage>
         </div>
       </SplashLayout>
     );

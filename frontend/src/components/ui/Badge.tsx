@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
+import { useI18n } from "../../i18n";
 import type { StatusMeta, Tone } from "../../lib/status";
 
 interface Props {
@@ -19,9 +20,10 @@ export function Badge({ tone = "neutral", icon: Icon, spin, children }: Props) {
 }
 
 export function StatusBadge({ meta }: { meta: StatusMeta }) {
+  const { t } = useI18n();
   return (
     <Badge tone={meta.tone} icon={meta.icon} spin={meta.spin}>
-      {meta.label}
+      {t(meta.label)}
     </Badge>
   );
 }

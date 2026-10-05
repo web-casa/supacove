@@ -26,6 +26,13 @@
   animation-delay: 160ms;
 }
 
+/* Auth footer: mode switch + language toggle on one quiet row. */
+.splash-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 /* Ambient signal: one heartbeat trace running behind the card. */
 .splash-bg {
   position: absolute;

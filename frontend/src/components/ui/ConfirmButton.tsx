@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
+import { useI18n } from "../../i18n";
 import { Button } from "./Button";
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 
 /** Two-step destructive action: the first click only arms it. */
 export function ConfirmButton({ label, tip, icon, prompt, confirmLabel, pending, onConfirm }: Props) {
+  const { t } = useI18n();
   const [armed, setArmed] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -52,7 +54,7 @@ export function ConfirmButton({ label, tip, icon, prompt, confirmLabel, pending,
         {confirmLabel}
       </Button>
       <Button ref={cancelRef} variant="ghost" size="sm" disabled={pending} onClick={() => setArmed(false)}>
-        Cancel
+        {t("common.cancel")}
       </Button>
     </span>
   );

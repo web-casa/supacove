@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { api, type ScheduleConfig } from "../api/client";
+import { useI18n } from "../i18n";
 import { control, hasErrors, isHttpUrl, shown } from "../lib/form";
 import { errorMessage } from "../lib/format";
 import { useToast } from "../lib/toast";
@@ -22,12 +23,6 @@ function validTimezone(tz: string): boolean {
   }
 }
 
-function hoursError(v: number): string | null {
-  if (!Number.isInteger(v) || v < 0) return "Use a whole number of hours, 0 or more.";
-  if (v > MAX_HOURS) return `At most ${MAX_HOURS} hours (one year).`;
-  return null;
-}
-
 interface Props {
   databaseId: number;
   name: string;
@@ -37,6 +32,7 @@ interface Props {
 export function ScheduleForm({ databaseId, name, onDone }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { t } = useI18n();
   const existing = useQuery({
     queryKey: ["schedule", databaseId],
     queryFn: () => api.getSchedule(databaseId),
@@ -46,6 +42,12 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
   const [form, setForm] = useState<Partial<ScheduleConfig>>({});
   const [submitted, setSubmitted] = useState(false);
   const cur = existing.data;
+
+  const hoursError = (v: number): string | null => {
+    if (!Number.isInteger(v) || v < 0) return t("schedule.error.hoursWhole");
+    if (v > MAX_HOURS) return t("schedule.error.hoursMax", { n: MAX_HOURS });
+    return null;
+  };
 
   const v = {
     cronExpr: form.cronExpr ?? cur?.cronExpr ?? "",
@@ -70,7 +72,7 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
     onSuccess: (saved) => {
       qc.setQueryData(["schedule", databaseId], saved);
       qc.invalidateQueries({ queryKey: ["overview"] });
-      toast("ok", `Schedule saved for “${name}”.`);
+      toast("ok", t("schedule.toast.saved", { name }));
       onDone();
     },
   });
@@ -81,14 +83,14 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
   const errors = {
     cronExpr:
       cron !== "" && !cron.startsWith("@") && cron.split(/\s+/).length !== 5
-        ? "Use 5 fields: minute hour day-of-month month day-of-week."
+        ? t("schedule.error.cron")
         : null,
-    cronTz: validTimezone(v.cronTz.trim()) ? null : "Not a known IANA timezone (e.g. Europe/Berlin).",
+    cronTz: validTimezone(v.cronTz.trim()) ? null : t("schedule.error.tz"),
     maxAgeHours: hoursError(v.maxAgeHours),
-    heartbeatUrl: hbActive && !isHttpUrl(hbUrl) ? "Use an http:// or https:// URL, “-” to disable, or leave empty." : null,
+    heartbeatUrl: hbActive && !isHttpUrl(hbUrl) ? t("schedule.error.hbUrl") : null,
     heartbeatPeriodHours:
       hoursError(v.heartbeatPeriodHours) ??
-      (hbActive && v.heartbeatPeriodHours <= 0 ? "A heartbeat URL needs an expected period above 0." : null),
+      (hbActive && v.heartbeatPeriodHours <= 0 ? t("schedule.error.period") : null),
     heartbeatGraceHours: hoursError(v.heartbeatGraceHours),
   };
   const visible = shown(errors, submitted);
@@ -106,7 +108,7 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
     return (
       <div className="subpanel">
         <p className="muted">
-          <Spinner /> Loading schedule…
+          <Spinner /> {t("schedule.loading")}
         </p>
       </div>
     );
@@ -114,13 +116,13 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
   if (existing.isError) {
     return (
       <div className="subpanel">
-        <InlineMessage>Schedule unavailable: {errorMessage(existing.error)}</InlineMessage>
+        <InlineMessage>{t("schedule.unavailable", { msg: errorMessage(existing.error) })}</InlineMessage>
         <div className="form-actions">
           <Button size="sm" onClick={() => existing.refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
           <Button variant="ghost" size="sm" onClick={onDone}>
-            Close
+            {t("common.close")}
           </Button>
         </div>
       </div>
@@ -128,17 +130,17 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
   }
 
   return (
-    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label={`Schedule and heartbeat for ${name}`}>
+    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label={t("schedule.aria", { name })}>
       <div className="subpanel-head">
-        <h3>Schedule &amp; heartbeat</h3>
+        <h3>{t("schedule.title")}</h3>
         <p className="muted">
-          Last scheduled run {cur?.lastScheduledAt ? <RelativeTime at={cur.lastScheduledAt} /> : "never"} · last
-          heartbeat {cur?.lastHeartbeatAt ? <RelativeTime at={cur.lastHeartbeatAt} /> : "never"}
+          {t("schedule.lastScheduled")} {cur?.lastScheduledAt ? <RelativeTime at={cur.lastScheduledAt} /> : t("common.never")} ·{" "}
+          {t("schedule.lastHeartbeat")} {cur?.lastHeartbeatAt ? <RelativeTime at={cur.lastHeartbeatAt} /> : t("common.never")}
         </p>
       </div>
 
       <div className="form-grid form-grid-3">
-        <Field label="Cron schedule" htmlFor={id("cron")} error={visible.cronExpr} hint="5-field crontab; empty = manual only.">
+        <Field label={t("schedule.field.cron")} htmlFor={id("cron")} error={visible.cronExpr} hint={t("schedule.hint.cron")}>
           <input
             {...control(id("cron"), visible.cronExpr)}
             className="mono"
@@ -148,7 +150,7 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
             onChange={(e) => set("cronExpr", e.target.value)}
           />
         </Field>
-        <Field label="Timezone (IANA)" htmlFor={id("tz")} error={visible.cronTz}>
+        <Field label={t("schedule.field.tz")} htmlFor={id("tz")} error={visible.cronTz}>
           <input
             {...control(id("tz"), visible.cronTz)}
             list={id("tz-list")}
@@ -163,10 +165,10 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
           </datalist>
         </Field>
         <Field
-          label="Freshness threshold (hours)"
+          label={t("schedule.field.maxAge")}
           htmlFor={id("maxage")}
           error={visible.maxAgeHours}
-          hint="Older than this = EXPIRED. 0 = off."
+          hint={t("schedule.hint.maxAge")}
         >
           <input
             {...control(id("maxage"), visible.maxAgeHours)}
@@ -179,10 +181,10 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
           />
         </Field>
         <Field
-          label="Heartbeat URL"
+          label={t("schedule.field.hbUrl")}
           htmlFor={id("hb")}
           error={visible.heartbeatUrl}
-          hint="Dead-man switch, optional. Empty inherits the server default; “-” disables."
+          hint={t("schedule.hint.hbUrl")}
         >
           <input
             {...control(id("hb"), visible.heartbeatUrl)}
@@ -193,7 +195,7 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
             onChange={(e) => set("heartbeatUrl", e.target.value)}
           />
         </Field>
-        <Field label="Expected period (hours)" htmlFor={id("hbp")} error={visible.heartbeatPeriodHours}>
+        <Field label={t("schedule.field.period")} htmlFor={id("hbp")} error={visible.heartbeatPeriodHours}>
           <input
             {...control(id("hbp"), visible.heartbeatPeriodHours)}
             className="num"
@@ -204,7 +206,7 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
             onChange={(e) => set("heartbeatPeriodHours", Number(e.target.value))}
           />
         </Field>
-        <Field label="Grace (hours)" htmlFor={id("hbg")} error={visible.heartbeatGraceHours}>
+        <Field label={t("schedule.field.grace")} htmlFor={id("hbg")} error={visible.heartbeatGraceHours}>
           <input
             {...control(id("hbg"), visible.heartbeatGraceHours)}
             className="num"
@@ -221,18 +223,18 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
         <input type="checkbox" role="switch" checked={v.paused} onChange={(e) => set("paused", e.target.checked)} />
         <span className="switch-track" aria-hidden />
         <span>
-          Pause scheduled backups
-          <span className="muted switch-note"> — manual “Back up now” keeps working.</span>
+          {t("schedule.pause")}
+          <span className="muted switch-note">{t("schedule.pauseNote")}</span>
         </span>
       </label>
 
       {save.isError && <InlineMessage>{errorMessage(save.error)}</InlineMessage>}
       <div className="form-actions">
         <Button type="submit" variant="primary" loading={save.isPending}>
-          {save.isPending ? "Saving…" : "Save"}
+          {save.isPending ? t("common.saving") : t("common.save")}
         </Button>
         <Button variant="ghost" onClick={onDone} disabled={save.isPending}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </form>

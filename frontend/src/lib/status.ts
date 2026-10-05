@@ -31,11 +31,11 @@ export interface StatusMeta {
 export function protectionMeta(state: OverviewEntry["state"]): StatusMeta {
   switch (state) {
     case "fresh":
-      return { label: "protected", tone: "ok", icon: ShieldCheck };
+      return { label: "status.protection.fresh", tone: "ok", icon: ShieldCheck };
     case "expired":
-      return { label: "EXPIRED", tone: "danger", icon: ShieldAlert };
+      return { label: "status.protection.expired", tone: "danger", icon: ShieldAlert };
     case "never":
-      return { label: "never backed up", tone: "warn", icon: ShieldOff };
+      return { label: "status.protection.never", tone: "warn", icon: ShieldOff };
     default:
       return { label: state, tone: "neutral", icon: CircleHelp };
   }
@@ -44,17 +44,17 @@ export function protectionMeta(state: OverviewEntry["state"]): StatusMeta {
 export function verifyMeta(v?: string): StatusMeta | null {
   switch (v) {
     case "verified":
-      return { label: "restore-verified", tone: "ok", icon: CircleCheck };
+      return { label: "status.verify.verified", tone: "ok", icon: CircleCheck };
     case "failed":
-      return { label: "verify FAILED", tone: "danger", icon: CircleX };
+      return { label: "status.verify.failed", tone: "danger", icon: CircleX };
     case "unsupported":
-      return { label: "verify unsupported", tone: "warn", icon: CircleHelp };
+      return { label: "status.verify.unsupported", tone: "warn", icon: CircleHelp };
     case "pending":
-      return { label: "verify pending…", tone: "neutral", icon: Clock };
+      return { label: "status.verify.pending", tone: "neutral", icon: Clock };
     case "running":
-      return { label: "verify running…", tone: "info", icon: LoaderCircle, spin: true };
+      return { label: "status.verify.running", tone: "info", icon: LoaderCircle, spin: true };
     case "skipped":
-      return { label: "not verified", tone: "neutral", icon: CircleDashed };
+      return { label: "status.verify.skipped", tone: "neutral", icon: CircleDashed };
     default:
       return null;
   }
@@ -63,17 +63,17 @@ export function verifyMeta(v?: string): StatusMeta | null {
 export function taskStatusMeta(status: Task["status"]): StatusMeta {
   switch (status) {
     case "succeeded":
-      return { label: "succeeded", tone: "ok", icon: CircleCheck };
+      return { label: "status.task.succeeded", tone: "ok", icon: CircleCheck };
     case "failed":
-      return { label: "failed", tone: "danger", icon: CircleX };
+      return { label: "status.task.failed", tone: "danger", icon: CircleX };
     case "running":
-      return { label: "running", tone: "info", icon: LoaderCircle, spin: true };
+      return { label: "status.task.running", tone: "info", icon: LoaderCircle, spin: true };
     case "pending":
-      return { label: "pending", tone: "neutral", icon: Clock };
+      return { label: "status.task.pending", tone: "neutral", icon: Clock };
     case "interrupted":
-      return { label: "interrupted", tone: "warn", icon: CircleHelp };
+      return { label: "status.task.interrupted", tone: "warn", icon: CircleHelp };
     case "canceled":
-      return { label: "canceled", tone: "neutral", icon: Ban };
+      return { label: "status.task.canceled", tone: "neutral", icon: Ban };
     default:
       return { label: status, tone: "neutral", icon: CircleHelp };
   }
@@ -84,11 +84,11 @@ type DeliveryState = NotificationList["notifications"][number]["state"];
 export function deliveryMeta(state: DeliveryState): StatusMeta {
   switch (state) {
     case "delivered":
-      return { label: "delivered", tone: "ok", icon: MailCheck };
+      return { label: "status.delivery.delivered", tone: "ok", icon: MailCheck };
     case "dead":
-      return { label: "dead", tone: "danger", icon: MailX };
+      return { label: "status.delivery.dead", tone: "danger", icon: MailX };
     case "delivering":
-      return { label: "delivering", tone: "info", icon: LoaderCircle, spin: true };
+      return { label: "status.delivery.delivering", tone: "info", icon: LoaderCircle, spin: true };
     default:
       return { label: state, tone: "neutral", icon: Clock };
   }

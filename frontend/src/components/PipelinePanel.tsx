@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Bell, CloudUpload, Database, FileArchive, LockKeyhole, ShieldCheck, type LucideIcon } from "lucide-react";
+import { useI18n } from "../i18n";
 import { duration, errorMessage, humanBytes, pct } from "../lib/format";
 import { statsQuery, tasksQuery } from "../lib/queries";
 import type { Tone } from "../lib/status";
@@ -84,6 +85,7 @@ function Stat({ label, hint, children }: { label: string; hint?: string; childre
 // the three volume metrics and the segmented success rates sit on the stage
 // that produces them.
 export function PipelinePanel() {
+  const { t } = useI18n();
   const stats = useQuery(statsQuery);
   const tasks = useQuery(tasksQuery);
   const d = stats.data;
@@ -93,92 +95,88 @@ export function PipelinePanel() {
 
   return (
     <Panel
-      title="Pipeline & statistics"
-      description="Every backup takes this path. Rings show lifetime success per stage."
+      title={t("pipe.title")}
+      description={t("pipe.desc")}
       actions={
         <span className={`live-chip${inFlight > 0 ? " live-chip-active" : ""}`}>
           <Beacon tone={inFlight > 0 ? "signal" : "neutral"} live={inFlight > 0} />
-          {inFlight > 0 ? `${inFlight} in flight` : "idle"}
+          {inFlight > 0 ? t("pipe.inFlight", { n: inFlight }) : t("pipe.idle")}
         </span>
       }
     >
       {stats.isError && !d ? (
-        <InlineMessage>Statistics unavailable: {errorMessage(stats.error)}</InlineMessage>
+        <InlineMessage>{t("pipe.unavailable", { msg: errorMessage(stats.error) })}</InlineMessage>
       ) : (
         <>
-          <ol className={`pipeline stagger${inFlight > 0 ? " pipeline-active" : ""}`} aria-label="Backup pipeline stages">
-            <Stage icon={Database} name="Source" hint="Newest known physical size per database, summed" loading={loading}>
-              {d && (
-                <>
-                  <span className="num">{humanBytes(d.totalSourceBytes)}</span> · {d.databases}{" "}
-                  {d.databases === 1 ? "database" : "databases"}
-                </>
-              )}
+          <ol className={`pipeline stagger${inFlight > 0 ? " pipeline-active" : ""}`} aria-label={t("pipe.aria")}>
+            <Stage icon={Database} name={t("pipe.stage.source")} hint={t("pipe.stage.source.hint")} loading={loading}>
+              {d && t("pipe.stage.source.sub", { size: humanBytes(d.totalSourceBytes), count: d.databases })}
             </Stage>
             <Pipe />
             <Stage
               icon={FileArchive}
-              name="Export"
-              hint="pg_dump success rate; size = compressed archives recorded in statistics"
+              name={t("pipe.stage.export")}
+              hint={t("pipe.stage.export.hint")}
               rate={d ? (d.exportSuccessRate ?? null) : null}
               loading={loading}
             >
-              <span className="num">{humanBytes(d?.totalDumpBytes)}</span> dump archive
+              {t("pipe.stage.export.sub", { size: humanBytes(d?.totalDumpBytes) })}
             </Stage>
             <Pipe />
-            <Stage icon={LockKeyhole} name="Encrypt" hint="age ciphertext across succeeded backups" loading={loading}>
-              <span className="num">{humanBytes(d?.totalArtifactBytes)}</span> encrypted
+            <Stage
+              icon={LockKeyhole}
+              name={t("pipe.stage.encrypt")}
+              hint={t("pipe.stage.encrypt.hint")}
+              loading={loading}
+            >
+              {t("pipe.stage.encrypt.sub", { size: humanBytes(d?.totalArtifactBytes) })}
             </Stage>
             <Pipe />
             <Stage
               icon={CloudUpload}
-              name="Remote commit"
-              hint="Remote commits vs upload failures"
+              name={t("pipe.stage.remote")}
+              hint={t("pipe.stage.remote.hint")}
               rate={d ? (d.remoteSuccessRate ?? null) : null}
               loading={loading}
             >
-              {d && (
-                <>
-                  {d.destinations} {d.destinations === 1 ? "destination" : "destinations"}
-                </>
-              )}
+              {d && t("pipe.stage.remote.sub", { count: d.destinations })}
             </Stage>
             <Pipe />
             <Stage
               icon={ShieldCheck}
-              name="Verification"
-              hint="Verified vs failed/unsupported restores"
+              name={t("pipe.stage.verify")}
+              hint={t("pipe.stage.verify.hint")}
               rate={d ? (d.verifySuccessRate ?? null) : null}
               loading={loading}
             >
-              restore-tested
+              {t("pipe.stage.verify.sub")}
             </Stage>
             <Pipe />
             <Stage
               icon={Bell}
-              name="Notification"
-              hint="Delivered vs dead webhook deliveries"
+              name={t("pipe.stage.notify")}
+              hint={t("pipe.stage.notify.hint")}
               rate={d ? (d.notifySuccessRate ?? null) : null}
               loading={loading}
             >
-              webhook delivery
+              {t("pipe.stage.notify.sub")}
             </Stage>
           </ol>
 
           <div className="stats">
-            <Stat label="Success rate" hint="Succeeded / finished jobs">
+            <Stat label={t("pipe.stat.success")} hint={t("pipe.stat.success.hint")}>
               {d ? d.successRate == null ? "—" : <CountUp value={d.successRate} format={pct} /> : <SkeletonText short />}
             </Stat>
-            <Stat label="Total jobs">{d ? count(d.totalJobs) : <SkeletonText short />}</Stat>
-            <Stat label="Succeeded">{d ? count(d.succeeded) : <SkeletonText short />}</Stat>
-            <Stat label="Failed">
+            <Stat label={t("pipe.stat.jobs")}>{d ? count(d.totalJobs) : <SkeletonText short />}</Stat>
+            <Stat label={t("pipe.stat.succeeded")}>{d ? count(d.succeeded) : <SkeletonText short />}</Stat>
+            <Stat label={t("pipe.stat.failed")}>
               {d ? <span className={d.failed > 0 ? "text-danger" : undefined}>{count(d.failed)}</span> : <SkeletonText short />}
             </Stat>
-            <Stat label="Avg duration" hint="Dump through remote commit, succeeded jobs">
+            <Stat label={t("pipe.stat.avg")} hint={t("pipe.stat.avg.hint")}>
               {d ? duration(d.avgDurationSecs) : <SkeletonText short />}
             </Stat>
-            <Stat label="Last success">
-              {d ? d.lastSuccessAt ? <RelativeTime at={d.lastSuccessAt} /> : "never" : <SkeletonText short />}
+            <Stat label={t("pipe.stat.lastSuccess")}>
+              {d ? d.lastSuccessAt ? <RelativeTime at={d.lastSuccessAt} /> : t("common.never") : <SkeletonText short />}
             </Stat>
           </div>
         </>

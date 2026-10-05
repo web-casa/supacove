@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef } from "react";
 import { Bell, History, LayoutDashboard, LogOut, type LucideIcon } from "lucide-react";
 import { api, type User } from "../api/client";
+import { useI18n } from "../i18n";
 import { useHashView, type View } from "../lib/useHashView";
 import { Brand } from "./Brand";
 import { DeliveryLog } from "./DeliveryLog";
@@ -11,15 +12,17 @@ import { ProtectionPanel } from "./ProtectionPanel";
 import { RecentBackups } from "./RecentBackups";
 import { WebhooksPanel } from "./WebhooksPanel";
 import { Button } from "./ui/Button";
+import { LangSwitch } from "./ui/LangSwitch";
 
-const NAV: { view: View; label: string; icon: LucideIcon }[] = [
-  { view: "overview", label: "Overview", icon: LayoutDashboard },
-  { view: "backups", label: "Backups", icon: History },
-  { view: "notifications", label: "Notifications", icon: Bell },
+const NAV: { view: View; key: string; icon: LucideIcon }[] = [
+  { view: "overview", key: "nav.overview", icon: LayoutDashboard },
+  { view: "backups", key: "nav.backups", icon: History },
+  { view: "notifications", key: "nav.notifications", icon: Bell },
 ];
 
 export function Dashboard({ user }: { user: User }) {
   const qc = useQueryClient();
+  const { t } = useI18n();
   const [view, setView] = useHashView();
   const navRef = useRef<HTMLElement>(null);
 
@@ -54,8 +57,8 @@ export function Dashboard({ user }: { user: User }) {
       <header className="topbar">
         <div className="topbar-inner">
           <Brand />
-          <nav className="nav" aria-label="Sections" ref={navRef}>
-            {NAV.map(({ view: v, label, icon: Icon }) => (
+          <nav className="nav" aria-label={t("nav.sections")} ref={navRef}>
+            {NAV.map(({ view: v, key, icon: Icon }) => (
               <button
                 type="button"
                 key={v}
@@ -64,14 +67,15 @@ export function Dashboard({ user }: { user: User }) {
                 onClick={() => setView(v)}
               >
                 <Icon size={14} aria-hidden />
-                <span>{label}</span>
+                <span>{t(key)}</span>
               </button>
             ))}
           </nav>
           <div className="topbar-user">
+            <LangSwitch />
             <span className="muted truncate">{user.username}</span>
             <Button variant="ghost" size="sm" icon={LogOut} loading={logout.isPending} onClick={() => logout.mutate()}>
-              Sign out
+              {t("nav.signOut")}
             </Button>
           </div>
         </div>

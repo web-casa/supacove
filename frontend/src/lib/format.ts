@@ -1,8 +1,18 @@
 // Display formatting shared by every panel. All timestamps from the API are
-// unix seconds.
+// unix seconds. Language-sensitive helpers read the active language via
+// i18n/getLang() so plain (non-React) call sites stay localized too; React
+// components re-render through useI18n() when it changes.
+import { getLang, translate } from "../i18n";
 
 export function relativeTime(unixSecs: number, nowMs: number = Date.now()): string {
   const s = Math.max(0, Math.round(nowMs / 1000 - unixSecs));
+  if (getLang() === "zh-CN") {
+    if (s < 45) return "刚刚";
+    if (s < 3600) return `${Math.max(1, Math.round(s / 60))} 分钟前`;
+    if (s < 48 * 3600) return `${Math.round(s / 3600)} 小时前`;
+    if (s < 60 * 86400) return `${Math.round(s / 86400)} 天前`;
+    return `${Math.round(s / (30 * 86400))} 个月前`;
+  }
   if (s < 45) return "just now";
   if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
   if (s < 48 * 3600) return `${Math.round(s / 3600)}h ago`;
@@ -11,7 +21,7 @@ export function relativeTime(unixSecs: number, nowMs: number = Date.now()): stri
 }
 
 export function absoluteTime(unixSecs: number): string {
-  return new Date(unixSecs * 1000).toLocaleString(undefined, {
+  return new Date(unixSecs * 1000).toLocaleString(getLang() === "zh-CN" ? "zh-CN" : undefined, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -44,5 +54,7 @@ export function duration(secs?: number | null): string {
 }
 
 export function errorMessage(e: unknown): string {
-  return e instanceof Error && e.message ? e.message : "Request failed";
+  return e instanceof Error && e.message
+    ? e.message
+    : translate(getLang(), "fmt.requestFailed");
 }

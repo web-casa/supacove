@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Inbox } from "lucide-react";
+import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/format";
 import { notificationsQuery } from "../lib/queries";
 import { deliveryMeta } from "../lib/status";
@@ -16,33 +17,34 @@ const PAGE = 10;
 
 // Notification outbox delivery states.
 export function DeliveryLog() {
+  const { t } = useI18n();
   const notifications = useQuery(notificationsQuery);
   const [showAll, setShowAll] = useState(false);
   const list = notifications.data?.notifications ?? [];
   const visible = showAll ? list : list.slice(0, PAGE);
 
   return (
-    <Panel title="Delivery log" description="Outbox state for every alert sent to your webhooks.">
+    <Panel title={t("dl.title")} description={t("dl.desc")}>
       {notifications.isPending && <SkeletonRows rows={2} />}
       {notifications.isError && !notifications.data && (
-        <InlineMessage>Delivery log unavailable: {errorMessage(notifications.error)}</InlineMessage>
+        <InlineMessage>{t("dl.unavailable", { msg: errorMessage(notifications.error) })}</InlineMessage>
       )}
       {notifications.data && list.length === 0 && (
-        <EmptyState icon={Inbox} title="Nothing sent yet">
-          Alerts appear here once a backup fails, expires or fails verification.
+        <EmptyState icon={Inbox} title={t("dl.empty.title")}>
+          {t("dl.empty.body")}
         </EmptyState>
       )}
       {list.length > 0 && (
-        <div className="table table-log stagger" role="table" aria-label="Notification deliveries">
+        <div className="table table-log stagger" role="table" aria-label={t("dl.aria")}>
           <div className="thead" role="row">
-            <span role="columnheader">State</span>
-            <span role="columnheader">Event</span>
-            <span role="columnheader">Database</span>
+            <span role="columnheader">{t("dl.col.state")}</span>
+            <span role="columnheader">{t("dl.col.event")}</span>
+            <span role="columnheader">{t("dl.col.database")}</span>
             <span role="columnheader" className="cell-right">
-              Attempts
+              {t("dl.col.attempts")}
             </span>
             <span role="columnheader" className="cell-right">
-              Created
+              {t("dl.col.created")}
             </span>
           </div>
           {visible.map((n) => {
@@ -79,7 +81,7 @@ export function DeliveryLog() {
       {list.length > PAGE && (
         <div className="panel-foot">
           <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)}>
-            {showAll ? `Show latest ${PAGE}` : `Show all ${list.length}`}
+            {showAll ? t("common.showLatest", { n: PAGE }) : t("common.showAll", { n: list.length })}
           </Button>
         </div>
       )}

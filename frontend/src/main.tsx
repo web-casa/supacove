@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import { ApiError } from "./api/client";
+import { I18nProvider } from "./i18n";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./index.css";
@@ -32,8 +33,10 @@ const queryClient = new QueryClient({
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </I18nProvider>
   </StrictMode>,
 );

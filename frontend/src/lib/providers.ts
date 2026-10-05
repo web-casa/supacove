@@ -1,81 +1,65 @@
 // Per-platform guidance for the registration form: where the connection
-// string lives and which variant pg_dump can use.
+// string lives and which variant pg_dump can use. Copy lives in i18n/en.ts
+// and i18n/zh-CN.ts under `providers.<id>.*`; `label` is a brand name and
+// stays untranslated.
 import { Leaf, Server, TrainFront, Zap, type LucideIcon } from "lucide-react";
 import type { Provider, SslMode } from "./connection";
 
 export interface ProviderInfo {
   id: Provider;
   label: string;
-  tagline: string;
+  /** i18n key for the one-line summary under the brand name. */
+  taglineKey: string;
   icon: LucideIcon;
   /** Shown inside the connection-string input. */
   example: string;
   defaultSsl: SslMode;
   /** Self-hosted servers rarely hand out a ready-made URI. */
   defaultMode: "uri" | "fields";
-  steps: string[];
+  /** i18n keys for the numbered instructions. */
+  stepKeys: string[];
 }
 
 export const PROVIDERS: ProviderInfo[] = [
   {
     id: "supabase",
     label: "Supabase",
-    tagline: "Session pooler or direct",
+    taglineKey: "providers.supabase.tagline",
     icon: Zap,
     example: "postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres",
     defaultSsl: "require",
     defaultMode: "uri",
-    steps: [
-      "In the project dashboard open Connect, then the Connection string tab (type: URI).",
-      "Copy Session pooler (port 5432). It works over IPv4. Direct connection also works, but it is IPv6-only unless the project has the IPv4 add-on.",
-      "Do not use Transaction pooler (port 6543) — pg_dump cannot run through it.",
-      "Replace [YOUR-PASSWORD] with the database password.",
-    ],
+    stepKeys: ["providers.supabase.s1", "providers.supabase.s2", "providers.supabase.s3", "providers.supabase.s4"],
   },
   {
     id: "neon",
     label: "Neon",
-    tagline: "Direct endpoint, pooling off",
+    taglineKey: "providers.neon.tagline",
     icon: Leaf,
     example: "postgresql://<user>:<password>@ep-<name>.<region>.aws.neon.tech/<db>?sslmode=require",
     defaultSsl: "require",
     defaultMode: "uri",
-    steps: [
-      "In the Neon console open the project and click Connect.",
-      "Switch Connection pooling off, so the host has no “-pooler” in it.",
-      "Copy the string as-is. The channel_binding parameter Neon adds is removed here because supabackup does not accept it.",
-      "An idle compute takes a few seconds to wake, so the first test can be slow.",
-    ],
+    stepKeys: ["providers.neon.s1", "providers.neon.s2", "providers.neon.s3", "providers.neon.s4"],
   },
   {
     id: "railway",
     label: "Railway",
-    tagline: "Public TCP proxy URL",
+    taglineKey: "providers.railway.tagline",
     icon: TrainFront,
     example: "postgresql://postgres:<password>@<name>.proxy.rlwy.net:<port>/railway",
     defaultSsl: "require",
     defaultMode: "uri",
-    steps: [
-      "Open the Postgres service, then the Variables tab.",
-      "Copy DATABASE_PUBLIC_URL (host ends in .proxy.rlwy.net).",
-      "Do not use DATABASE_URL: its *.railway.internal host only resolves inside Railway.",
-      "Railway’s string sets no TLS mode, so one is added from the selector below.",
-    ],
+    stepKeys: ["providers.railway.s1", "providers.railway.s2", "providers.railway.s3", "providers.railway.s4"],
   },
   {
     id: "generic",
     label: "Self-hosted / other",
-    tagline: "Any PostgreSQL server",
+    taglineKey: "providers.generic.tagline",
     icon: Server,
     example: "postgresql://backup:<password>@db.internal:5432/app?sslmode=verify-full",
     defaultSsl: "require",
     defaultMode: "fields",
-    steps: [
-      "The host must be reachable from the supabackup container. localhost means the container itself; for the Docker host use host.docker.internal or its LAN address.",
-      "Use a role that can read everything pg_dump exports: the database owner, or a member of pg_read_all_data (PostgreSQL 14+).",
-      "TLS: verify-full when the server has a CA-signed certificate, require to encrypt without verifying, disable only on a private network you trust.",
-      "Check pg_hba.conf allows this server’s address for that role and database.",
-    ],
+    stepKeys: ["providers.generic.s1", "providers.generic.s2", "providers.generic.s3", "providers.generic.s4"],
   },
 ];
 

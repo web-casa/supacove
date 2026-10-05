@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Eye, EyeOff, PlugZap } from "lucide-react";
 import { api, type Database, type DatabaseCreate } from "../api/client";
+import { useI18n } from "../i18n";
 import {
   analyze,
   applyPatch,
@@ -31,6 +32,7 @@ const HOST_IN_URI = /@([^/?#]+?)(?::\d+)?(?:[/?#]|$)/;
 // the server's own poolingWarning is still surfaced afterwards (P2-01).
 export function RegisterDatabase({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
+  const { t } = useI18n();
   const [provider, setProvider] = useState<Provider>("supabase");
   const [mode, setMode] = useState<"uri" | "fields">("uri");
   const [name, setName] = useState("");
@@ -91,12 +93,12 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
 
   const portOk = /^\d*$/.test(fields.port.trim()) && (fields.port.trim() === "" || Number(fields.port) <= 65535);
   const errors = {
-    name: name.trim() === "" ? "Give this database a display name." : null,
-    uri: mode === "uri" && uri.trim() === "" ? "Paste the connection string." : null,
-    host: mode === "fields" && fields.host.trim() === "" ? "Enter the host." : null,
-    port: mode === "fields" && !portOk ? "Port must be 1–65535." : null,
-    database: mode === "fields" && fields.database.trim() === "" ? "Enter the database name." : null,
-    user: mode === "fields" && fields.user.trim() === "" ? "Enter the role." : null,
+    name: name.trim() === "" ? t("reg.error.name") : null,
+    uri: mode === "uri" && uri.trim() === "" ? t("reg.error.uri") : null,
+    host: mode === "fields" && fields.host.trim() === "" ? t("reg.error.host") : null,
+    port: mode === "fields" && !portOk ? t("reg.error.port") : null,
+    database: mode === "fields" && fields.database.trim() === "" ? t("reg.error.database") : null,
+    user: mode === "fields" && fields.user.trim() === "" ? t("reg.error.user") : null,
   };
   const visible = shown(errors, submitted);
   const blocked = Object.values(errors).some(Boolean) || !analysis || analysis.blocked;
@@ -115,22 +117,20 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label="Register a database">
+    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label={t("reg.aria")}>
       <div className="subpanel-head">
-        <h3>Register a database</h3>
-        <p className="muted">
-          The connection is tested before it is saved. The string is stored encrypted and never shown again.
-        </p>
+        <h3>{t("reg.title")}</h3>
+        <p className="muted">{t("reg.desc")}</p>
       </div>
 
-      <div className="providers" role="radiogroup" aria-label="Where is the database hosted?">
-        {PROVIDERS.map(({ id, label, tagline, icon: Icon }) => (
+      <div className="providers" role="radiogroup" aria-label={t("reg.providerAria")}>
+        {PROVIDERS.map(({ id, label, taglineKey, icon: Icon }) => (
           <label className="provider" key={id}>
             <input type="radio" name="provider" checked={provider === id} onChange={() => chooseProvider(id)} />
             <Icon size={16} aria-hidden />
             <span className="provider-text">
               <span className="provider-label">{label}</span>
-              <span className="provider-tagline">{tagline}</span>
+              <span className="provider-tagline">{t(taglineKey)}</span>
             </span>
           </label>
         ))}
@@ -138,7 +138,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
 
       <div className="register-grid">
         <div className="form">
-          <Field label="Display name" htmlFor="db-name" error={visible.name}>
+          <Field label={t("reg.field.name")} htmlFor="db-name" error={visible.name}>
             <input
               {...control("db-name", visible.name)}
               value={name}
@@ -149,17 +149,17 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
             />
           </Field>
 
-          <div className="segmented" role="tablist" aria-label="How to enter the connection">
+          <div className="segmented" role="tablist" aria-label={t("reg.tab.aria")}>
             <button type="button" role="tab" aria-selected={mode === "uri"} onClick={() => setMode("uri")}>
-              Paste connection string
+              {t("reg.tab.uri")}
             </button>
             <button type="button" role="tab" aria-selected={mode === "fields"} onClick={() => setMode("fields")}>
-              Enter details
+              {t("reg.tab.fields")}
             </button>
           </div>
 
           {mode === "uri" ? (
-            <Field label="postgres:// connection string" htmlFor="db-uri" error={visible.uri}>
+            <Field label={t("reg.field.uri")} htmlFor="db-uri" error={visible.uri}>
               <div className="input-affix">
                 <input
                   {...control("db-uri", visible.uri)}
@@ -175,7 +175,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
                   variant="ghost"
                   size="sm"
                   icon={reveal ? EyeOff : Eye}
-                  tip={reveal ? "Hide" : "Show"}
+                  tip={reveal ? t("common.hide") : t("common.show")}
                   className="tip-end"
                   onClick={() => setReveal(!reveal)}
                 />
@@ -183,7 +183,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
             </Field>
           ) : (
             <div className="form-grid form-grid-conn">
-              <Field label="Host" htmlFor="db-host" error={visible.host}>
+              <Field label={t("reg.field.host")} htmlFor="db-host" error={visible.host}>
                 <input
                   {...control("db-host", visible.host)}
                   className="mono"
@@ -193,7 +193,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setField("host")(e.target.value)}
                 />
               </Field>
-              <Field label="Port" htmlFor="db-port" error={visible.port}>
+              <Field label={t("reg.field.port")} htmlFor="db-port" error={visible.port}>
                 <input
                   {...control("db-port", visible.port)}
                   className="num"
@@ -203,7 +203,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setField("port")(e.target.value)}
                 />
               </Field>
-              <Field label="Database" htmlFor="db-database" error={visible.database}>
+              <Field label={t("reg.field.database")} htmlFor="db-database" error={visible.database}>
                 <input
                   {...control("db-database", visible.database)}
                   className="mono"
@@ -213,7 +213,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setField("database")(e.target.value)}
                 />
               </Field>
-              <Field label="Role" htmlFor="db-user" error={visible.user}>
+              <Field label={t("reg.field.user")} htmlFor="db-user" error={visible.user}>
                 <input
                   {...control("db-user", visible.user)}
                   className="mono"
@@ -224,7 +224,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
                   onChange={(e) => setField("user")(e.target.value)}
                 />
               </Field>
-              <Field label="Password" htmlFor="db-password" hint="Special characters are encoded for you.">
+              <Field label={t("reg.field.password")} htmlFor="db-password" hint={t("reg.hint.password")}>
                 <input
                   id="db-password"
                   type="password"
@@ -238,11 +238,7 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
           )}
 
           {needsSslChoice && (
-            <Field
-              label="TLS mode (sslmode)"
-              htmlFor="db-ssl"
-              hint="require encrypts; verify-full also checks the server certificate against its hostname."
-            >
+            <Field label={t("reg.field.ssl")} htmlFor="db-ssl" hint={t("reg.hint.ssl")}>
               <select id="db-ssl" value={sslMode} onChange={(e) => setSslMode(e.target.value as SslMode)}>
                 {SSL_MODES.map((m) => (
                   <option key={m} value={m}>
@@ -254,14 +250,14 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <aside className="guide" aria-label={`${info.label} instructions`} key={provider}>
+        <aside className="guide" aria-label={t("reg.guide.aria", { label: info.label })} key={provider}>
           <h4>
             <info.icon size={14} aria-hidden />
-            Where to find it — {info.label}
+            {t("reg.guide.title", { label: info.label })}
           </h4>
           <ol>
-            {info.steps.map((step) => (
-              <li key={step}>{step}</li>
+            {info.stepKeys.map((key) => (
+              <li key={key}>{t(key)}</li>
             ))}
           </ol>
         </aside>
@@ -271,8 +267,9 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
 
       {registered && (
         <InlineMessage tone="ok">
-          Registered “{registered.name}”
-          {registered.serverVersion && ` — PostgreSQL ${registered.serverVersion}`}.
+          {registered.serverVersion
+            ? t("reg.registeredWithVersion", { name: registered.name, version: registered.serverVersion })
+            : t("reg.registered", { name: registered.name })}
         </InlineMessage>
       )}
       {registered?.poolingWarning && (
@@ -284,10 +281,10 @@ export function RegisterDatabase({ onClose }: { onClose: () => void }) {
 
       <div className="form-actions">
         <Button type="submit" variant="primary" icon={PlugZap} loading={create.isPending}>
-          {create.isPending ? "Testing connection…" : "Test & register"}
+          {create.isPending ? t("reg.testing") : t("reg.test")}
         </Button>
         <Button variant="ghost" onClick={onClose} disabled={create.isPending}>
-          {registered ? "Done" : "Cancel"}
+          {registered ? t("common.done") : t("common.cancel")}
         </Button>
       </div>
     </form>

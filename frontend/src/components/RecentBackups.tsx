@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Cloud, CloudUpload, Download, History, LifeBuoy, Wrench } from "lucide-react";
 import { artifactDownloadPath, kitDownloadPath, presignedUrl, type Task } from "../api/client";
+import { useI18n } from "../i18n";
 import { errorMessage, humanBytes } from "../lib/format";
 import { overviewQuery, tasksQuery } from "../lib/queries";
 import { taskStatusMeta, verifyMeta } from "../lib/status";
@@ -16,6 +17,7 @@ import { SkeletonRows } from "./ui/Skeleton";
 const PAGE = 10;
 
 function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string }) {
+  const { t: tr } = useI18n();
   // The presigned URL is short-lived, so it is fetched on click, not up front.
   const bucket = useMutation({
     mutationFn: () => presignedUrl(t.id),
@@ -33,8 +35,8 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
       <div className="trow" role="row">
         <div className="cell cell-main" role="cell">
           <span className="num muted">#{t.id}</span>
-          <span className="db-name truncate">{databaseName ?? `database ${t.databaseId}`}</span>
-          {t.attempt > 1 && <span className="chip">attempt {t.attempt}</span>}
+          <span className="db-name truncate">{databaseName ?? tr("backups.dbFallback", { id: t.databaseId })}</span>
+          {t.attempt > 1 && <span className="chip">{tr("backups.attempt", { n: t.attempt })}</span>}
         </div>
         <div className="cell" role="cell">
           <StatusBadge meta={status} />
@@ -43,12 +45,12 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
           {verify && <StatusBadge meta={verify} />}
           {committed && (
             <Badge tone="info" icon={Cloud}>
-              remote
+              {tr("backups.badge.remote")}
             </Badge>
           )}
           {t.remoteState === "uploading" && (
             <Badge tone="neutral" icon={CloudUpload}>
-              uploading
+              {tr("backups.badge.uploading")}
             </Badge>
           )}
         </div>
@@ -61,17 +63,17 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
         <div className="cell cell-actions" role="cell">
           {t.status === "succeeded" && t.hasRecoveryKit && (
             <LinkButton variant="ghost" size="sm" icon={LifeBuoy} href={kitDownloadPath(t.id)} download={`restore-job${t.id}.sh`}>
-              Recovery kit
+              {tr("backups.kit")}
             </LinkButton>
           )}
           {t.status === "succeeded" && committed && (
             <Button variant="ghost" size="sm" icon={Cloud} loading={bucket.isPending} onClick={() => bucket.mutate()}>
-              Download (bucket)
+              {tr("backups.bucketDl")}
             </Button>
           )}
           {t.status === "succeeded" && !committed && (
             <LinkButton variant="ghost" size="sm" icon={Download} href={artifactDownloadPath(t.id)} download={`backup-job${t.id}.dump.age`}>
-              Download
+              {tr("backups.download")}
             </LinkButton>
           )}
         </div>
@@ -81,7 +83,8 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
           <Wrench size={13} aria-hidden />
           <div>
             <span className="remediation-title">
-              How to fix{t.errorClass ? <span className="chip">{t.errorClass}</span> : null}
+              {tr("backups.howToFix")}
+              {t.errorClass ? <span className="chip">{t.errorClass}</span> : null}
             </span>
             {t.errorMessage && <p className="mono text-danger">{t.errorMessage}</p>}
             {t.remediation && <p>{t.remediation}</p>}
@@ -90,7 +93,7 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
       )}
       {bucket.isError && (
         <div className="trow-extra">
-          <InlineMessage>Could not get a download link: {errorMessage(bucket.error)}</InlineMessage>
+          <InlineMessage>{tr("backups.linkError", { msg: errorMessage(bucket.error) })}</InlineMessage>
         </div>
       )}
     </div>
@@ -99,6 +102,7 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
 
 // Recent tasks with kit/artifact downloads (kit = Phase 5 recovery kit).
 export function RecentBackups() {
+  const { t } = useI18n();
   const tasks = useQuery(tasksQuery);
   const overview = useQuery(overviewQuery);
   const [showAll, setShowAll] = useState(false);
@@ -107,40 +111,41 @@ export function RecentBackups() {
   const visible = showAll ? list : list.slice(0, PAGE);
 
   return (
-    <Panel title="Recent backups" description="Newest first. Refreshes every 15s.">
+    <Panel title={t("backups.title")} description={t("backups.desc")}>
       {tasks.isPending && <SkeletonRows rows={4} />}
-      {tasks.isError && !tasks.data && <InlineMessage>Backups unavailable: {errorMessage(tasks.error)}</InlineMessage>}
+      {tasks.isError && !tasks.data && (
+        <InlineMessage>{t("backups.unavailable", { msg: errorMessage(tasks.error) })}</InlineMessage>
+      )}
       {tasks.data && list.length === 0 && (
-        <EmptyState icon={History} title="No backups yet">
-          Run “Back up now” on a database in the overview, or give it a cron schedule. Every run shows up here
-          with its verification result and downloads.
+        <EmptyState icon={History} title={t("backups.empty.title")}>
+          {t("backups.empty.body")}
         </EmptyState>
       )}
       {list.length > 0 && (
-        <div className="table table-tasks stagger" role="table" aria-label="Backup tasks">
+        <div className="table table-tasks stagger" role="table" aria-label={t("backups.aria")}>
           <div className="thead" role="row">
-            <span role="columnheader">Backup</span>
-            <span role="columnheader">Status</span>
-            <span role="columnheader">Checks</span>
+            <span role="columnheader">{t("backups.col.backup")}</span>
+            <span role="columnheader">{t("backups.col.status")}</span>
+            <span role="columnheader">{t("backups.col.checks")}</span>
             <span role="columnheader" className="cell-right">
-              Size
+              {t("backups.col.size")}
             </span>
             <span role="columnheader" className="cell-right">
-              When
+              {t("backups.col.when")}
             </span>
             <span role="columnheader" className="sr-only">
-              Downloads
+              {t("backups.col.downloads")}
             </span>
           </div>
-          {visible.map((t) => (
-            <TaskRow key={t.id} task={t} databaseName={names.get(t.databaseId)} />
+          {visible.map((task) => (
+            <TaskRow key={task.id} task={task} databaseName={names.get(task.databaseId)} />
           ))}
         </div>
       )}
       {list.length > PAGE && (
         <div className="panel-foot">
           <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)}>
-            {showAll ? `Show latest ${PAGE}` : `Show all ${list.length}`}
+            {showAll ? t("common.showLatest", { n: PAGE }) : t("common.showAll", { n: list.length })}
           </Button>
         </div>
       )}
