@@ -146,7 +146,7 @@ func (c *Config) TrustedProxyCIDRs() ([]*net.IPNet, error) {
 		return nil, nil
 	}
 	var out []*net.IPNet
-	for _, part := range strings.Split(c.TrustedProxies, ",") {
+	for part := range strings.SplitSeq(c.TrustedProxies, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

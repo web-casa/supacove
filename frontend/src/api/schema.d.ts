@@ -496,6 +496,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Aggregate backup statistics (Phase 8 dashboard). */
+        get: operations["getStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/overview": {
         parameters: {
             query?: never;
@@ -532,7 +549,7 @@ export interface components {
             paused: boolean;
             /** @description Dead-man switch URL (http/https). Empty inherits the process fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly disables the heartbeat for this database. */
             heartbeatUrl?: string;
-            /** @description Expected backup period for the dead-man switch; 0 disables the age gate. */
+            /** @description Expected backup period for the dead-man switch. 0 means success pings are NOT sent (without a period there are no silence semantics to vouch for); fail pings still fire. A heartbeatUrl (except the "-" disable marker) requires a positive period. */
             heartbeatPeriodHours: number;
             /** @description Extra tolerance added to the period before silence alarms. */
             heartbeatGraceHours: number;
@@ -628,6 +645,36 @@ export interface components {
             /** @description A cron schedule exists and the next fire time has passed. */
             scheduleDue?: boolean;
             maxAgeHours?: number;
+        };
+        StatsSummary: {
+            /** Format: int64 */
+            totalJobs: number;
+            /** Format: int64 */
+            succeeded: number;
+            /** Format: int64 */
+            failed: number;
+            /** Format: int64 */
+            canceled: number;
+            /** Format: double */
+            successRate: number;
+            /** Format: double */
+            avgDurationSecs?: number;
+            /**
+             * Format: int64
+             * @description Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
+             */
+            totalArtifactBytes: number;
+            /**
+             * Format: int64
+             * @description Newest known source database physical size summed over registered databases (volume metric 1; unknown sizes count as 0).
+             */
+            totalSourceBytes?: number;
+            /** Format: int64 */
+            lastSuccessAt?: number;
+            databases: number;
+            destinations: number;
+            /** Format: int64 */
+            uptimeSeconds?: number;
         };
         Overview: {
             databases: components["schemas"]["OverviewEntry"][];
@@ -789,6 +836,8 @@ export interface components {
             attempt: number;
             /** @enum {string} */
             errorClass?: "" | "network" | "auth" | "permission" | "client_version" | "disk" | "storage_upload" | "verification" | "unknown";
+            /** @description Operator-facing troubleshooting steps for the error class; present on failed tasks only. Never embeds job-specific data. */
+            remediation?: string;
             errorMessage?: string;
             artifactSha256?: string;
             /** Format: int64 */
@@ -2071,6 +2120,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationList"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    getStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statistics summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatsSummary"];
                 };
             };
             500: components["responses"]["Internal"];

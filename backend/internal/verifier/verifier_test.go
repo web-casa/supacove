@@ -305,7 +305,7 @@ func (s *pgStub) stopCalls() int {
 		return 0
 	}
 	n := 0
-	for _, line := range strings.Split(string(b), "\n") {
+	for line := range strings.SplitSeq(string(b), "\n") {
 		if strings.Contains(line, " stop") {
 			n++
 		}

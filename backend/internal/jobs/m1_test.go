@@ -168,7 +168,7 @@ func verifyRestoredContent(t *testing.T, verifyURI string) error {
 		}
 		var id int
 		fmt.Sscanf(parts[0], "%d", &id)
-		want := fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%d", id))))
+		want := fmt.Sprintf("%x", md5.Sum(fmt.Appendf(nil, "%d", id)))
 		if parts[1] != want {
 			return fmt.Errorf("content mismatch at id %d: got %q want %q", id, parts[1], want)
 		}
@@ -438,10 +438,8 @@ func TestConcurrentEnqueueExactlyOne(t *testing.T) {
 	var wg sync.WaitGroup
 	okCount, queuedCount := 0, 0
 	var mu sync.Mutex
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			_, err := runner.Enqueue(context.Background(), dbID)
 			mu.Lock()
 			defer mu.Unlock()
@@ -452,7 +450,7 @@ func TestConcurrentEnqueueExactlyOne(t *testing.T) {
 			} else {
 				t.Logf("unexpected enqueue error: %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if okCount != 1 || queuedCount != 7 {

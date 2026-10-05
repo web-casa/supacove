@@ -301,6 +301,10 @@ func taskToAPI(t *jobs.Task) api.Task {
 	if t.ErrorClass != "" {
 		ec := api.TaskErrorClass(t.ErrorClass)
 		out.ErrorClass = &ec
+		if t.Status == "failed" {
+			rem := jobs.RemediationFor(t.ErrorClass)
+			out.Remediation = &rem
+		}
 	}
 	if t.ErrorMessage != "" {
 		out.ErrorMessage = &t.ErrorMessage

@@ -167,6 +167,7 @@ function Dashboard({ user }: { user: User }) {
           Sign out
         </button>
       </div>
+      <StatsSection />
       <OverviewSection />
       <AddDatabaseSection />
       <TasksSection />
@@ -212,6 +213,34 @@ function ageHours(h: number): string {
   if (h < 1) return `${Math.round(h * 60)} min ago`;
   if (h < 48) return `${h.toFixed(1)} h ago`;
   return `${(h / 24).toFixed(1)} d ago`;
+}
+
+// Phase 8: the three volume metrics + segmented success rate.
+function StatsSection() {
+  const stats = useQuery({ queryKey: ["stats"], queryFn: api.stats, refetchInterval: 60_000 });
+  if (stats.isError || !stats.data) return null;
+  const d = stats.data;
+  const mb = (b?: number) => (b && b > 0 ? humanBytes(b) : "—");
+  return (
+    <div className="card">
+      <h1>Statistics</h1>
+      <div className="grid2">
+        <div className="kv"><span>Success rate</span><span>{d.successRate.toFixed(1)}% ({d.succeeded}/{d.totalJobs})</span></div>
+        <div className="kv"><span>Failed</span><span>{d.failed}</span></div>
+        <div className="kv"><span>Source DBs (newest known)</span><span>{mb(d.totalSourceBytes)}</span></div>
+        <div className="kv"><span>Encrypted archive total</span><span>{mb(d.totalArtifactBytes)}</span></div>
+        <div className="kv"><span>Last success</span><span>{d.lastSuccessAt ? new Date(d.lastSuccessAt * 1000).toLocaleString() : "never"}</span></div>
+        <div className="kv"><span>Avg duration</span><span>{d.avgDurationSecs ? `${d.avgDurationSecs.toFixed(1)}s` : "—"}</span></div>
+      </div>
+    </div>
+  );
+}
+
+function humanBytes(b: number): string {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 ** 2) return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 ** 3) return `${(b / 1024 ** 2).toFixed(1)} MB`;
+  return `${(b / 1024 ** 3).toFixed(2)} GB`;
 }
 
 function OverviewSection() {
@@ -478,6 +507,9 @@ function TasksSection() {
             {t.verifyStatus === "failed" && <span className="badge danger">verify failed</span>}
             {(t as { remoteState?: string }).remoteState === "committed" && <span className="badge">remote</span>}
           </div>
+          {t.status === "failed" && t.remediation && (
+            <div className="db-meta"><span className="muted">{t.remediation}</span></div>
+          )}
           <div className="db-actions">
             {t.status === "succeeded" && t.hasRecoveryKit && (
               <a className="secondary" href={kitDownloadPath(t.id)}>

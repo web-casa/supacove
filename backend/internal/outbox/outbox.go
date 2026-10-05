@@ -226,7 +226,7 @@ func (n *Notifier) recoverStuck(ctx context.Context) {
 // so concurrent passes cannot double-deliver.
 func (n *Notifier) deliverDue(ctx context.Context) {
 	n.recoverExpiredLeases(ctx)
-	for batch := 0; batch < 10; batch++ {
+	for range 10 {
 		claimed, err := n.claimOne(ctx)
 		if err != nil {
 			n.log.Error("outbox claim failed", "err", err)
@@ -417,7 +417,7 @@ func (n *Notifier) targets(ctx context.Context, eventType string) ([]WebhookTarg
 		if err := rows.Scan(&t.ID, &t.Name, &t.URL, &t.Events); err != nil {
 			return nil, err
 		}
-		for _, ev := range strings.Split(t.Events, ",") {
+		for ev := range strings.SplitSeq(t.Events, ",") {
 			if strings.TrimSpace(ev) == eventType {
 				out = append(out, t)
 				break

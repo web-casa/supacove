@@ -123,3 +123,30 @@ button.secondary {
 .kv span:first-child {
   color: var(--muted);
 }
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 1rem;
+}
+
+.warning {
+  color: #fbbf24;
+  font-size: 0.8125rem;
+  margin: 0.5rem 0;
+}
+
+.check-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.error-inline {
+  color: var(--danger);
+  font-size: 0.8125rem;
+}
+
+.danger-btn {
+  color: var(--danger);
+}

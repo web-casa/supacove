@@ -70,9 +70,7 @@ func (r *Runner) SetVerifyTimeout(d time.Duration) {
 // Start() after the runner lifetime context exists; the worker joins the
 // runner WaitGroup so Stop waits for it (P1-06).
 func (r *Runner) startVerifyWorker(lifeCtx context.Context) {
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
+	r.wg.Go(func() {
 		for {
 			select {
 			case <-lifeCtx.Done():
@@ -81,7 +79,7 @@ func (r *Runner) startVerifyWorker(lifeCtx context.Context) {
 				r.runVerification(lifeCtx, req)
 			}
 		}
-	}()
+	})
 }
 
 // initialVerifyState returns the verification state a freshly succeeded job

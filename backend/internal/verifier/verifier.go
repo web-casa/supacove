@@ -610,7 +610,7 @@ func (v *Verifier) missingExtensions(ctx context.Context, env []string, sockDir 
 		return nil, err
 	}
 	available := make(map[string]bool)
-	for _, name := range strings.Split(out, "\n") {
+	for name := range strings.SplitSeq(out, "\n") {
 		available[strings.TrimSpace(name)] = true
 	}
 	var missing []string
@@ -632,7 +632,7 @@ func (v *Verifier) missingInstalledExtensions(ctx context.Context, env []string,
 		return nil, err
 	}
 	installed := make(map[string]bool)
-	for _, name := range strings.Split(out, "\n") {
+	for name := range strings.SplitSeq(out, "\n") {
 		installed[strings.TrimSpace(name)] = true
 	}
 	var missing []string

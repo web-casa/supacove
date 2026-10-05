@@ -9,7 +9,7 @@ import (
 func TestLimiterLockoutFlow(t *testing.T) {
 	l := New()
 	key := "1.2.3.4"
-	for i := 0; i < lockoutAfter-1; i++ {
+	for i := range lockoutAfter - 1 {
 		if !l.Allow(key) {
 			t.Fatalf("attempt %d must be allowed", i)
 		}
@@ -35,7 +35,7 @@ func TestLimiterLockoutFlow(t *testing.T) {
 func TestLimiterCapacityDoesNotDropNewAttempt(t *testing.T) {
 	l := New()
 	// Fill the table to its hard limit with recently-seen keys.
-	for i := 0; i < maxKeys; i++ {
+	for i := range maxKeys {
 		k := fmt.Sprintf("10.0.%d.%d", i/256, i%256)
 		if !l.Allow(k) {
 			t.Fatalf("seed key %d must be allowed", i)
@@ -43,7 +43,7 @@ func TestLimiterCapacityDoesNotDropNewAttempt(t *testing.T) {
 	}
 	// One more key must still be tracked: its per-window quota is enforced.
 	fresh := "9.9.9.9"
-	for i := 0; i < maxPerWindow; i++ {
+	for i := range maxPerWindow {
 		if !l.Allow(fresh) {
 			t.Fatalf("fresh key attempt %d must be allowed", i)
 		}
@@ -58,7 +58,7 @@ func TestLimiterWindowRollover(t *testing.T) {
 	now := time.Now()
 	l.now = func() time.Time { return now }
 	key := "k"
-	for i := 0; i < maxPerWindow; i++ {
+	for i := range maxPerWindow {
 		if !l.Allow(key) {
 			t.Fatalf("attempt %d must be allowed", i)
 		}
@@ -77,7 +77,7 @@ func TestLimiterLockoutExpiry(t *testing.T) {
 	now := time.Now()
 	l.now = func() time.Time { return now }
 	key := "k"
-	for i := 0; i < lockoutAfter; i++ {
+	for i := range lockoutAfter {
 		if !l.Allow(key) {
 			t.Fatalf("attempt %d must be allowed", i)
 		}

@@ -63,7 +63,7 @@ func requireMinIO(t *testing.T) *Store {
 			}
 			// Create the bucket via the S3 API (MinIO starts empty).
 			if _, err := store.client.CreateBucket(context.Background(), &s3.CreateBucketInput{
-				Bucket: awsString("sb-test"),
+				Bucket: new("sb-test"),
 			}); err == nil {
 				minioClient = store
 				minioAddr = addr
@@ -92,7 +92,8 @@ var (
 	minioStopped   bool
 )
 
-func awsString(v string) *string { return &v }
+//go:fix inline
+func awsString(v string) *string { return new(v) }
 
 func TestMinIOEndToEnd(t *testing.T) {
 	s := requireMinIO(t)

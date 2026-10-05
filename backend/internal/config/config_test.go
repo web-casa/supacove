@@ -15,7 +15,7 @@ func TestLoadOrCreateSecretAtomicCreation(t *testing.T) {
 	const n = 16
 	keys := make([][]byte, n)
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -86,7 +86,7 @@ func TestLoadOrCreateSecretRoundtrip(t *testing.T) {
 
 func repeat(s string, n int) string {
 	out := make([]byte, 0, len(s)*n)
-	for i := 0; i < n; i++ {
+	for range n {
 		out = append(out, s...)
 	}
 	return string(out)

@@ -56,6 +56,11 @@ type Dependencies struct {
 	// (phase-5 review P1-08): a restore that completes without error but
 	// loses tables must NOT be reported as verified.
 	TableCount int64 `json:"tableCount"`
+	// SourceDBBytes is the physical size of the source database
+	// (pg_database_size) at collection time — the first of the three volume
+	// metrics (dev-plan §0; measured口径: reported by the server, NOT
+	// derived from the archive). 0 = unknown.
+	SourceDBBytes int64 `json:"sourceDBBytes"`
 }
 
 // CollectDependencies gathers the restore-relevant facts recorded in the
@@ -111,6 +116,10 @@ func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error
 		Scan(&d.TableCount); err != nil {
 		return nil, ClassifyError(err)
 	}
+	// Physical size of the source database (best effort: a permission error
+	// here must not fail the backup; 0 = unknown).
+	_ = conn.QueryRow(ctx, `SELECT pg_database_size(current_database())`).
+		Scan(&d.SourceDBBytes)
 
 	// Shared dependency roles: relation owners, routine owners, schema owners,
 	// ACL grantees and default-ACL privileges.
@@ -157,11 +166,42 @@ func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error
 }
 
 // SanitizeMessage is the shared credential scrubber for stored error text.
+// Beyond rewriting URI schemes, the VALUE after a `password=` keyword is
+// redacted too (phase-8 secret-canary finding: the old replacer kept the
+// actual secret body — `password=[REDACTED]hunter2` still leaked `hunter2`).
 func SanitizeMessage(msg string) string {
 	r := strings.NewReplacer(
-		"password=", "password=[REDACTED]",
 		"postgres://", "postgres-uri://[REDACTED]",
 		"postgresql://", "postgres-uri://[REDACTED]",
 	)
-	return r.Replace(msg)
+	msg = r.Replace(msg)
+	return redactKeywordValues(msg)
+}
+
+// redactKeywordValues replaces everything after each case-insensitive
+// occurrence of "password=" (up to the next delimiter) with [REDACTED].
+func redactKeywordValues(msg string) string {
+	const replacement = "[REDACTED]"
+	const needleLower = "password="
+	out := msg
+	searchFrom := 0
+	for {
+		i := strings.Index(strings.ToLower(out[searchFrom:]), needleLower)
+		if i < 0 {
+			return out
+		}
+		start := searchFrom + i + len(needleLower)
+		end := start
+		for end < len(out) {
+			c := out[end]
+			if c == ' ' || c == '\t' || c == '\'' || c == '"' || c == ',' || c == ')' || c == ']' {
+				break
+			}
+			end++
+		}
+		out = out[:start] + replacement + out[end:]
+		// Continue after the replacement (its text contains the prefix, so
+		// skip past it to avoid an infinite loop).
+		searchFrom = start + len(replacement)
+	}
 }

@@ -410,7 +410,7 @@ type ScheduleConfig struct {
 	// HeartbeatGraceHours Extra tolerance added to the period before silence alarms.
 	HeartbeatGraceHours int `json:"heartbeatGraceHours"`
 
-	// HeartbeatPeriodHours Expected backup period for the dead-man switch; 0 disables the age gate.
+	// HeartbeatPeriodHours Expected backup period for the dead-man switch. 0 means success pings are NOT sent (without a period there are no silence semantics to vouch for); fail pings still fire. A heartbeatUrl (except the "-" disable marker) requires a positive period.
 	HeartbeatPeriodHours int `json:"heartbeatPeriodHours"`
 
 	// HeartbeatUrl Dead-man switch URL (http/https). Empty inherits the process fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly disables the heartbeat for this database.
@@ -436,6 +436,26 @@ type ScheduleUpdate struct {
 	Paused       *bool   `json:"paused,omitempty"`
 }
 
+// StatsSummary defines model for StatsSummary.
+type StatsSummary struct {
+	AvgDurationSecs *float64 `json:"avgDurationSecs,omitempty"`
+	Canceled        int64    `json:"canceled"`
+	Databases       int      `json:"databases"`
+	Destinations    int      `json:"destinations"`
+	Failed          int64    `json:"failed"`
+	LastSuccessAt   *int64   `json:"lastSuccessAt,omitempty"`
+	Succeeded       int64    `json:"succeeded"`
+	SuccessRate     float64  `json:"successRate"`
+
+	// TotalArtifactBytes Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
+	TotalArtifactBytes int64 `json:"totalArtifactBytes"`
+	TotalJobs          int64 `json:"totalJobs"`
+
+	// TotalSourceBytes Newest known source database physical size summed over registered databases (volume metric 1; unknown sizes count as 0).
+	TotalSourceBytes *int64 `json:"totalSourceBytes,omitempty"`
+	UptimeSeconds    *int64 `json:"uptimeSeconds,omitempty"`
+}
+
 // Task defines model for Task.
 type Task struct {
 	ArtifactSha256  *string         `json:"artifactSha256,omitempty"`
@@ -454,6 +474,9 @@ type Task struct {
 
 	// Platform Auto-detected source platform (drives the recovery kit).
 	Platform *TaskPlatform `json:"platform,omitempty"`
+
+	// Remediation Operator-facing troubleshooting steps for the error class; present on failed tasks only. Never embeds job-specific data.
+	Remediation *string `json:"remediation,omitempty"`
 
 	// RemoteState Protocol C remote-commit state (empty = local-only).
 	RemoteState *TaskRemoteState `json:"remoteState,omitempty"`
@@ -665,6 +688,9 @@ type ServerInterface interface {
 	// Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 	// (GET /ready)
 	GetReady(w http.ResponseWriter, r *http.Request)
+	// Aggregate backup statistics (Phase 8 dashboard).
+	// (GET /stats)
+	GetStats(w http.ResponseWriter, r *http.Request)
 	// Recent jobs across all databases (newest first).
 	// (GET /tasks)
 	ListTasks(w http.ResponseWriter, r *http.Request)
@@ -842,6 +868,12 @@ func (_ Unimplemented) GetOverview(w http.ResponseWriter, r *http.Request) {
 // Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 // (GET /ready)
 func (_ Unimplemented) GetReady(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Aggregate backup statistics (Phase 8 dashboard).
+// (GET /stats)
+func (_ Unimplemented) GetStats(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1512,6 +1544,26 @@ func (siw *ServerInterfaceWrapper) GetReady(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// GetStats operation middleware
+func (siw *ServerInterfaceWrapper) GetStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStats(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTasks operation middleware
 func (siw *ServerInterfaceWrapper) ListTasks(w http.ResponseWriter, r *http.Request) {
 
@@ -1962,6 +2014,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/ready", wrapper.GetReady)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/stats", wrapper.GetStats)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/tasks", wrapper.ListTasks)
@@ -2977,6 +3032,31 @@ func (response GetReady503JSONResponse) VisitGetReadyResponse(w http.ResponseWri
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetStatsRequestObject struct {
+}
+
+type GetStatsResponseObject interface {
+	VisitGetStatsResponse(w http.ResponseWriter) error
+}
+
+type GetStats200JSONResponse StatsSummary
+
+func (response GetStats200JSONResponse) VisitGetStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetStats500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetStats500JSONResponse) VisitGetStatsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListTasksRequestObject struct {
 }
 
@@ -3427,6 +3507,9 @@ type StrictServerInterface interface {
 	// Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 	// (GET /ready)
 	GetReady(ctx context.Context, request GetReadyRequestObject) (GetReadyResponseObject, error)
+	// Aggregate backup statistics (Phase 8 dashboard).
+	// (GET /stats)
+	GetStats(ctx context.Context, request GetStatsRequestObject) (GetStatsResponseObject, error)
 	// Recent jobs across all databases (newest first).
 	// (GET /tasks)
 	ListTasks(ctx context.Context, request ListTasksRequestObject) (ListTasksResponseObject, error)
@@ -4128,6 +4211,30 @@ func (sh *strictHandler) GetReady(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReadyResponseObject); ok {
 		if err := validResponse.VisitGetReadyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetStats operation middleware
+func (sh *strictHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	var request GetStatsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetStats(ctx, request.(GetStatsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetStats")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetStatsResponseObject); ok {
+		if err := validResponse.VisitGetStatsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

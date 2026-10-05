@@ -61,11 +61,13 @@ type Webhook = WebhookList["webhooks"][number];
 type WebhookCreate = operations["createWebhook"]["requestBody"]["content"]["application/json"];
 type WebhookTest = operations["testWebhook"]["responses"]["200"]["content"]["application/json"];
 type NotificationList = operations["listNotifications"]["responses"]["200"]["content"]["application/json"];
+type StatsSummary = operations["getStats"]["responses"]["200"]["content"]["application/json"];
 
 export type {
   Overview,
   OverviewEntry,
   Task,
+  StatsSummary,
   WebhookList,
   Database,
   DatabaseCreate,
@@ -127,6 +129,7 @@ export const api = {
   testWebhook: (body: WebhookCreate) =>
     request<WebhookTest>("/api/webhooks/test", { method: "POST", body: JSON.stringify(body) }),
   notifications: () => request<NotificationList>("/api/notifications"),
+  stats: () => request<StatsSummary>("/api/stats"),
 };
 
 // Kit and artifact downloads are same-origin GETs carrying the session

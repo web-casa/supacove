@@ -247,7 +247,7 @@ func TestLoginRateLimit(t *testing.T) {
 	env.bootstrapAdmin(t)
 
 	saw429 := false
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		code, _ := postJSON(t, env, "/api/auth/login", map[string]string{
 			"username": "admin", "password": fmt.Sprintf("wrong-password-%d", i),
 		})
@@ -278,7 +278,7 @@ func TestLoginRateLimitIgnoresUntrustedForwardedHeaders(t *testing.T) {
 
 	attempts := 0
 	saw429 := false
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		hdrs := map[string]string{
 			"X-Forwarded-For": fmt.Sprintf("203.0.113.%d", i),
 			"X-Real-IP":       fmt.Sprintf("198.51.100.%d", i),

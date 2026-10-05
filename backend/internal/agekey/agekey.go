@@ -39,7 +39,7 @@ func Fingerprint(recipient string) string {
 // non-comment line is the key.
 func ParseIdentity(identity string) (*age.X25519Identity, error) {
 	var line string
-	for _, l := range strings.Split(strings.TrimSpace(identity), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(identity), "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "#") {
 			continue

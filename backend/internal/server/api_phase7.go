@@ -385,3 +385,70 @@ func (s *Server) testWebhookDelivery(ctx context.Context, url, eventType, eventI
 	}
 	return true, ""
 }
+
+// GetStats serves the Phase-8 dashboard statistics: job outcomes, success
+// rate, the three volume metrics (source DB physical size, dump archive,
+// age ciphertext), and entity counts. The source-size total sums the NEWEST
+// known value per database (older backups of the same database would double
+// count a size that only has a current meaning).
+func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) (api.GetStatsResponseObject, error) {
+	var total, succeeded, failed, canceled int64
+	var avgDur float64
+	var totalArtifact int64
+	err := a.srv.store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 END), 0),
+		       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 END), 0),
+		       COALESCE(SUM(CASE WHEN status = 'canceled' THEN 1 END), 0),
+		       COALESCE(AVG(CASE WHEN status = 'succeeded' THEN duration_secs END), 0),
+		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN artifact_size END), 0)
+		FROM jobs WHERE status NOT IN ('pending','running')`).
+		Scan(&total, &succeeded, &failed, &canceled, &avgDur, &totalArtifact)
+	if err != nil {
+		a.srv.log.Error("stats query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
+	}
+	successRate := 0.0
+	if total > 0 {
+		successRate = float64(succeeded) / float64(total) * 100
+	}
+
+	var lastSuccess int64
+	_ = a.srv.store.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(finished_at),0) FROM jobs WHERE status = 'succeeded'`).Scan(&lastSuccess)
+
+	var dbCount, destCount int
+	_ = a.srv.store.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM databases WHERE deleted_at IS NULL`).Scan(&dbCount)
+	_ = a.srv.store.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM destinations WHERE deleted_at IS NULL`).Scan(&destCount)
+
+	// Newest KNOWN physical size per database (0 = never measured).
+	var totalSource int64
+	_ = a.srv.store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(sz), 0) FROM (
+		    SELECT source_db_bytes AS sz FROM jobs j
+		    WHERE j.status = 'succeeded' AND j.source_db_bytes > 0
+		      AND j.id = (SELECT MAX(j2.id) FROM jobs j2
+		                  WHERE j2.database_id = j.database_id AND j2.status = 'succeeded'
+		                    AND j2.source_db_bytes > 0)
+		)`).Scan(&totalSource)
+
+	avg := avgDur
+	last := lastSuccess
+	uptime := int64(time.Since(a.srv.started).Seconds())
+	return api.GetStats200JSONResponse{
+		TotalJobs:          total,
+		Succeeded:          succeeded,
+		Failed:             failed,
+		Canceled:           canceled,
+		SuccessRate:        successRate,
+		AvgDurationSecs:    &avg,
+		TotalArtifactBytes: totalArtifact,
+		TotalSourceBytes:   &totalSource,
+		LastSuccessAt:      &last,
+		Databases:          dbCount,
+		Destinations:       destCount,
+		UptimeSeconds:      &uptime,
+	}, nil
+}

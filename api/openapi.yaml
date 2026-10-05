@@ -867,6 +867,19 @@ paths:
                 $ref: "#/components/schemas/NotificationList"
         "500":
           $ref: "#/components/responses/Internal"
+  /stats:
+    get:
+      operationId: getStats
+      summary: Aggregate backup statistics (Phase 8 dashboard).
+      responses:
+        "200":
+          description: The statistics summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsSummary"
+        "500":
+          $ref: "#/components/responses/Internal"
   /overview:
     get:
       operationId: getOverview
@@ -1093,6 +1106,46 @@ components:
           description: A cron schedule exists and the next fire time has passed.
         maxAgeHours:
           type: integer
+    StatsSummary:
+      type: object
+      required: [totalJobs, succeeded, failed, canceled, successRate, totalArtifactBytes, databases, destinations]
+      properties:
+        totalJobs:
+          type: integer
+          format: int64
+        succeeded:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        canceled:
+          type: integer
+          format: int64
+        successRate:
+          type: number
+          format: double
+        avgDurationSecs:
+          type: number
+          format: double
+        totalArtifactBytes:
+          type: integer
+          format: int64
+          description: Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
+        totalSourceBytes:
+          type: integer
+          format: int64
+          description: Newest known source database physical size summed over registered databases (volume metric 1; unknown sizes count as 0).
+        lastSuccessAt:
+          type: integer
+          format: int64
+        databases:
+          type: integer
+        destinations:
+          type: integer
+        uptimeSeconds:
+          type: integer
+          format: int64
     Overview:
       type: object
       required: [databases]
@@ -1391,6 +1444,11 @@ components:
         errorClass:
           type: string
           enum: ["", network, auth, permission, client_version, disk, storage_upload, verification, unknown]
+        remediation:
+          type: string
+          description: >
+            Operator-facing troubleshooting steps for the error class;
+            present on failed tasks only. Never embeds job-specific data.
         errorMessage:
           type: string
         artifactSha256:

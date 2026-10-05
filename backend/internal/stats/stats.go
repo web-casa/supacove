@@ -26,15 +26,20 @@ func (r *Recorder) Record(ctx context.Context, entry Entry) error {
 		entry.JobID, entry.DatabaseName, entry.DumpSize, entry.ArtifactSize,
 		entry.DurationSecs, entry.VerifyStatus, entry.VerifyTables,
 		btoi(entry.RemoteCommitted))
+	// Volume metric 1 lives on the authoritative jobs row (the stats table is
+	// a dashboard snapshot; the overview reads jobs.source_db_bytes directly).
 	return err
 }
 
 // Entry is one backup's recorded metrics.
 type Entry struct {
-	JobID           int64
+	JobID int64
+	// SourceDBBytes is volume metric 1 (dev-plan §0): the source database's
+	// physical size as reported by the server at dump time. 0 = unknown.
+	SourceDBBytes   int64
 	DatabaseName    string
-	DumpSize        int64
-	ArtifactSize    int64
+	DumpSize        int64 // volume metric 2 (pg_dump archive, compressed)
+	ArtifactSize    int64 // volume metric 3 (age ciphertext)
 	DurationSecs    float64
 	VerifyStatus    string
 	VerifyTables    int64

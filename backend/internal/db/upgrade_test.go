@@ -406,8 +406,19 @@ func TestWebhookVocabularyDownUpCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.Down(context.Background()); err != nil {
-		t.Fatalf("down: %v", err)
+	// Roll back until 0014 is undone (newer migrations may exist above it —
+	// e.g. 0015 source_db_bytes added later in the same release train).
+	for {
+		var v int64
+		if err := ro.QueryRow(`SELECT COALESCE(MAX(version_id),0) FROM goose_db_version WHERE is_applied=1`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		if v < 14 {
+			break // 0014 undone (and everything above it)
+		}
+		if _, err := provider.Down(context.Background()); err != nil {
+			t.Fatalf("down from %d: %v", v, err)
+		}
 	}
 	if got := eventsAt(); got != "failure,expired" {
 		t.Fatalf("after Down: %q, want restored legacy vocabulary", got)
@@ -436,7 +447,7 @@ func TestLegacyDuplicateWebhookNamesSurvive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := ro.Exec(
 			`INSERT INTO webhooks (name, url, events, created_at) VALUES ('dup', 'https://old.example/h', 'failure', 0)`); err != nil {
 			t.Fatal(err)
@@ -574,8 +585,17 @@ func TestWebhookVocabularyAllCombinationsCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.Down(context.Background()); err != nil {
-		t.Fatalf("down: %v", err)
+	for {
+		var v int64
+		if err := ro.QueryRow(`SELECT COALESCE(MAX(version_id),0) FROM goose_db_version WHERE is_applied=1`).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		if v < 14 {
+			break // 0014 undone (and everything above it)
+		}
+		if _, err := provider.Down(context.Background()); err != nil {
+			t.Fatalf("down from %d: %v", v, err)
+		}
 	}
 	afterDown := readAll()
 	for _, c := range all {
@@ -591,7 +611,7 @@ func TestWebhookVocabularyAllCombinationsCycle(t *testing.T) {
 			}
 		}
 		var parts []string
-		for _, e := range strings.Split(afterDown[c.name], ",") {
+		for e := range strings.SplitSeq(afterDown[c.name], ",") {
 			parts = append(parts, e)
 		}
 		if len(parts) != len(want) {

@@ -408,9 +408,7 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 func (r *Runner) Start(parent context.Context) {
 	r.startOnce.Do(func() {
 		r.lifeCtx, r.lifeCancel = context.WithCancel(parent)
-		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
+		r.wg.Go(func() {
 			for {
 				select {
 				case <-r.lifeCtx.Done():
@@ -422,18 +420,16 @@ func (r *Runner) Start(parent context.Context) {
 					// drain queued jobs one by one (global concurrency = 1)
 				}
 			}
-		}()
+		})
 		if r.verifier != nil {
 			r.startVerifyWorker(r.lifeCtx)
 		}
 		// The startup sweep runs even without a verifier: it settles stale
 		// pending/running states to an explicit skip in that case. It joins
 		// the WaitGroup, so Stop waits for its writes (round-2 P1-06/P2-02).
-		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
+		r.wg.Go(func() {
 			r.ResumePendingVerifications(r.lifeCtx)
-		}()
+		})
 	})
 }
 
@@ -518,7 +514,7 @@ func (r *Runner) Cancel(jobID int64) error {
 	go func() {
 		tick := time.NewTicker(50 * time.Millisecond)
 		defer tick.Stop()
-		for i := 0; i < 40; i++ {
+		for range 40 {
 			select {
 			case <-lc.Done():
 				return
@@ -784,7 +780,8 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		DumpStartedAt: dumpStart,
 		FinishedAt:    now,
 		Database:      manifest.Database{Name: name, Platform: platform, EnvTag: envTag},
-		Source:        manifest.Source{Host: ci.Host, Port: ci.Port, DBName: ci.DBName, ServerVersion: test.ServerVersion},
+		Source: manifest.Source{Host: ci.Host, Port: ci.Port, DBName: ci.DBName, ServerVersion: test.ServerVersion,
+			PhysicalSizeBytes: deps.SourceDBBytes},
 		Backup: manifest.Backup{
 			Mode: "full", Format: "pg_dump custom (-Fc)",
 			Compression:  "zlib/gzip (custom-format default; algorithm set by the pg_dump build)",
@@ -864,18 +861,18 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	successSQL := `
 		UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
 		  artifact_path = ?, artifact_sha256 = ?, artifact_size = ?, manifest_path = ?,
-		  platform = ?, verify_status = ?, verify_detail = ?
+		  platform = ?, verify_status = ?, verify_detail = ?, source_db_bytes = ?
 		WHERE id = ? AND status = 'running' AND cancel_requested = 0`
 	res, err := r.authDB.Exec(successSQL,
 		result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath,
-		string(detectedPlatform), verifyStatus, verifyDetail, jobID)
+		string(detectedPlatform), verifyStatus, verifyDetail, deps.SourceDBBytes, jobID)
 	if err != nil {
 		// SQLITE_BUSY/ENOSPC here would leave a committed artifact with a
 		// 'running' job — bounded retry, then a loud failure record.
 		time.Sleep(500 * time.Millisecond)
 		res, err = r.authDB.Exec(successSQL,
 			result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath,
-			string(detectedPlatform), verifyStatus, verifyDetail, jobID)
+			string(detectedPlatform), verifyStatus, verifyDetail, deps.SourceDBBytes, jobID)
 	}
 	if err != nil {
 		r.log.Error("job success update failed twice", "job", jobID, "err", err)
@@ -938,7 +935,8 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		dumpSz := result.SizeBytes
 		if err := r.statsRecorder.Record(ctx, stats.Entry{
 			JobID: jobID, DatabaseName: name,
-			DumpSize: dumpSz, ArtifactSize: result.SizeBytes,
+			SourceDBBytes: deps.SourceDBBytes,
+			DumpSize:      dumpSz, ArtifactSize: result.SizeBytes,
 			DurationSecs: time.Since(dumpStart).Seconds(),
 			VerifyStatus: verifyStatus,
 		}); err != nil {

@@ -39,6 +39,10 @@ type Source struct {
 	Port          string `json:"port,omitempty"`
 	DBName        string `json:"dbname"`
 	ServerVersion string `json:"serverVersion"`
+	// PhysicalSizeBytes is the source database's reported physical size at
+	// dump time (pg_database_size; 0 = unknown). Measured by the server —
+	// NOT derived from the archive (dev-plan §0 volume metrics).
+	PhysicalSizeBytes int64 `json:"physicalSizeBytes,omitempty"`
 }
 
 type ToolVersions struct {

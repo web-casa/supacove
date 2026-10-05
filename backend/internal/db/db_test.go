@@ -227,9 +227,7 @@ func TestBackupSnapshotUnderConcurrentWrites(t *testing.T) {
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -240,7 +238,7 @@ func TestBackupSnapshotUnderConcurrentWrites(t *testing.T) {
 					fmt.Sprintf("writer-%d", i), i)
 			}
 		}
-	}()
+	})
 	time.Sleep(100 * time.Millisecond)
 	dest, err := s.BackupNow(ctx, "concurrent")
 	close(stop)
@@ -359,7 +357,7 @@ func TestMigrateNoPendingDoesNotCreateOrPruneBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := s.Migrate(ctx); err != nil {
 			t.Fatalf("restart migrate %d: %v", i, err)
 		}

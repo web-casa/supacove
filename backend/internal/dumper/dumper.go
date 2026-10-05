@@ -406,9 +406,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	stderrData := make([]byte, 0, stderrKeep)
 	stderrMu := sync.Mutex{}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		encErr = agekey.EncryptStream(t.Recipient, dumpOut, encTarget)
 		if encErr != nil {
 			// Consumer failure: make sure no process-group member keeps the
@@ -426,11 +424,9 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 		// On SUCCESS: no kill. pg_dump closed its stdout and is finishing
 		// its shutdown; killing here would turn a clean dump into
 		// "signal: killed" (found by the M1 gate).
-	}()
+	})
 	stderrTruncated := false
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		// Drain to EOF ALWAYS; retain only the first stderrKeep bytes. The
 		// truncated flag is set whenever total exceeds the cap — read
 		// segmentation must not affect it (round-13 review: a read landing
@@ -463,7 +459,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 				return
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 	// Wait with a bounded grace period: pg_dump normally exits right after

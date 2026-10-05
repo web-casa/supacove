@@ -233,10 +233,10 @@ func (p *phase3Runner) seedCommittedJob(t *testing.T, dbID, destID int64, status
 	_ = os.MkdirAll(filepath.Join(p.dataDir, "staging"), 0o700)
 	manifest := filepath.Join(p.dataDir, "staging", fmt.Sprintf("backup-job%d.dump.age.manifest.json", jobID))
 	artifact := filepath.Join(p.dataDir, "staging", fmt.Sprintf("backup-job%d.dump.age", jobID))
-	if err := osWriteFile(artifact, []byte(fmt.Sprintf("CIPHERTEXT-%d", jobID)), 0o600); err != nil {
+	if err := osWriteFile(artifact, fmt.Appendf(nil, "CIPHERTEXT-%d", jobID), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := osWriteFile(manifest, []byte(fmt.Sprintf(`{"backupId":"job-%d"}`, jobID)), 0o600); err != nil {
+	if err := osWriteFile(manifest, fmt.Appendf(nil, `{"backupId":"job-%d"}`, jobID), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	data, rerr := os.ReadFile(artifact)
@@ -329,7 +329,7 @@ func TestUploadProtocolCCommittedPipeline(t *testing.T) {
 		artifactSize:  int64(len(data)),
 		sha256Hex:     sha256Of(data),
 		manifestPath:  manifest,
-		manifestBytes: []byte(fmt.Sprintf(`{"backupId":"job-%d"}`, jobID)),
+		manifestBytes: fmt.Appendf(nil, `{"backupId":"job-%d"}`, jobID),
 	}
 	if err := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload, dest); err != nil {
 		t.Fatalf("uploadAndCommitRemote: %v", err)

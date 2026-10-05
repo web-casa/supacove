@@ -54,7 +54,7 @@ func TestExcerptOfPercentEncodingMatrix(t *testing.T) {
 	pw := `p@ss/word~x-y_z`
 	encAll := make([]byte, 0, len(pw)*3)
 	for i := 0; i < len(pw); i++ {
-		encAll = append(encAll, []byte(fmt.Sprintf("%%%02X", pw[i]))...)
+		encAll = append(encAll, fmt.Appendf(nil, "%%%02X", pw[i])...)
 	}
 	encPartial := "p%40ss%2Fword~x-y_z"
 	for _, form := range []string{string(encAll), encPartial} {

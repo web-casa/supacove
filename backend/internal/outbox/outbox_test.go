@@ -33,7 +33,7 @@ func TestEnqueueDedup(t *testing.T) {
 	db := testOpen(t)
 	ctx := context.Background()
 	now := time.Now()
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if err := Enqueue(ctx, db, testEvent("evt-1"), now); err != nil {
 			t.Fatal(err)
 		}
