@@ -194,8 +194,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 		s.log.Info("backup scheduled", "database", sch.Name, "cron", sch.CronExpr, "tz", sch.CronTZ)
 	}
 
-	// Failure webhook: check for recently failed jobs
-	s.checkFailures(ctx)
+	// Durable notification reconciliation (see reconcileNotifications).
+	s.reconcileNotifications(ctx)
 }
 
 // DueNow reports whether a cron expression's next fire time (from the last
@@ -315,58 +315,105 @@ func (s *Scheduler) loadSchedules(ctx context.Context) []ScheduleInfo {
 	return out
 }
 
-// checkFailures fires failure webhooks for recently failed jobs.
-func (s *Scheduler) checkFailures(ctx context.Context) {
-	// Round-4 review P1-03: SQLite strftime needs the unit in the modifier.
-	cutoff := time.Now().Add(-5 * time.Minute).Unix()
+// reconcileNotifications is the DURABLE compensation net (round-1 review
+// P1-03): every failed job and every failed/unsupported verification WITHOUT
+// an outbox row gets one enqueued — no time window, event_id dedup makes it
+// idempotent. It covers INSERT failures inside jobs.fail (whose fallback
+// path skips the notification), crash-between-writes windows, and pre-outbox
+// upgrade rows.
+func (s *Scheduler) reconcileNotifications(ctx context.Context) {
+	const batch = 200
+	// Backup failures.
 	rows, err := s.store.QueryContext(ctx, `
-		SELECT id, database_id, error_class, error_message
-		FROM jobs
-		WHERE status = 'failed'
-		  AND finished_at > ?
-		ORDER BY id DESC LIMIT 10`, cutoff)
+		SELECT j.id, j.database_id, COALESCE(d.name, ''), COALESCE(j.error_class,''), COALESCE(j.error_message,'')
+		FROM jobs j
+		LEFT JOIN databases d ON d.id = j.database_id
+		WHERE j.status = 'failed'
+		  AND NOT EXISTS (SELECT 1 FROM notification_outbox o
+		                  WHERE o.event_id = 'backup_failed:job:' || j.id)
+		ORDER BY j.id DESC LIMIT ?`, batch)
 	if err != nil {
-		s.log.Error("failure query", "err", err)
+		s.log.Error("reconcile failures query", "err", err)
 		return
 	}
-	defer rows.Close()
-	type failedJob struct {
-		id      int64
-		dbID    int64
-		class   string
-		message string
+	type fr struct {
+		id, dbID    int64
+		name, class string
+		message     string
 	}
-	var failed []failedJob
+	var failed []fr
 	for rows.Next() {
-		var f failedJob
-		if err := rows.Scan(&f.id, &f.dbID, &f.class, &f.message); err != nil {
-			return
+		var f fr
+		if err := rows.Scan(&f.id, &f.dbID, &f.name, &f.class, &f.message); err != nil {
+			break
 		}
-		// Redact: remove password values and URL credentials.
 		f.message = redactNotify(f.message)
 		failed = append(failed, f)
 	}
-	if err := rows.Err(); err != nil {
-		s.log.Error("failure scan", "err", err)
-		return
-	}
-	// Legacy net: jobs.fail enqueues backup_failed transactionally now; this
-	// sweep only catches rows written by an OLDER binary before the outbox
-	// existed (upgrade window). Dedup keeps it idempotent.
+	rows.Close()
 	for _, f := range failed {
 		if err := outbox.EnqueueTx(ctx, s.store, outbox.Event{
-			EventID:    fmt.Sprintf("backup_failed:job:%d", f.id),
-			EventType:  outbox.EventBackupFailed,
-			DatabaseID: f.dbID,
+			EventID:      fmt.Sprintf("backup_failed:job:%d", f.id),
+			EventType:    outbox.EventBackupFailed,
+			DatabaseID:   f.dbID,
+			DatabaseName: f.name,
 			Payload: map[string]any{
 				"event":         "backup_failed",
 				"job_id":        f.id,
 				"database_id":   f.dbID,
+				"database":      f.name,
 				"error_class":   f.class,
 				"error_message": f.message,
 			},
 		}, time.Now()); err != nil {
-			s.log.Error("legacy failure enqueue failed", "job", f.id, "err", err)
+			s.log.Error("reconcile failure enqueue", "job", f.id, "err", err)
+		}
+	}
+
+	// Verification failures (terminal states only).
+	vrows, err := s.store.QueryContext(ctx, `
+		SELECT j.id, j.database_id, COALESCE(d.name, ''), COALESCE(j.verify_status,''),
+		       COALESCE(j.verify_detail,'')
+		FROM jobs j
+		LEFT JOIN databases d ON d.id = j.database_id
+		WHERE j.status = 'succeeded' AND j.verify_status IN ('failed','unsupported')
+		  AND NOT EXISTS (SELECT 1 FROM notification_outbox o
+		                  WHERE o.event_id = 'verification_failed:job:' || j.id)
+		ORDER BY j.id DESC LIMIT ?`, batch)
+	if err != nil {
+		s.log.Error("reconcile verifications query", "err", err)
+		return
+	}
+	type vr struct {
+		id, dbID    int64
+		name, state string
+		detail      string
+	}
+	var verifs []vr
+	for vrows.Next() {
+		var v vr
+		if err := vrows.Scan(&v.id, &v.dbID, &v.name, &v.state, &v.detail); err != nil {
+			break
+		}
+		v.detail = redactNotify(v.detail)
+		verifs = append(verifs, v)
+	}
+	vrows.Close()
+	for _, v := range verifs {
+		if err := outbox.EnqueueTx(ctx, s.store, outbox.Event{
+			EventID:      fmt.Sprintf("verification_failed:job:%d", v.id),
+			EventType:    outbox.EventVerificationFailed,
+			DatabaseID:   v.dbID,
+			DatabaseName: v.name,
+			Payload: map[string]any{
+				"event":         "verification_failed",
+				"job_id":        v.id,
+				"database":      v.name,
+				"verify_status": v.state,
+				"detail":        truncate(v.detail, 300),
+			},
+		}, time.Now()); err != nil {
+			s.log.Error("reconcile verification enqueue", "job", v.id, "err", err)
 		}
 	}
 }

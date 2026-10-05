@@ -5,20 +5,28 @@
 //
 // Pinging is bound to REAL freshness (dev-plan Phase 7 task 2):
 //   - the success ping only fires when the backup was REMOTELY COMMITTED
-//     (or local-only by design) AND the snapshot is still fresh: a backup
-//     that sat in the queue so long that its EXPORT SNAPSHOT is older than
-//     period+grace does NOT ping — the stale ciphertext must not silence
-//     the monitor;
-//   - failures ping url+"/fail" (healthchecks.io convention) so a failing
-//     backup is visible immediately, not only via silence;
-//   - per-database configuration (url/period/grace) with the process-wide
-//     SB_HEARTBEAT_URL as the fallback URL.
+//     (or local-only by design — the documented v1 local-only exception)
+//     AND the SNAPSHOT age is gated: a backup whose export snapshot is
+//     older than period+grace does NOT ping — the stale ciphertext must not
+//     silence the monitor (round-1 review P1-05: the age gate applies to
+//     the inherited fallback URL too; without a period there is no silence
+//     semantics, so the backup must not be vouched for at all);
+//   - failures ping url+"/fail" (healthchecks.io convention; the suffix is
+//     inserted BEFORE any query string), so a failing backup is visible
+//     immediately, not only via silence. There is no /start signal in v1:
+//     a start ping would require queue-aware grace math the per-database
+//     period model does not carry yet (v1.0 item);
+//   - per-database configuration wins over the process-wide fallback URL;
+//     the reserved value "-" explicitly DISABLES the heartbeat for one
+//     database even when a fallback is configured.
 package jobs
 
 import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -27,22 +35,33 @@ import (
 type heartbeatDecision struct {
 	url    string
 	skip   string // non-empty = skipped with this reason
-	kind   string // "" | "/fail"
 	lateBy time.Duration
 }
 
-// heartbeatFor loads the per-database heartbeat config (period/grace) and
-// applies the freshness gate.
+// heartbeatFor loads the per-database heartbeat config and applies the
+// freshness gate. Empty db URL inherits the process fallback UNLESS it is
+// the explicit disable marker "-".
 func (r *Runner) heartbeatFor(dbID int64, dumpStart time.Time, remoteCommitted, hasDestination bool) heartbeatDecision {
 	dec := heartbeatDecision{}
-	var url string
+	var dbURL string
 	var period, grace int
 	err := r.authDB.QueryRow(`
-		SELECT COALESCE(NULLIF(heartbeat_url,''), ?), heartbeat_period_hours, heartbeat_grace_hours
-		FROM databases WHERE id = ? AND deleted_at IS NULL`,
-		r.heartbeatURL, dbID).Scan(&url, &period, &grace)
-	if err != nil || url == "" {
-		return dec // no heartbeat configured (or row vanished): silent no-op
+		SELECT heartbeat_url, heartbeat_period_hours, heartbeat_grace_hours
+		FROM databases WHERE id = ? AND deleted_at IS NULL`, dbID).
+		Scan(&dbURL, &period, &grace)
+	if err != nil {
+		return dec // row vanished: silent no-op
+	}
+	url := strings.TrimSpace(dbURL)
+	if url == "-" {
+		dec.skip = "heartbeat explicitly disabled for this database"
+		return dec
+	}
+	if url == "" {
+		url = strings.TrimSpace(r.heartbeatURL) // process fallback
+	}
+	if url == "" {
+		return dec // no heartbeat configured
 	}
 	dec.url = url
 
@@ -54,69 +73,97 @@ func (r *Runner) heartbeatFor(dbID int64, dumpStart time.Time, remoteCommitted, 
 		return dec
 	}
 
-	// Snapshot age gate: started_at ≈ the export snapshot instant. If the
-	// data is already older than period+grace, the external monitor SHOULD
-	// alert — a late upload must not mask the gap (dev-plan: 旧密文晚上传
-	// 成功不得消除超期).
-	if period > 0 {
-		maxAge := time.Duration(period+grace) * time.Hour
-		age := time.Since(dumpStart)
-		if age > maxAge {
-			dec.skip = fmt.Sprintf("snapshot is stale (age %s > period+grace %s); the monitor must alert", age.Round(time.Second), maxAge)
-			dec.lateBy = age - maxAge
-			return dec
-		}
+	// The age gate is UNCONDITIONAL (round-1 review P1-05): without a
+	// period there are no silence semantics, so a success ping would vouch
+	// for backups of unknown freshness. period must be configured.
+	if period <= 0 {
+		dec.skip = "no heartbeat period configured; the backup cannot be vouched for (set heartbeatPeriodHours)"
+		return dec
+	}
+	maxAge := time.Duration(period+grace) * time.Hour
+	age := time.Since(dumpStart)
+	if age > maxAge {
+		dec.skip = fmt.Sprintf("snapshot is stale (age %s > period+grace %s); the monitor must alert", age.Round(time.Second), maxAge)
+		dec.lateBy = age - maxAge
+		return dec
 	}
 	return dec
 }
 
 // pingSuccess sends the success ping for a backup that passed the freshness
-// gate, and records last_heartbeat_at. Fire-and-forget with a bounded
-// window; never blocks the backup pipeline.
+// gate. Fire-and-forget with a bounded window; never blocks the backup
+// pipeline. last_heartbeat_at records SUCCESSFUL pings only (round-1
+// review P2-03: a failed attempt must not display as a heartbeat).
 func (r *Runner) pingSuccess(dbID int64, dec heartbeatDecision) {
 	if dec.url == "" || dec.skip != "" {
 		r.log.Warn("heartbeat success ping skipped", "database_id", dbID, "reason", dec.skip)
 		return
 	}
-	r.ping(dbID, dec.url, "")
-}
-
-// pingFail signals a backup failure to the dead-man switch (url+"/fail").
-func (r *Runner) pingFail(dbID int64) {
-	var url string
-	if err := r.authDB.QueryRow(`
-		SELECT COALESCE(NULLIF(heartbeat_url,''), ?)
-		FROM databases WHERE id = ? AND deleted_at IS NULL`,
-		r.heartbeatURL, dbID).Scan(&url); err != nil || url == "" {
-		return
-	}
-	r.ping(dbID, url, "/fail")
-}
-
-// ping performs the GET (with the healthchecks.io convention suffix).
-func (r *Runner) ping(dbID int64, url, suffix string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+suffix, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, dec.url, nil)
 		if err != nil {
 			r.log.Error("heartbeat request build failed", "err_type", fmt.Sprintf("%T", err))
 			return
 		}
 		resp, err := heartbeatClient.Do(req)
 		if err != nil {
-			// Do NOT log the URL: it may contain bearer tokens for the
-			// external healthcheck service.
-			r.log.Error("heartbeat ping failed", "suffix", suffix, "err_type", fmt.Sprintf("%T", err))
+			// Do NOT log the URL: it may contain bearer tokens.
+			r.log.Error("heartbeat ping failed", "err_type", fmt.Sprintf("%T", err))
 			return
 		}
 		resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			r.log.Error("heartbeat rejected", "status", resp.StatusCode)
+			return
+		}
+		if _, err := r.authDB.Exec(`
+			UPDATE databases SET last_heartbeat_at = strftime('%s','now') WHERE id = ?`, dbID); err != nil {
+			r.log.Error("heartbeat timestamp write failed", "database_id", dbID, "err", err)
 		}
 	}()
-	if _, err := r.authDB.Exec(`
-		UPDATE databases SET last_heartbeat_at = strftime('%s','now') WHERE id = ?`, dbID); err != nil {
-		r.log.Error("heartbeat timestamp write failed", "database_id", dbID, "err", err)
+}
+
+// pingFail signals a backup failure to the dead-man switch (url+"/fail").
+func (r *Runner) pingFail(dbID int64) {
+	dec := r.heartbeatFor(dbID, time.Now(), true, false)
+	if dec.url == "" || dec.skip == "heartbeat explicitly disabled for this database" {
+		return
 	}
+	// The fail signal ignores the freshness gate (a failing backup is
+	// exactly what the monitor wants to know about), but keeps the
+	// disable marker honored.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, withURLPathSuffix(dec.url, "/fail"), nil)
+		if err != nil {
+			r.log.Error("heartbeat fail request build failed", "err_type", fmt.Sprintf("%T", err))
+			return
+		}
+		resp, err := heartbeatClient.Do(req)
+		if err != nil {
+			r.log.Error("heartbeat fail ping failed", "err_type", fmt.Sprintf("%T", err))
+			return
+		}
+		resp.Body.Close()
+	}()
+}
+
+// withURLPathSuffix inserts suffix into the URL PATH (before any query or
+// fragment), so healthchecks-style "?token=…" URLs keep the token in the
+// query instead of swallowing "/fail" into a parameter value (P1-04).
+func withURLPathSuffix(rawURL, suffix string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// Unparseable: the request would fail anyway; fall back to plain
+		// concatenation before the query marker.
+		if i := strings.IndexByte(rawURL, '?'); i >= 0 {
+			return rawURL[:i] + suffix + rawURL[i:]
+		}
+		return rawURL + suffix
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/") + suffix
+	return u.String()
 }

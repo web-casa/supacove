@@ -224,6 +224,7 @@ func (n *Notifier) recoverStuck(ctx context.Context) {
 // The claim (pending→delivering) is a single conditional UPDATE ... RETURNING,
 // so concurrent passes cannot double-deliver.
 func (n *Notifier) deliverDue(ctx context.Context) {
+	n.recoverExpiredLeases(ctx)
 	for batch := 0; batch < 10; batch++ {
 		claimed, err := n.claimOne(ctx)
 		if err != nil {
@@ -253,13 +254,14 @@ func (n *Notifier) claimOne(ctx context.Context) (*entry, error) {
 	}
 	defer tx.Rollback()
 	row := tx.QueryRowContext(ctx, `
-		UPDATE notification_outbox SET state = 'delivering'
+		UPDATE notification_outbox SET state = 'delivering',
+		       next_attempt_at = strftime('%s','now') + ?1
 		WHERE id = (
 			SELECT id FROM notification_outbox
 			WHERE state = 'pending' AND next_attempt_at <= strftime('%s','now')
 			ORDER BY id LIMIT 1
 		)
-		RETURNING id, event_id, event_type, payload, attempts`)
+		RETURNING id, event_id, event_type, payload, attempts`, int64(deliveryLease.Seconds()))
 	e := &entry{}
 	var payload string
 	if err := row.Scan(&e.id, &e.eventID, &e.eventType, &payload, &e.attempts); err != nil {
@@ -290,7 +292,7 @@ func (n *Notifier) deliver(ctx context.Context, e *entry) {
 	}
 	var failures []string
 	for _, t := range targets {
-		if err := n.post(ctx, t, e.payload); err != nil {
+		if err := n.post(ctx, t, e.eventType, e.eventID, string(e.payload)); err != nil {
 			// Never log the URL (bearer credential); name + category only.
 			n.log.Error("webhook delivery failed", "name", t.Name,
 				"event", e.eventType, "err_type", fmt.Sprintf("%T", err))
@@ -304,14 +306,19 @@ func (n *Notifier) deliver(ctx context.Context, e *entry) {
 	n.succeed(ctx, e)
 }
 
-// post sends one delivery. The response body is drained with a hard cap
-// (never trust a receiver to be small).
-func (n *Notifier) post(ctx context.Context, t WebhookTarget, payload []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.URL, strings.NewReader(string(payload)))
+// post sends one delivery carrying the event type and the STABLE event id
+// (round-1 review P2-01: receivers dedup retries/replays by event id; the
+// legacy X-Supabackup-Event header is preserved for existing receivers).
+// The response body is drained with a hard cap (never trust a receiver to
+// be small).
+func (n *Notifier) post(ctx context.Context, t WebhookTarget, eventType, eventID, payload string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.URL, strings.NewReader(payload))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Supabackup-Event", eventType)
+	req.Header.Set("X-Supabackup-Event-ID", eventID)
 	resp, err := n.client.Do(req)
 	if err != nil {
 		return err
@@ -326,12 +333,11 @@ func (n *Notifier) post(ctx context.Context, t WebhookTarget, payload []byte) er
 }
 
 func (n *Notifier) succeed(ctx context.Context, e *entry) {
-	if _, err := n.store.ExecContext(ctx, `
+	execRetry(ctx, n.store, `
 		UPDATE notification_outbox SET state = 'delivered',
 		       delivered_at = strftime('%s','now'), last_error = ''
-		WHERE id = ? AND state = 'delivering'`, e.id); err != nil {
-		n.log.Error("outbox delivered-state write failed", "id", e.id, "err", err)
-	}
+		WHERE id = ? AND state = 'delivering'`, []any{e.id},
+		func(err error) { n.log.Error("outbox delivered-state write failed", "id", e.id, "err", err) })
 }
 
 // fail schedules the retry with backoff, or kills the entry after the cap.
@@ -342,22 +348,50 @@ func (n *Notifier) fail(ctx context.Context, e *entry, errMsg string) {
 		truncated = truncated[:300]
 	}
 	if attempts >= MaxAttempts {
-		if _, err := n.store.ExecContext(ctx, `
+		execRetry(ctx, n.store, `
 			UPDATE notification_outbox SET state = 'dead', attempts = ?, last_error = ?
-			WHERE id = ? AND state = 'delivering'`, attempts, truncated, e.id); err != nil {
-			n.log.Error("outbox dead-state write failed", "id", e.id, "err", err)
-		}
+			WHERE id = ? AND state = 'delivering'`, []any{attempts, truncated, e.id},
+			func(err error) { n.log.Error("outbox dead-state write failed", "id", e.id, "err", err) })
 		n.log.Error("notification went DEAD after retries", "event", e.eventType,
 			"attempts", attempts, "err", truncated)
 		return
 	}
 	next := time.Now().Add(n.backoff(attempts))
-	if _, err := n.store.ExecContext(ctx, `
+	execRetry(ctx, n.store, `
 		UPDATE notification_outbox SET state = 'pending', attempts = ?,
 		       next_attempt_at = ?, last_error = ?
-		WHERE id = ? AND state = 'delivering'`, attempts, next.Unix(), truncated, e.id); err != nil {
-		n.log.Error("outbox retry-state write failed", "id", e.id, "err", err)
+		WHERE id = ? AND state = 'delivering'`, []any{attempts, next.Unix(), truncated, e.id},
+		func(err error) { n.log.Error("outbox retry-state write failed", "id", e.id, "err", err) })
+}
+
+// deliveryLease is how long a 'delivering' claim may run before the runtime
+// sweep treats it as crashed and re-queues it. Generous: a pass serially
+// delivers to every receiver with a 10s client timeout each.
+const deliveryLease = 15 * time.Minute
+
+// recoverExpiredLeases re-queues 'delivering' rows whose lease expired.
+// Safe under the single-instance protocol (OS advisory lock): no second
+// owner can be mid-delivery on the same row.
+func (n *Notifier) recoverExpiredLeases(ctx context.Context) {
+	if _, err := n.store.ExecContext(ctx, `
+		UPDATE notification_outbox SET state = 'pending'
+		WHERE state = 'delivering' AND next_attempt_at < strftime('%s','now')`); err != nil {
+		n.log.Error("outbox lease recovery failed", "err", err)
 	}
+}
+
+// execRetry performs a bounded retry for a result-state write so a transient
+// SQLite failure cannot strand a row in 'delivering' forever (round-1 review
+// P2-02); the lease sweep is the final net.
+func execRetry(ctx context.Context, db *sql.DB, query string, args []any, onFail func(error)) {
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if _, err = db.ExecContext(ctx, query, args...); err == nil {
+			return
+		}
+		time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+	}
+	onFail(err)
 }
 
 func (n *Notifier) targets(ctx context.Context, eventType string) ([]WebhookTarget, error) {

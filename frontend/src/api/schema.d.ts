@@ -530,7 +530,7 @@ export interface components {
             /** @description Freshness threshold; 0 disables expiry checks. */
             maxAgeHours: number;
             paused: boolean;
-            /** @description Dead-man switch URL (http/https); empty = disabled. */
+            /** @description Dead-man switch URL (http/https). Empty inherits the process fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly disables the heartbeat for this database. */
             heartbeatUrl?: string;
             /** @description Expected backup period for the dead-man switch; 0 disables the age gate. */
             heartbeatPeriodHours: number;
@@ -546,7 +546,7 @@ export interface components {
             cronTz?: string;
             maxAgeHours?: number;
             paused?: boolean;
-            /** @description http/https only; must not be a link-local address. */
+            /** @description http/https only; must not be a link-local address. Empty inherits the process fallback; "-" explicitly disables. A heartbeat URL requires heartbeatPeriodHours > 0 (silence semantics). */
             heartbeatUrl?: string;
             heartbeatPeriodHours?: number;
             heartbeatGraceHours?: number;

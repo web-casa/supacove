@@ -4,9 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cloudfan/supabackup/backend/internal/outbox"
 )
 
 // seedHeartbeatDB registers a database with heartbeat configuration.
@@ -65,10 +68,19 @@ func TestHeartbeatFreshnessGate(t *testing.T) {
 	}
 	r.pingSuccess(staleDB, dec) // must be a no-op
 
-	// No period configured: no age gate (ping fires).
+	// No period configured: NO silence semantics → the backup cannot be
+	// vouched for at all (round-1 review P1-05: the inherited-fallback
+	// bypass is closed).
 	dec = r.heartbeatFor(noperiodDB, time.Now().Add(-100*time.Hour), true, true)
-	if dec.skip != "" {
-		t.Fatalf("no-period config must not gate: %q", dec.skip)
+	if dec.skip == "" {
+		t.Fatal("no-period config must not send success pings (no age gate possible)")
+	}
+	// Explicit disable marker "-" wins over any fallback URL.
+	r.SetHeartbeatURL("https://fallback.example/hb")
+	disabledDB := seedHeartbeatDB(t, r, "hb-disabled", "-", 24, 0)
+	dec = r.heartbeatFor(disabledDB, time.Now(), true, true)
+	if dec.url != "" || dec.skip == "" {
+		t.Fatal("explicit disable marker must silence the heartbeat entirely")
 	}
 
 	// Uncommitted backup with a destination: must not vouch.
@@ -192,4 +204,62 @@ func TestScheduleConfigRoundTrip(t *testing.T) {
 	if _, err := GetSchedule(context.Background(), r.store.DB, 999999); err != ErrDatabaseNotFound {
 		t.Fatalf("unknown id err = %v, want ErrDatabaseNotFound", err)
 	}
+}
+
+// TestFailPathFiresDeadManSwitch: a real failure through runner.fail() must
+// (a) persist the failure, (b) enqueue the notification in the SAME
+// transaction, and (c) ping url+"/fail" — proven through the production
+// path, not by calling pingFail directly (round-1 review P1-04).
+func TestFailPathFiresDeadManSwitch(t *testing.T) {
+	var failPings atomic.Int32
+	hb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/fail") {
+			failPings.Add(1)
+		}
+		w.WriteHeader(200)
+	}))
+	defer hb.Close()
+
+	r := newPhase3Runner(t)
+	dbID := seedHeartbeatDB(t, r, "fail-db", hb.URL, 24, 0)
+	var jobID int64
+	if err := r.store.DB.QueryRow(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at)
+		VALUES (?, 'running', 0, 0) RETURNING id`, dbID).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	r.fail(jobID, "network", "connection refused (canary-notify)")
+
+	// (a) failure state persisted.
+	var status string
+	if err := r.store.DB.QueryRow(`SELECT status FROM jobs WHERE id = ?`, jobID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "failed" {
+		t.Fatalf("status = %q, want failed", status)
+	}
+	// (b) notification enqueued atomically.
+	entries, err := outbox.List(context.Background(), r.store.DB, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.EventType == "backup_failed" && e.DatabaseName == "fail-db" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("backup_failed notification not enqueued by fail()")
+	}
+	// (c) the /fail ping reaches url+"/fail" (path suffix, token-safe).
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if failPings.Load() > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("fail() never pinged url+/fail")
 }

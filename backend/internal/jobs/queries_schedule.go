@@ -6,7 +6,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -199,7 +198,8 @@ func Overview(ctx context.Context, dbh *sql.DB, now time.Time, dueFn func(expr s
 	for rows.Next() {
 		var e OverviewEntry
 		var paused int
-		var lastSuccess, verifyState, lastJob sql.NullString
+		var lastSuccess sql.NullInt64
+		var verifyState, lastJob sql.NullString
 		if err := rows.Scan(&e.DatabaseID, &e.Name, &e.Platform, &e.MaxAgeHours, &paused,
 			&e.ScheduleExpr, &lastSuccess, &verifyState, &lastJob); err != nil {
 			return nil, err
@@ -211,19 +211,14 @@ func Overview(ctx context.Context, dbh *sql.DB, now time.Time, dueFn func(expr s
 		if lastJob.Valid {
 			e.LastJobStatus = lastJob.String
 		}
-		if lastSuccess.Valid && lastSuccess.String != "" {
-			var started int64
-			if _, err := fmt.Sscanf(lastSuccess.String, "%d", &started); err == nil && started > 0 {
-				e.LastSuccessAt = started
-				age := now.Sub(time.Unix(started, 0))
-				e.LastSuccessAgeHours = age.Hours()
-				if e.MaxAgeHours > 0 && age > time.Duration(e.MaxAgeHours)*time.Hour {
-					e.State = "expired"
-				} else {
-					e.State = "fresh"
-				}
+		if lastSuccess.Valid && lastSuccess.Int64 > 0 {
+			e.LastSuccessAt = lastSuccess.Int64
+			age := now.Sub(time.Unix(lastSuccess.Int64, 0))
+			e.LastSuccessAgeHours = age.Hours()
+			if e.MaxAgeHours > 0 && age > time.Duration(e.MaxAgeHours)*time.Hour {
+				e.State = "expired"
 			} else {
-				e.State = "never"
+				e.State = "fresh"
 			}
 		} else {
 			e.State = "never"

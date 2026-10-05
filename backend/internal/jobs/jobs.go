@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,10 +62,11 @@ const (
 
 var ErrAlreadyQueued = errors.New("this database already has a pending or running job")
 
-// heartbeatClient bounds dead-man switch pings (Phase 7). Loopback and
-// private targets are legitimate for self-hosted monitors; nothing else
-// here needs custom dialing.
-var heartbeatClient = &http.Client{Timeout: 5 * time.Second}
+// heartbeatClient bounds dead-man switch pings (Phase 7) and reuses the
+// webhook delivery transport: link-local (cloud metadata) destinations are
+// refused at dial time no matter what a DNS name resolves to (round-1
+// review P1-01 — configuration-time literal checks alone are bypassable).
+var heartbeatClient = outbox.DeliveryClient(5 * time.Second)
 
 // ErrDatabaseNotFound for unknown database ids.
 var ErrDatabaseNotFound = errors.New("database not found")
@@ -990,58 +990,89 @@ func (r *Runner) ranToCancellation(jobID int64) bool {
 func (r *Runner) fail(jobID int64, class, msg string) {
 	msg = pgclient.SanitizeMessage(msg)
 
-	// The failure record and its notification are ONE transaction (Phase 7
-	// outbox): a crash between them can no longer lose the notification,
-	// and a webhook outage can never roll the backup failure back.
+	var dbID int64
+	var dbName string
+	// Attempt 1: state + notification in ONE transaction (Phase 7 outbox) —
+	// a crash between them can never lose the notification.
+	err := r.commitFailure(jobID, class, msg, true)
+	if err != nil {
+		// Attempt 2: state-only write (no notification inside the tx). The
+		// scheduler reconciliation sweep (no time window, event_id-deduped)
+		// provides the durable compensation for the missing notification.
+		r.log.Error("atomic failure commit failed; falling back to state-only", "job", jobID, "err", err)
+		err = r.commitFailure(jobID, class, msg, false)
+		if err != nil {
+			r.log.Error("job failure STATE WRITE failed twice; job stays active", "job", jobID, "err", err)
+			return
+		}
+		// Compensation enqueue, best effort outside the tx.
+		_ = r.authDB.QueryRow(`
+			SELECT j.database_id, COALESCE(d.name, '')
+			FROM jobs j LEFT JOIN databases d ON d.id = j.database_id
+			WHERE j.id = ?`, jobID).Scan(&dbID, &dbName)
+		if enqErr := outbox.Enqueue(context.Background(), r.authDB, r.failureEvent(jobID, dbID, dbName, class, msg), time.Now()); enqErr != nil {
+			r.log.Error("failure notification compensation enqueue FAILED; the sweep must recover it", "job", jobID, "err", enqErr)
+		}
+	}
+	// The failure is committed: tell the dead-man switch immediately so a
+	// failing backup is visible without waiting for silence (P1-04).
+	_ = r.authDB.QueryRow(`
+		SELECT j.database_id, COALESCE(d.name, '')
+		FROM jobs j LEFT JOIN databases d ON d.id = j.database_id
+		WHERE j.id = ?`, jobID).Scan(&dbID, &dbName)
+	r.pingFail(dbID)
+
+	r.log.Error("backup failed", "job", jobID, "class", class, "error", msg)
+}
+
+// failureEvent builds the deduped backup_failed notification.
+func (r *Runner) failureEvent(jobID, dbID int64, dbName, class, msg string) outbox.Event {
+	return outbox.Event{
+		EventID:      fmt.Sprintf("backup_failed:job:%d", jobID),
+		EventType:    outbox.EventBackupFailed,
+		DatabaseID:   dbID,
+		DatabaseName: dbName,
+		Payload: map[string]any{
+			"event":         "backup_failed",
+			"job_id":        jobID,
+			"database_id":   dbID,
+			"database":      dbName,
+			"error_class":   class,
+			"error_message": truncate(msg, 300),
+		},
+	}
+}
+
+// commitFailure writes the terminal failure state; withNotify also enqueues
+// the notification in the SAME transaction (rolls back together on error).
+func (r *Runner) commitFailure(jobID int64, class, msg string, withNotify bool) error {
 	tx, err := r.authDB.Begin()
 	if err != nil {
-		r.log.Error("job failure tx begin failed", "job", jobID, "err", err)
+		return fmt.Errorf("begin: %w", err)
 	}
-	if tx != nil {
-		res, err := tx.Exec(`
-			UPDATE jobs SET status = 'failed', finished_at = strftime('%s','now'),
-			  error_class = ?, error_message = ?
-			WHERE id = ? AND status IN ('pending','running')`, class, msg, jobID)
-		if err != nil {
-			r.log.Error("job failure update failed", "job", jobID, "err", err)
-			tx.Rollback()
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			r.log.Error("job failure update affected 0 rows (job not in an active state)", "job", jobID)
-			tx.Rollback()
-			return
-		}
+	defer tx.Rollback()
+	res, err := tx.Exec(`
+		UPDATE jobs SET status = 'failed', finished_at = strftime('%s','now'),
+		  error_class = ?, error_message = ?
+		WHERE id = ? AND status IN ('pending','running')`, class, msg, jobID)
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("job %d not in an active state", jobID)
+	}
+	if withNotify {
 		var dbID int64
 		var dbName string
 		_ = tx.QueryRow(`
 			SELECT j.database_id, COALESCE(d.name, '')
 			FROM jobs j LEFT JOIN databases d ON d.id = j.database_id
 			WHERE j.id = ?`, jobID).Scan(&dbID, &dbName)
-		if err := outbox.EnqueueTx(context.Background(), tx, outbox.Event{
-			EventID:      fmt.Sprintf("backup_failed:job:%d", jobID),
-			EventType:    outbox.EventBackupFailed,
-			DatabaseID:   dbID,
-			DatabaseName: dbName,
-			Payload: map[string]any{
-				"event":         "backup_failed",
-				"job_id":        jobID,
-				"database_id":   dbID,
-				"database":      dbName,
-				"error_class":   class,
-				"error_message": truncate(msg, 300),
-			},
-		}, time.Now()); err != nil {
-			// The failure record is authoritative; a notification-write
-			// failure is logged and must not hide the backup failure.
-			r.log.Error("outbox enqueue for failure failed", "job", jobID, "err", err)
-		}
-		if err := tx.Commit(); err != nil {
-			r.log.Error("job failure tx commit failed", "job", jobID, "err", err)
-			return
+		if err := outbox.EnqueueTx(context.Background(), tx, r.failureEvent(jobID, dbID, dbName, class, msg), time.Now()); err != nil {
+			return fmt.Errorf("outbox enqueue: %w", err)
 		}
 	}
-	r.log.Error("backup failed", "job", jobID, "class", class, "error", msg)
+	return tx.Commit()
 }
 
 // classify maps kernel errors to the seven classes.

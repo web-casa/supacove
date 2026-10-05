@@ -413,7 +413,7 @@ type ScheduleConfig struct {
 	// HeartbeatPeriodHours Expected backup period for the dead-man switch; 0 disables the age gate.
 	HeartbeatPeriodHours int `json:"heartbeatPeriodHours"`
 
-	// HeartbeatUrl Dead-man switch URL (http/https); empty = disabled.
+	// HeartbeatUrl Dead-man switch URL (http/https). Empty inherits the process fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly disables the heartbeat for this database.
 	HeartbeatUrl    *string `json:"heartbeatUrl,omitempty"`
 	LastHeartbeatAt *int64  `json:"lastHeartbeatAt"`
 	LastScheduledAt *int64  `json:"lastScheduledAt"`
@@ -430,7 +430,7 @@ type ScheduleUpdate struct {
 	HeartbeatGraceHours  *int    `json:"heartbeatGraceHours,omitempty"`
 	HeartbeatPeriodHours *int    `json:"heartbeatPeriodHours,omitempty"`
 
-	// HeartbeatUrl http/https only; must not be a link-local address.
+	// HeartbeatUrl http/https only; must not be a link-local address. Empty inherits the process fallback; "-" explicitly disables. A heartbeat URL requires heartbeatPeriodHours > 0 (silence semantics).
 	HeartbeatUrl *string `json:"heartbeatUrl,omitempty"`
 	MaxAgeHours  *int    `json:"maxAgeHours,omitempty"`
 	Paused       *bool   `json:"paused,omitempty"`

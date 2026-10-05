@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -260,8 +261,13 @@ func (a *apiService) TestWebhook(ctx context.Context, request api.TestWebhookReq
 	if name == "" {
 		name = "test"
 	}
-	payload := fmt.Sprintf(`{"event":"webhook_test","name":%q,"sent_at":%d}`, name, time.Now().Unix())
-	delivered, detail := a.srv.testWebhookDelivery(ctx, body.Url, payload)
+	payloadBytes, err := json.Marshal(map[string]any{
+		"event": "webhook_test", "name": name, "sent_at": time.Now().Unix(),
+	})
+	if err != nil {
+		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: "name produced invalid JSON"}, nil
+	}
+	delivered, detail := a.srv.testWebhookDelivery(ctx, body.Url, "webhook_test", "test-"+time.Now().UTC().Format("20060102T150405.000000000"), string(payloadBytes))
 	res := api.WebhookTestResult{Delivered: delivered}
 	if detail != "" {
 		res.Detail = &detail
@@ -353,14 +359,15 @@ func (a *apiService) GetOverview(ctx context.Context, _ api.GetOverviewRequestOb
 // testWebhookDelivery performs one synchronous webhook delivery with the
 // shared SSRF-bounded client. Returns (delivered, humanDetail); the detail
 // never embeds the URL.
-func (s *Server) testWebhookDelivery(ctx context.Context, url, payload string) (bool, string) {
+func (s *Server) testWebhookDelivery(ctx context.Context, url, eventType, eventID, payload string) (bool, string) {
 	client := outbox.DeliveryClient(10 * time.Second)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(payload))
 	if err != nil {
 		return false, "request build failed"
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Supabackup-Event", "webhook_test")
+	req.Header.Set("X-Supabackup-Event", eventType)
+	req.Header.Set("X-Supabackup-Event-ID", eventID)
 	resp, err := client.Do(req)
 	if err != nil {
 		s.log.Error("webhook test delivery failed", "err_type", fmt.Sprintf("%T", err))

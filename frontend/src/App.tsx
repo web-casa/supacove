@@ -242,7 +242,9 @@ function OverviewSection() {
         />
       ))}
       {dbs.some((d) => scheduleFor === d.databaseId) && null}
-      {scheduleFor !== null && <ScheduleForm databaseId={scheduleFor} onDone={() => setScheduleFor(null)} />}
+      {scheduleFor !== null && (
+        <ScheduleForm key={scheduleFor} databaseId={scheduleFor} onDone={() => setScheduleFor(null)} />
+      )}
     </div>
   );
 }

@@ -401,33 +401,13 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 			"verification interrupted by instance shutdown; re-queued for the next startup", req.redact, nil)
 		return
 	}
-	r.finishVerification(jobID, string(res.Status), res.Detail, req.redact, &res)
-
-	// A verification failure is a reliability signal worth a notification,
-	// but the BACKUP itself is fine — the event is recorded through the
-	// outbox without touching the job's success state.
-	if !res.Pass() && (res.Status == verifier.StatusFailed || res.Status == verifier.StatusUnsupported) {
-		var dbID int64
-		var dbName string
-		_ = r.authDB.QueryRow(`
-			SELECT j.database_id, COALESCE(d.name, '') FROM jobs j
-			LEFT JOIN databases d ON d.id = j.database_id
-			WHERE j.id = ?`, jobID).Scan(&dbID, &dbName)
-		if err := outbox.Enqueue(context.Background(), r.authDB, outbox.Event{
-			EventID:      fmt.Sprintf("verification_failed:job:%d", jobID),
-			EventType:    outbox.EventVerificationFailed,
-			DatabaseID:   dbID,
-			DatabaseName: dbName,
-			Payload: map[string]any{
-				"event":         "verification_failed",
-				"job_id":        jobID,
-				"database":      dbName,
-				"verify_status": string(res.Status),
-				"detail":        req.redact(truncate(res.Detail, 300)),
-			},
-		}, time.Now()); err != nil {
-			r.log.Error("outbox enqueue for verification failure failed", "job", jobID, "err", err)
-		}
+	if res.Pass() || (res.Status != verifier.StatusFailed && res.Status != verifier.StatusUnsupported) {
+		r.finishVerification(jobID, string(res.Status), res.Detail, req.redact, &res)
+	} else if !r.finishVerificationWithNotify(jobID, string(res.Status), res.Detail, req.redact, &res) {
+		// The terminal state did not commit: the next startup sweep re-queues
+		// the verification and the reconciliation covers the notification —
+		// never emit a notification for state that was not persisted (P1-03).
+		return
 	}
 
 	if res.Pass() {
@@ -485,6 +465,62 @@ func (r *Runner) finishVerification(jobID int64, status, detail string, redact f
 	}
 	r.log.Error("verify state write failed after retries; job stays transitional for startup convergence",
 		"job", jobID, "wanted_status", status, "err", err)
+}
+
+// finishVerificationWithNotify persists a terminal verification failure and
+// its notification in ONE transaction (round-1 review P1-03: separate writes
+// left a crash window with a failed state and no notification, and let a
+// notification be emitted for state that never persisted). Returns false
+// when the transaction did not commit.
+func (r *Runner) finishVerificationWithNotify(jobID int64, status, detail string, redact func(string) string, res *verifier.Result) bool {
+	detail = redact(detail)
+	if len(detail) > 2000 {
+		detail = detail[:2000]
+	}
+	tx, err := r.authDB.Begin()
+	if err != nil {
+		r.log.Error("verify failure tx begin failed", "job", jobID, "err", err)
+		return false
+	}
+	defer tx.Rollback()
+	var dbID int64
+	var dbName string
+	if err := tx.QueryRow(`
+		SELECT j.database_id, COALESCE(d.name, '') FROM jobs j
+		LEFT JOIN databases d ON d.id = j.database_id
+		WHERE j.id = ?`, jobID).Scan(&dbID, &dbName); err != nil {
+		r.log.Error("verify failure tx lookup failed", "job", jobID, "err", err)
+		return false
+	}
+	if _, err := tx.Exec(`
+		UPDATE jobs SET verify_status = ?, verify_detail = ?,
+		  verify_tables = ?, verify_duration_secs = ?, verify_profile = ?
+		WHERE id = ?`, status, detail, res.TablesFound, res.Duration.Seconds(),
+		verifyProfileOf(*res), jobID); err != nil {
+		r.log.Error("verify failure state write failed", "job", jobID, "err", err)
+		return false
+	}
+	if err := outbox.EnqueueTx(context.Background(), tx, outbox.Event{
+		EventID:      fmt.Sprintf("verification_failed:job:%d", jobID),
+		EventType:    outbox.EventVerificationFailed,
+		DatabaseID:   dbID,
+		DatabaseName: dbName,
+		Payload: map[string]any{
+			"event":         "verification_failed",
+			"job_id":        jobID,
+			"database":      dbName,
+			"verify_status": status,
+			"detail":        truncate(detail, 300),
+		},
+	}, time.Now()); err != nil {
+		r.log.Error("outbox enqueue for verification failure failed", "job", jobID, "err", err)
+		return false
+	}
+	if err := tx.Commit(); err != nil {
+		r.log.Error("verify failure tx commit failed", "job", jobID, "err", err)
+		return false
+	}
+	return true
 }
 
 // verifyBusy reports whether a verification for the job may be reading its

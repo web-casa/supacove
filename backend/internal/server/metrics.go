@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/cloudfan/supabackup/backend/internal/outbox"
@@ -26,6 +27,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	gauge := func(name, help string, value any) {
 		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %v\n", name, help, name, name, value)
 	}
+	// Collector failures are exposed explicitly: a scrape must never render
+	// a query outage as a credible zero (round-1 review P2-06).
+	scrapeErrors := map[string]bool{}
+	failed := func(collector string) { scrapeErrors[collector] = true }
 
 	gauge("supabackup_uptime_seconds", "Uptime in seconds.", uptime)
 	gauge("supabackup_go_goroutines", "Number of goroutines.", runtime.NumGoroutine())
@@ -33,6 +38,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Job outcomes (Phase 7: 任务数 per status).
 	rows, err := s.store.DB.QueryContext(ctx, `SELECT status, COUNT(*) FROM jobs GROUP BY status`)
+	if err != nil {
+		failed("jobs")
+	}
 	if err == nil {
 		type kv struct {
 			status string
@@ -46,20 +54,33 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		rows.Close()
-		fmt.Fprintf(w, "# HELP supabackup_jobs_total Backup jobs by terminal/active status.\n")
+		fmt.Fprintf(w, "# HELP supabackup_jobs_total Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).\n")
 		fmt.Fprintf(w, "# TYPE supabackup_jobs_total gauge\n")
+		var succeeded, failed int64
 		for _, x := range kvs {
 			fmt.Fprintf(w, "supabackup_jobs_total{status=%q} %d\n", x.status, x.n)
+			switch x.status {
+			case "succeeded":
+				succeeded = x.n
+			case "failed":
+				failed = x.n
+			}
 		}
+		// Legacy gauges (pre-Phase-7): kept so existing alert rules and
+		// dashboards keep firing across the upgrade; prefer jobs_total.
+		gauge("supabackup_jobs_succeeded", "DEPRECATED alias of supabackup_jobs_total{status=\"succeeded\"}.", succeeded)
+		gauge("supabackup_jobs_failed", "DEPRECATED alias of supabackup_jobs_total{status=\"failed\"}.", failed)
 	}
 
 	// Remote commit inputs (protocol C success rate).
 	var committed, uploadFailed int64
-	_ = s.store.DB.QueryRowContext(ctx,
+	if err := s.store.DB.QueryRowContext(ctx,
 		`SELECT
 		   COALESCE(SUM(CASE WHEN remote_state IN ('committed','deleted') THEN 1 END), 0),
 		   COALESCE(SUM(CASE WHEN status = 'failed' AND error_class = 'storage_upload' THEN 1 END), 0)
-		 FROM jobs`).Scan(&committed, &uploadFailed)
+		 FROM jobs`).Scan(&committed, &uploadFailed); err != nil {
+		failed("remote")
+	}
 	gauge("supabackup_remote_commits_total", "Backups remotely committed (or deleted after a committed lifetime).", committed)
 	gauge("supabackup_remote_upload_failures_total", "Jobs failed in the storage_upload class.", uploadFailed)
 
@@ -67,6 +88,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	vrows, err := s.store.DB.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(verify_status,''),'none'), COUNT(*)
 		FROM jobs WHERE status = 'succeeded' GROUP BY 1`)
+	if err != nil {
+		failed("verification")
+	}
 	if err == nil {
 		type kv struct {
 			status string
@@ -119,7 +143,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	// Notification outbox health.
 	pending, dead, err := outbox.Counts(ctx, s.store.DB)
-	if err == nil {
+	if err != nil {
+		failed("outbox")
+	} else {
 		gauge("supabackup_outbox_pending", "Notification outbox entries awaiting delivery.", pending)
 		gauge("supabackup_outbox_dead", "Notification outbox entries that exhausted retries.", dead)
 	}
@@ -129,6 +155,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		SELECT d.id, d.name, d.max_age_hours,
 		       (SELECT j.started_at FROM jobs j WHERE j.database_id = d.id AND j.status = 'succeeded' ORDER BY j.id DESC LIMIT 1)
 		FROM databases d WHERE d.deleted_at IS NULL`)
+	if err != nil {
+		failed("protection")
+	}
 	if err == nil {
 		counts := map[string]int64{}
 		now := time.Now()
@@ -154,6 +183,21 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# TYPE supabackup_databases_protection gauge\n")
 		for _, state := range []string{"fresh", "expired", "never"} {
 			fmt.Fprintf(w, "supabackup_databases_protection{state=%q} %d\n", state, counts[state])
+		}
+	}
+
+	// Surface collector failures explicitly (omit the metric when clean so
+	// alerting on its absence/positive value is trivial).
+	if len(scrapeErrors) > 0 {
+		names := make([]string, 0, len(scrapeErrors))
+		for c := range scrapeErrors {
+			names = append(names, c)
+		}
+		sort.Strings(names)
+		fmt.Fprintf(w, "# HELP supabackup_scrape_errors Collectors that failed during this scrape.\n")
+		fmt.Fprintf(w, "# TYPE supabackup_scrape_errors gauge\n")
+		for _, c := range names {
+			fmt.Fprintf(w, "supabackup_scrape_errors{collector=%q} 1\n", c)
 		}
 	}
 }

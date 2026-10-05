@@ -301,3 +301,90 @@ func TestUpgradeFromOriginal0004(t *testing.T) {
 		t.Fatalf("duration_secs missing after legacy upgrade: %v", err)
 	}
 }
+
+// TestUpgradeWebhookVocabulary (phase-7 round-1 review P1-02): databases
+// with the Phase-4 subscription vocabulary ("failure,expired") upgrade to
+// the new event names, so existing receivers keep receiving events after
+// the outbox switchover — the empty-targets path must never mask this.
+func TestUpgradeWebhookVocabulary(t *testing.T) {
+	dir := t.TempDir()
+	legacy := legacyMigrations{
+		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
+		"0004_backup_kernel.sql": &fstest.MapFile{Data: []byte(original0004)},
+		"0009_scheduling.sql":    &fstest.MapFile{Data: []byte(readEmbedded(t, "0009_scheduling.sql"))},
+	}
+	buildLegacyDB(t, dir, legacy)
+	// A Phase-4-era webhook row with the OLD default vocabulary.
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ro.Exec(
+		`INSERT INTO webhooks (name, url, events, created_at) VALUES ('ops', 'https://old.example/hook', 'failure,expired', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	ro.Close()
+
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate legacy webhook row: %v", err)
+	}
+	var events string
+	if err := store.DB.QueryRow(`SELECT events FROM webhooks WHERE name = 'ops'`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != "backup_failed,backup_expired" {
+		t.Fatalf("legacy vocabulary not converted: %q", events)
+	}
+}
+
+// TestUpgradeDuplicateWebhookNames (phase-7 round-1 review P2-04): legacy
+// duplicate LIVE names are deterministically renamed (never deleted) so the
+// unique index can land and the upgrade is not blocked.
+func TestUpgradeDuplicateWebhookNames(t *testing.T) {
+	dir := t.TempDir()
+	legacy := legacyMigrations{
+		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},
+		"0004_backup_kernel.sql": &fstest.MapFile{Data: []byte(original0004)},
+		"0009_scheduling.sql":    &fstest.MapFile{Data: []byte(readEmbedded(t, "0009_scheduling.sql"))},
+	}
+	buildLegacyDB(t, dir, legacy)
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := ro.Exec(
+			`INSERT INTO webhooks (name, url, events, created_at) VALUES ('dup', 'https://old.example/h', 'failure', 0)`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ro.Close()
+
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Migrate(context.Background()); err != nil {
+		t.Fatalf("migrate with duplicate live names: %v", err)
+	}
+	var n int
+	if err := store.DB.QueryRow(`SELECT COUNT(*) FROM webhooks WHERE deleted_at IS NULL`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("live webhook rows = %d, want 3 (renamed, never deleted)", n)
+	}
+	var distinct int
+	if err := store.DB.QueryRow(`SELECT COUNT(DISTINCT name) FROM webhooks WHERE deleted_at IS NULL`).Scan(&distinct); err != nil {
+		t.Fatal(err)
+	}
+	if distinct != 3 {
+		t.Fatalf("distinct names = %d, want 3", distinct)
+	}
+}
