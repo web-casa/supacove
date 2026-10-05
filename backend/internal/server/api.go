@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
 )
 
@@ -49,7 +50,7 @@ func (a *apiService) GetHealthDetails(ctx context.Context, _ api.GetHealthDetail
 	if userFrom(ctx) == nil {
 		// Defensive fail-safe: the guard guarantees a user here, but a future
 		// refactor must not silently serve diagnostics anonymously.
-		return api.GetHealthDetails401JSONResponse{Code: "unauthenticated", Message: "login required"}, nil
+		return api.GetHealthDetails401JSONResponse{Code: "unauthenticated", Message: i18n.T(ctx, "login required", "需要登录")}, nil
 	}
 	st := a.srv.store.DB.Stats()
 	return api.GetHealthDetails200JSONResponse{
@@ -64,7 +65,7 @@ func (a *apiService) GetHealthDetails(ctx context.Context, _ api.GetHealthDetail
 func (a *apiService) PostAuthBootstrap(ctx context.Context, request api.PostAuthBootstrapRequestObject) (api.PostAuthBootstrapResponseObject, error) {
 	body := request.Body
 	if body == nil || body.Token == "" || body.Username == "" || body.Password == "" {
-		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: "token, username and password are required"}, nil
+		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "token, username and password are required", "token、用户名和密码为必填项")}, nil
 	}
 	if err := auth.ValidateUsername(body.Username); err != nil {
 		return api.PostAuthBootstrap400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
@@ -78,9 +79,9 @@ func (a *apiService) PostAuthBootstrap(ctx context.Context, request api.PostAuth
 	user, sessionRaw, err := a.srv.auth.Bootstrap(ctx, body.Token, body.Username, body.Password)
 	switch {
 	case errors.Is(err, auth.ErrAlreadyInitialized):
-		return api.PostAuthBootstrap409JSONResponse{Code: "already_initialized", Message: "an admin user already exists; use the CLI reset-password command locally"}, nil
+		return api.PostAuthBootstrap409JSONResponse{Code: "already_initialized", Message: i18n.T(ctx, "an admin user already exists; use the CLI reset-password command locally", "管理员账号已存在；请在本地使用 CLI 的 reset-password 命令")}, nil
 	case errors.Is(err, auth.ErrInvalidToken):
-		return api.PostAuthBootstrap403JSONResponse{Code: "invalid_bootstrap_token", Message: "bootstrap token is invalid, already used, or expired"}, nil
+		return api.PostAuthBootstrap403JSONResponse{Code: "invalid_bootstrap_token", Message: i18n.T(ctx, "bootstrap token is invalid, already used, or expired", "引导令牌无效、已被使用或已过期")}, nil
 	case errors.Is(err, auth.ErrKDFBusy):
 		return api.PostAuthBootstrap429JSONResponse{RateLimitedJSONResponse: api.RateLimitedJSONResponse(errJSON("rate_limited", "too many attempts, try again later"))}, nil
 	case err != nil:
@@ -99,15 +100,15 @@ func (a *apiService) PostAuthBootstrap(ctx context.Context, request api.PostAuth
 func (a *apiService) PostAuthLogin(ctx context.Context, request api.PostAuthLoginRequestObject) (api.PostAuthLoginResponseObject, error) {
 	body := request.Body
 	if body == nil || body.Username == "" || body.Password == "" {
-		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username and password are required"}, nil
+		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "username and password are required", "用户名和密码为必填项")}, nil
 	}
 	// Runtime field limits mirror the contract in CHARACTER terms (review
 	// P0-02/P1-09 remainder): both bounds are enforced before the KDF.
 	if n := utf8.RuneCountInString(body.Username); n < 3 || n > 64 {
-		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "username must be 3-64 characters"}, nil
+		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "username must be 3-64 characters", "用户名长度需为 3–64 个字符")}, nil
 	}
 	if n := utf8.RuneCountInString(body.Password); n < 12 || n > 128 {
-		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: "password must be 12-128 characters"}, nil
+		return api.PostAuthLogin400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "password must be 12-128 characters", "密码长度需为 12–128 个字符")}, nil
 	}
 
 	// Rate limiting already happened in the guard before decoding; issue the
@@ -117,7 +118,7 @@ func (a *apiService) PostAuthLogin(ctx context.Context, request api.PostAuthLogi
 	case errors.Is(err, auth.ErrBadCredentials):
 		// Deliberately vague: no username oracle. Failures are debited by the
 		// guard from the response status.
-		return api.PostAuthLogin401JSONResponse{Code: "invalid_credentials", Message: "invalid username or password"}, nil
+		return api.PostAuthLogin401JSONResponse{Code: "invalid_credentials", Message: i18n.T(ctx, "invalid username or password", "用户名或密码错误")}, nil
 	case errors.Is(err, auth.ErrKDFBusy):
 		return api.PostAuthLogin503JSONResponse{OverloadedJSONResponse: api.OverloadedJSONResponse(api.Error(errJSON("overloaded", "password hashing busy, try again")))}, nil
 	case err != nil:
@@ -158,7 +159,7 @@ func (a *apiService) PostAuthLogout(ctx context.Context, _ api.PostAuthLogoutReq
 func (a *apiService) GetAuthMe(ctx context.Context, _ api.GetAuthMeRequestObject) (api.GetAuthMeResponseObject, error) {
 	user := userFrom(ctx)
 	if user == nil {
-		return api.GetAuthMe401JSONResponse{Code: "unauthenticated", Message: "login required"}, nil
+		return api.GetAuthMe401JSONResponse{Code: "unauthenticated", Message: i18n.T(ctx, "login required", "需要登录")}, nil
 	}
 	return api.GetAuthMe200JSONResponse(api.User{Id: user.ID, Username: user.Username, CreatedAt: user.CreatedAt}), nil
 }

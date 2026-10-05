@@ -687,8 +687,8 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// untrusted input later); it drives the recovery kit and is persisted on
 	// the job so API consumers see the same classification the kit used.
 	detectedPlatform := platformpkg.Detect(ci.Host)
-	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); hint != "" {
-		r.log.Warn("pooling hint", "job", jobID, "database", name, "hint", hint)
+	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); !hint.Empty() {
+		r.log.Warn("pooling hint", "job", jobID, "database", name, "hint", hint.En)
 	}
 
 	// Resolve the destination EARLY (before the dump): the snapshot is used

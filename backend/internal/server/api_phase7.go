@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/outbox"
 	"github.com/cloudfan/supabackup/backend/internal/scheduler"
@@ -80,7 +81,7 @@ func scheduleToAPI(c *jobs.ScheduleConfig) api.ScheduleConfig {
 func (a *apiService) GetDatabaseSchedule(ctx context.Context, request api.GetDatabaseScheduleRequestObject) (api.GetDatabaseScheduleResponseObject, error) {
 	c, err := jobs.GetSchedule(ctx, a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrDatabaseNotFound) {
-		return api.GetDatabaseSchedule404JSONResponse{Code: "not_found", Message: "database not found"}, nil
+		return api.GetDatabaseSchedule404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "database not found", "数据库不存在")}, nil
 	}
 	if err != nil {
 		a.srv.log.Error("get schedule", "err", err)
@@ -92,11 +93,11 @@ func (a *apiService) GetDatabaseSchedule(ctx context.Context, request api.GetDat
 func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDatabaseScheduleRequestObject) (api.PutDatabaseScheduleResponseObject, error) {
 	body := request.Body
 	if body == nil {
-		return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "request body required"}, nil
+		return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "request body required", "缺少请求体")}, nil
 	}
 	c, err := jobs.GetSchedule(ctx, a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrDatabaseNotFound) {
-		return api.PutDatabaseSchedule404JSONResponse{Code: "not_found", Message: "database not found"}, nil
+		return api.PutDatabaseSchedule404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "database not found", "数据库不存在")}, nil
 	}
 	if err != nil {
 		a.srv.log.Error("get schedule for update", "err", err)
@@ -106,7 +107,7 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 	if body.CronExpr != nil {
 		expr := strings.TrimSpace(*body.CronExpr)
 		if len(expr) > 100 {
-			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "cronExpr too long"}, nil
+			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "cronExpr too long", "cronExpr 过长")}, nil
 		}
 		if err := scheduler.ValidateCronExpr(expr); err != nil {
 			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
@@ -119,13 +120,13 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 			tz = "UTC"
 		}
 		if _, err := time.LoadLocation(tz); err != nil {
-			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "unknown IANA timezone: " + tz}, nil
+			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "unknown IANA timezone: ", "未知 IANA 时区：") + tz}, nil
 		}
 		c.CronTZ = tz
 	}
 	if body.MaxAgeHours != nil {
 		if *body.MaxAgeHours < 0 || *body.MaxAgeHours > 8760 {
-			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "maxAgeHours must be 0-8760"}, nil
+			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "maxAgeHours must be 0-8760", "maxAgeHours 需在 0–8760 之间")}, nil
 		}
 		c.MaxAgeHours = *body.MaxAgeHours
 	}
@@ -140,7 +141,7 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 		// URL validation; everything else is a real URL.
 		if hb != "-" && hb != "" {
 			if len(hb) > 500 {
-				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "heartbeatUrl too long"}, nil
+				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "heartbeatUrl too long", "heartbeatUrl 过长")}, nil
 			}
 			if err := validateWebhookURL(hb); err != nil {
 				return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "heartbeatUrl: " + err.Error()}, nil
@@ -150,13 +151,13 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 	}
 	if body.HeartbeatPeriodHours != nil {
 		if *body.HeartbeatPeriodHours < 0 || *body.HeartbeatPeriodHours > 8760 {
-			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "heartbeatPeriodHours must be 0-8760"}, nil
+			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "heartbeatPeriodHours must be 0-8760", "heartbeatPeriodHours 需在 0–8760 之间")}, nil
 		}
 		c.HeartbeatPeriodHours = *body.HeartbeatPeriodHours
 	}
 	if body.HeartbeatGraceHours != nil {
 		if *body.HeartbeatGraceHours < 0 || *body.HeartbeatGraceHours > 8760 {
-			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: "heartbeatGraceHours must be 0-8760"}, nil
+			return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "heartbeatGraceHours must be 0-8760", "heartbeatGraceHours 需在 0–8760 之间")}, nil
 		}
 		c.HeartbeatGraceHours = *body.HeartbeatGraceHours
 	}
@@ -164,12 +165,12 @@ func (a *apiService) PutDatabaseSchedule(ctx context.Context, request api.PutDat
 	// (the "-" disable marker and empty inherit are exempt).
 	if c.HeartbeatURL != "" && c.HeartbeatURL != "-" && c.HeartbeatPeriodHours == 0 {
 		return api.PutDatabaseSchedule400JSONResponse{Code: "invalid_request",
-			Message: "heartbeatPeriodHours is required when a heartbeatUrl is set (the dead-man switch needs an expected period)"}, nil
+			Message: i18n.T(ctx, "heartbeatPeriodHours is required when a heartbeatUrl is set (the dead-man switch needs an expected period)", "设置了心跳 URL 时必须提供 heartbeatPeriodHours（死人开关需要期望周期）")}, nil
 	}
 
 	if err := jobs.UpdateSchedule(ctx, a.srv.store.DB, c); err != nil {
 		if errors.Is(err, jobs.ErrDatabaseNotFound) {
-			return api.PutDatabaseSchedule404JSONResponse{Code: "not_found", Message: "database not found"}, nil
+			return api.PutDatabaseSchedule404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "database not found", "数据库不存在")}, nil
 		}
 		a.srv.log.Error("update schedule", "err", err)
 		return api.PutDatabaseSchedule500JSONResponse{}, nil
@@ -222,7 +223,7 @@ func webhookEventsFromAPI(items *[]api.WebhookCreateEvents) []string {
 func (a *apiService) CreateWebhook(ctx context.Context, request api.CreateWebhookRequestObject) (api.CreateWebhookResponseObject, error) {
 	body := request.Body
 	if body == nil {
-		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: "request body required"}, nil
+		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "request body required", "缺少请求体")}, nil
 	}
 	if err := validateWebhookURL(body.Url); err != nil {
 		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: "url: " + err.Error()}, nil
@@ -231,7 +232,8 @@ func (a *apiService) CreateWebhook(ctx context.Context, request api.CreateWebhoo
 	switch {
 	case err == nil:
 	case errors.Is(err, jobs.ErrWebhookNameExists):
-		return api.CreateWebhook409JSONResponse{Code: "name_exists", Message: err.Error()}, nil
+		// The sentinel's text is fixed English; localize the response here.
+		return api.CreateWebhook409JSONResponse{Code: "name_exists", Message: i18n.T(ctx, "a webhook with this name already exists", "同名 webhook 已存在")}, nil
 	default:
 		return api.CreateWebhook400JSONResponse{Code: "invalid_request", Message: err.Error()}, nil
 	}
@@ -245,7 +247,7 @@ func (a *apiService) DeleteWebhook(ctx context.Context, request api.DeleteWebhoo
 	case err == nil:
 		return api.DeleteWebhook204Response{}, nil
 	case errors.Is(err, jobs.ErrNotFound):
-		return api.DeleteWebhook404JSONResponse{Code: "not_found", Message: "webhook not found"}, nil
+		return api.DeleteWebhook404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "webhook not found", "webhook 不存在")}, nil
 	default:
 		a.srv.log.Error("delete webhook", "err", err)
 		return api.DeleteWebhook500JSONResponse{}, nil
@@ -258,7 +260,7 @@ func (a *apiService) DeleteWebhook(ctx context.Context, request api.DeleteWebhoo
 func (a *apiService) TestWebhook(ctx context.Context, request api.TestWebhookRequestObject) (api.TestWebhookResponseObject, error) {
 	body := request.Body
 	if body == nil || body.Url == "" {
-		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: "url is required"}, nil
+		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "url is required", "url 为必填项")}, nil
 	}
 	if err := validateWebhookURL(body.Url); err != nil {
 		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: "url: " + err.Error()}, nil
@@ -271,7 +273,7 @@ func (a *apiService) TestWebhook(ctx context.Context, request api.TestWebhookReq
 		"event": "webhook_test", "name": name, "sent_at": time.Now().Unix(),
 	})
 	if err != nil {
-		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: "name produced invalid JSON"}, nil
+		return api.TestWebhook400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "name produced invalid JSON", "name 生成的 JSON 无效")}, nil
 	}
 	delivered, detail := a.srv.testWebhookDelivery(ctx, body.Url, "webhook_test", "test-"+time.Now().UTC().Format("20060102T150405.000000000"), string(payloadBytes))
 	res := api.WebhookTestResult{Delivered: delivered}

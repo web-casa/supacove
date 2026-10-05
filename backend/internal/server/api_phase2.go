@@ -10,6 +10,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/agekey"
 	"github.com/cloudfan/supabackup/backend/internal/api"
 	"github.com/cloudfan/supabackup/backend/internal/crypto"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
@@ -50,13 +51,13 @@ func (a *apiService) GetAgeStatus(ctx context.Context, _ api.GetAgeStatusRequest
 func (a *apiService) PutAgeRecipient(ctx context.Context, request api.PutAgeRecipientRequestObject) (api.PutAgeRecipientResponseObject, error) {
 	body := request.Body
 	if body == nil || len(body.Recipient) < 20 {
-		return api.PutAgeRecipient400JSONResponse{Code: "invalid_request", Message: "recipient is required"}, nil
+		return api.PutAgeRecipient400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "recipient is required", "recipient 为必填项")}, nil
 	}
 	rcp := strings.TrimSpace(body.Recipient)
 	// Validate by parsing and confirming it is an X25519 age recipient.
 	if _, err := age.ParseX25519Recipient(rcp); err != nil {
 		return api.PutAgeRecipient400JSONResponse{Code: "invalid_recipient",
-			Message: "not a valid age recipient (expected age1…)"}, nil
+			Message: i18n.T(ctx, "not a valid age recipient (expected age1…)", "不是有效的 age recipient（应为 age1…）")}, nil
 	}
 	if err := a.srv.storeRecipient(ctx, rcp); err != nil {
 		a.srv.log.Error("store recipient", "err", err)
@@ -80,7 +81,7 @@ func (a *apiService) ListDatabases(ctx context.Context, _ api.ListDatabasesReque
 	}
 	out := make([]api.Database, 0, len(dbs))
 	for _, d := range dbs {
-		out = append(out, a.dbToAPI(d))
+		out = append(out, a.dbToAPI(d, i18n.FromContext(ctx)))
 	}
 	return api.ListDatabases200JSONResponse{Databases: out}, nil
 }
@@ -88,11 +89,11 @@ func (a *apiService) ListDatabases(ctx context.Context, _ api.ListDatabasesReque
 func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatabaseRequestObject) (api.CreateDatabaseResponseObject, error) {
 	body := request.Body
 	if body == nil || strings.TrimSpace(body.Name) == "" || body.ConnectionUri == "" {
-		return api.CreateDatabase400JSONResponse{Code: "invalid_request", Message: "name and connectionUri are required"}, nil
+		return api.CreateDatabase400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "name and connectionUri are required", "name 和 connectionUri 为必填项")}, nil
 	}
 	name := strings.TrimSpace(body.Name)
 	if len(name) > 100 {
-		return api.CreateDatabase400JSONResponse{Code: "invalid_request", Message: "name must be at most 100 characters"}, nil
+		return api.CreateDatabase400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "name must be at most 100 characters", "name 不能超过 100 个字符")}, nil
 	}
 	platform := "generic"
 	if body.Platform != nil {
@@ -104,7 +105,7 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 		// Deliberately FIXED-TEXT: url.Error and friends embed the full URI
 		// with credentials — never echo parse failures back (round-1 P1-02).
 		return api.CreateDatabase400JSONResponse{Code: "invalid_request",
-			Message: "connectionUri is not a valid, supported postgres:// URI (" + err.Error() + ")"}, nil
+			Message: i18n.T(ctx, "connectionUri is not a valid, supported postgres:// URI (", "connectionUri 不是有效且受支持的 postgres:// URI（") + err.Error() + ")"}, nil
 	}
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {
@@ -122,7 +123,7 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 			"keyword_view", ci.KeywordView(),
 			"err", pgclient.SanitizeMessage(redact.Secrets([]string{ci.Password}, err.Error())))
 		return api.CreateDatabase422JSONResponse{Code: "connection_test_failed",
-			Message: "connection test failed — verify host, port, credentials and TLS mode"}, nil
+			Message: i18n.T(ctx, "connection test failed — verify host, port, credentials and TLS mode", "连接测试失败——请检查主机、端口、凭据和 TLS 模式")}, nil
 	}
 
 	enc, err := crypto.Encrypt(a.srv.key, []byte(body.ConnectionUri))
@@ -139,7 +140,7 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 		name, platform, envTagOrEmpty(body.EnvTag), enc, test.ServerVersion, ci.SSLMode).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return api.CreateDatabase409JSONResponse{Code: "name_exists", Message: "a database with this name already exists"}, nil
+			return api.CreateDatabase409JSONResponse{Code: "name_exists", Message: i18n.T(ctx, "a database with this name already exists", "同名数据库已存在")}, nil
 		}
 		a.srv.log.Error("create database", "err", err)
 		return api.CreateDatabase500JSONResponse{}, nil
@@ -153,10 +154,12 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 	}
 	// Surface the pooled-endpoint warning at registration time (P2-01): the
 	// wizard moment is where the user can still pick the direct endpoint.
-	out := a.dbToAPI(d)
-	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); hint != "" {
-		out.PoolingWarning = &hint
-		a.srv.log.Warn("pooled endpoint registered", "id", id, "hint", hint)
+	lang := i18n.FromContext(ctx)
+	out := a.dbToAPI(d, lang)
+	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); !hint.Empty() {
+		text := hint.T(lang)
+		out.PoolingWarning = &text
+		a.srv.log.Warn("pooled endpoint registered", "id", id, "hint", hint.En)
 	}
 	return api.CreateDatabase201JSONResponse(out), nil
 }
@@ -164,13 +167,13 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 func (a *apiService) GetDatabase(ctx context.Context, request api.GetDatabaseRequestObject) (api.GetDatabaseResponseObject, error) {
 	d, err := jobs.GetDatabase(a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrNotFound) {
-		return api.GetDatabase404JSONResponse{Code: "not_found", Message: "database not found"}, nil
+		return api.GetDatabase404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "database not found", "数据库不存在")}, nil
 	}
 	if err != nil {
 		a.srv.log.Error("get database", "err", err)
 		return api.GetDatabase500JSONResponse{}, nil
 	}
-	return api.GetDatabase200JSONResponse(a.dbToAPI(d)), nil
+	return api.GetDatabase200JSONResponse(a.dbToAPI(d, i18n.FromContext(ctx))), nil
 }
 
 func (a *apiService) DeleteDatabase(ctx context.Context, request api.DeleteDatabaseRequestObject) (api.DeleteDatabaseResponseObject, error) {
@@ -194,9 +197,9 @@ func (a *apiService) DeleteDatabase(ctx context.Context, request api.DeleteDatab
 		if err := a.srv.store.DB.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM databases WHERE id = ? AND deleted_at IS NULL`, request.Id).Scan(&n); err == nil && n == 1 {
 			return api.DeleteDatabase409JSONResponse{Code: "job_active",
-				Message: "a job is pending or running for this database"}, nil
+				Message: i18n.T(ctx, "a job is pending or running for this database", "该数据库已有任务在排队或运行中")}, nil
 		}
-		return api.DeleteDatabase404JSONResponse{Code: "not_found", Message: "database not found"}, nil
+		return api.DeleteDatabase404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "database not found", "数据库不存在")}, nil
 	}
 	return api.DeleteDatabase204Response{}, nil
 }
@@ -205,12 +208,12 @@ func (a *apiService) DeleteDatabase(ctx context.Context, request api.DeleteDatab
 
 func (a *apiService) TriggerBackup(ctx context.Context, request api.TriggerBackupRequestObject) (api.TriggerBackupResponseObject, error) {
 	if _, err := jobs.GetDatabase(a.srv.store.DB, request.Id); errors.Is(err, jobs.ErrNotFound) {
-		return api.TriggerBackup404JSONResponse{Code: "not_found", Message: "database not found"}, nil
+		return api.TriggerBackup404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "database not found", "数据库不存在")}, nil
 	}
 	jobID, err := a.srv.runner.Enqueue(ctx, request.Id)
 	if errors.Is(err, jobs.ErrAlreadyQueued) {
 		return api.TriggerBackup409JSONResponse{Code: "already_queued",
-			Message: "a job is already pending or running for this database"}, nil
+			Message: i18n.T(ctx, "a job is already pending or running for this database", "该数据库已有任务在排队或运行中")}, nil
 	}
 	if err != nil {
 		a.srv.log.Error("enqueue", "err", err)
@@ -220,7 +223,7 @@ func (a *apiService) TriggerBackup(ctx context.Context, request api.TriggerBacku
 	if err != nil {
 		return api.TriggerBackup500JSONResponse{}, nil
 	}
-	return api.TriggerBackup202JSONResponse(taskToAPI(t)), nil
+	return api.TriggerBackup202JSONResponse(taskToAPI(t, i18n.FromContext(ctx))), nil
 }
 
 func (a *apiService) ListTasks(ctx context.Context, _ api.ListTasksRequestObject) (api.ListTasksResponseObject, error) {
@@ -231,7 +234,7 @@ func (a *apiService) ListTasks(ctx context.Context, _ api.ListTasksRequestObject
 	}
 	out := make([]api.Task, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, taskToAPI(t))
+		out = append(out, taskToAPI(t, i18n.FromContext(ctx)))
 	}
 	return api.ListTasks200JSONResponse{Tasks: out}, nil
 }
@@ -239,19 +242,19 @@ func (a *apiService) ListTasks(ctx context.Context, _ api.ListTasksRequestObject
 func (a *apiService) GetTask(ctx context.Context, request api.GetTaskRequestObject) (api.GetTaskResponseObject, error) {
 	t, err := jobs.GetTask(a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrNotFound) {
-		return api.GetTask404JSONResponse{Code: "not_found", Message: "task not found"}, nil
+		return api.GetTask404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "task not found", "任务不存在")}, nil
 	}
 	if err != nil {
 		return api.GetTask500JSONResponse{}, nil
 	}
-	return api.GetTask200JSONResponse(taskToAPI(t)), nil
+	return api.GetTask200JSONResponse(taskToAPI(t, i18n.FromContext(ctx))), nil
 }
 
 func (a *apiService) CancelTask(ctx context.Context, request api.CancelTaskRequestObject) (api.CancelTaskResponseObject, error) {
 	t, err := jobs.GetTask(a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrNotFound) {
 		// The contract declares 202/409/500; unknown ids are not cancelable.
-		return api.CancelTask409JSONResponse{Code: "not_found", Message: "task not found"}, nil
+		return api.CancelTask409JSONResponse{Code: "not_found", Message: i18n.T(ctx, "task not found", "任务不存在")}, nil
 	}
 	if err != nil {
 		return api.CancelTask500JSONResponse{}, nil
@@ -264,12 +267,12 @@ func (a *apiService) CancelTask(ctx context.Context, request api.CancelTaskReque
 	if err != nil {
 		return api.CancelTask500JSONResponse{}, nil
 	}
-	return api.CancelTask202JSONResponse(taskToAPI(nt)), nil
+	return api.CancelTask202JSONResponse(taskToAPI(nt, i18n.FromContext(ctx))), nil
 }
 
 // ---- mapping helpers ----
 
-func (a *apiService) dbToAPI(d *jobs.Database) api.Database {
+func (a *apiService) dbToAPI(d *jobs.Database, lang i18n.Lang) api.Database {
 	out := api.Database{
 		Id:            d.ID,
 		Name:          d.Name,
@@ -281,7 +284,7 @@ func (a *apiService) dbToAPI(d *jobs.Database) api.Database {
 		UpdatedAt:     d.UpdatedAt,
 	}
 	if d.LastTask != nil {
-		t := taskToAPI(d.LastTask)
+		t := taskToAPI(d.LastTask, lang)
 		out.LastTask = &t
 	}
 	return out
@@ -294,7 +297,7 @@ func ranVerification(status string) bool {
 	return status == "verified" || status == "failed" || status == "unsupported"
 }
 
-func taskToAPI(t *jobs.Task) api.Task {
+func taskToAPI(t *jobs.Task, lang i18n.Lang) api.Task {
 	out := api.Task{
 		Id:         t.ID,
 		DatabaseId: t.DatabaseID,
@@ -305,7 +308,7 @@ func taskToAPI(t *jobs.Task) api.Task {
 		ec := api.TaskErrorClass(t.ErrorClass)
 		out.ErrorClass = &ec
 		if t.Status == "failed" {
-			rem := jobs.RemediationFor(t.ErrorClass)
+			rem := jobs.RemediationMsg(t.ErrorClass).T(lang)
 			out.Remediation = &rem
 		}
 	}

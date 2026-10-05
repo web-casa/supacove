@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	"github.com/cloudfan/supabackup/backend/internal/redact"
@@ -59,7 +60,7 @@ func (a *apiService) ListDestinations(ctx context.Context, _ api.ListDestination
 func (a *apiService) CreateDestination(ctx context.Context, request api.CreateDestinationRequestObject) (api.CreateDestinationResponseObject, error) {
 	body := request.Body
 	if body == nil {
-		return api.CreateDestination400JSONResponse{Code: "invalid_request", Message: "request body required"}, nil
+		return api.CreateDestination400JSONResponse{Code: "invalid_request", Message: i18n.T(ctx, "request body required", "缺少请求体")}, nil
 	}
 	platform := "s3"
 	if body.Platform != nil {
@@ -83,7 +84,7 @@ func (a *apiService) CreateDestination(ctx context.Context, request api.CreateDe
 	switch {
 	case err == nil:
 	case errors.Is(err, jobs.ErrDestinationNameExists):
-		return api.CreateDestination409JSONResponse{Code: "name_exists", Message: "a destination with this name already exists"}, nil
+		return api.CreateDestination409JSONResponse{Code: "name_exists", Message: i18n.T(ctx, "a destination with this name already exists", "同名目的地已存在")}, nil
 	default:
 		// Live-test or validation failure. The error text may contain the
 		// endpoint (not secret) — but the secret key is redacted from any
@@ -111,7 +112,7 @@ func (a *apiService) DeleteDestination(ctx context.Context, request api.DeleteDe
 	case err == nil:
 		return api.DeleteDestination204Response{}, nil
 	case errors.Is(err, jobs.ErrDestinationNotFound):
-		return api.DeleteDestination404JSONResponse{Code: "not_found", Message: "destination not found"}, nil
+		return api.DeleteDestination404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil
 	default:
 		return api.DeleteDestination409JSONResponse{Code: "upload_in_flight", Message: err.Error()}, nil
 	}
@@ -120,7 +121,7 @@ func (a *apiService) DeleteDestination(ctx context.Context, request api.DeleteDe
 func (a *apiService) TestDestination(ctx context.Context, request api.TestDestinationRequestObject) (api.TestDestinationResponseObject, error) {
 	dest, err := a.srv.runner.GetDestination(ctx, request.Id)
 	if errors.Is(err, jobs.ErrDestinationNotFound) {
-		return api.TestDestination404JSONResponse{Code: "not_found", Message: "destination not found"}, nil
+		return api.TestDestination404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil
 	}
 	if err != nil {
 		return api.TestDestination500JSONResponse{}, nil
@@ -139,7 +140,7 @@ func (a *apiService) TestDestination(ctx context.Context, request api.TestDestin
 func (a *apiService) ReconcileDestination(ctx context.Context, request api.ReconcileDestinationRequestObject) (api.ReconcileDestinationResponseObject, error) {
 	report, err := a.srv.runner.Reconcile(ctx, request.Id)
 	if errors.Is(err, jobs.ErrDestinationNotFound) {
-		return api.ReconcileDestination404JSONResponse{Code: "not_found", Message: "destination not found"}, nil
+		return api.ReconcileDestination404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil
 	}
 	if err != nil {
 		a.srv.log.Error("reconcile", "err", err)
@@ -167,7 +168,7 @@ func (a *apiService) AssignDatabaseDestination(ctx context.Context, request api.
 			return api.AssignDatabaseDestination409JSONResponse{Code: "not_assignable", Message: err.Error()}, nil
 		}
 		if errors.Is(err, jobs.ErrDestinationNotFound) {
-			return api.AssignDatabaseDestination409JSONResponse{Code: "not_assignable", Message: "destination not found"}, nil
+			return api.AssignDatabaseDestination409JSONResponse{Code: "not_assignable", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil
 		}
 		a.srv.log.Error("assign destination", "err", err)
 		return api.AssignDatabaseDestination500JSONResponse{}, nil
@@ -216,14 +217,14 @@ func openUnderStaging(stagingDir, path string) (*os.File, os.FileInfo, error) {
 func (a *apiService) GetTaskDownloadURL(ctx context.Context, request api.GetTaskDownloadURLRequestObject) (api.GetTaskDownloadURLResponseObject, error) {
 	t, err := jobs.GetTask(a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrNotFound) {
-		return api.GetTaskDownloadURL404JSONResponse{Code: "not_found", Message: "task not found"}, nil
+		return api.GetTaskDownloadURL404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "task not found", "任务不存在")}, nil
 	}
 	if err != nil {
 		return api.GetTaskDownloadURL500JSONResponse{}, nil
 	}
 	if t.RemoteState != "committed" || t.RemoteObjectKey == "" {
 		return api.GetTaskDownloadURL409JSONResponse{Code: "not_remotely_committed",
-			Message: "this backup is not committed to a remote destination"}, nil
+			Message: i18n.T(ctx, "this backup is not committed to a remote destination", "这份备份尚未提交到远端目的地")}, nil
 	}
 	backend, err := a.srv.runner.BuildBackendByID(ctx, t.DestinationID)
 	if err != nil {
@@ -248,13 +249,13 @@ func (a *apiService) GetTaskDownloadURL(ctx context.Context, request api.GetTask
 func (a *apiService) DownloadTask(ctx context.Context, request api.DownloadTaskRequestObject) (api.DownloadTaskResponseObject, error) {
 	t, err := jobs.GetTask(a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrNotFound) {
-		return api.DownloadTask404JSONResponse{Code: "not_found", Message: "task not found"}, nil
+		return api.DownloadTask404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "task not found", "任务不存在")}, nil
 	}
 	if err != nil {
 		return api.DownloadTask500JSONResponse{}, nil
 	}
 	if t.Status != "succeeded" {
-		return api.DownloadTask404JSONResponse{Code: "not_available", Message: "no local artifact for this task"}, nil
+		return api.DownloadTask404JSONResponse{Code: "not_available", Message: i18n.T(ctx, "no local artifact for this task", "该任务没有本地工件")}, nil
 	}
 	artifactPath, err := a.srv.runner.TaskArtifactPath(ctx, request.Id)
 	if err != nil {
@@ -262,12 +263,12 @@ func (a *apiService) DownloadTask(ctx context.Context, request api.DownloadTaskR
 	}
 	if artifactPath == "" {
 		return api.DownloadTask404JSONResponse{Code: "not_available",
-			Message: "no local artifact for this task"}, nil
+			Message: i18n.T(ctx, "no local artifact for this task", "该任务没有本地工件")}, nil
 	}
 	f, st, err := openUnderStaging(a.srv.stagingDir, artifactPath)
 	if err != nil {
 		a.srv.log.Error("download open failed (containment or absence)", "job", request.Id, "err", err)
-		return api.DownloadTask404JSONResponse{Code: "not_available", Message: "artifact file no longer present"}, nil
+		return api.DownloadTask404JSONResponse{Code: "not_available", Message: i18n.T(ctx, "artifact file no longer present", "工件文件已不存在")}, nil
 	}
 	return api.DownloadTask200ApplicationoctetStreamResponse{
 		Body:          f,
@@ -282,20 +283,20 @@ func (a *apiService) DownloadTask(ctx context.Context, request api.DownloadTaskR
 func (a *apiService) DownloadRecoveryKit(ctx context.Context, request api.DownloadRecoveryKitRequestObject) (api.DownloadRecoveryKitResponseObject, error) {
 	t, err := jobs.GetTask(a.srv.store.DB, request.Id)
 	if errors.Is(err, jobs.ErrNotFound) {
-		return api.DownloadRecoveryKit404JSONResponse{Code: "not_found", Message: "task not found"}, nil
+		return api.DownloadRecoveryKit404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "task not found", "任务不存在")}, nil
 	}
 	if err != nil {
 		return api.DownloadRecoveryKit500JSONResponse{}, nil
 	}
 	if t.Status != "succeeded" || !t.HasRecoveryKit {
 		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available",
-			Message: "no recovery kit for this task"}, nil
+			Message: i18n.T(ctx, "no recovery kit for this task", "该任务没有恢复套件")}, nil
 	}
 	f, st, err := openUnderStaging(a.srv.stagingDir, t.RecoveryKitPath)
 	if err != nil {
 		a.srv.log.Error("kit open failed (containment or absence)", "job", request.Id, "err", err)
 		return api.DownloadRecoveryKit404JSONResponse{Code: "not_available",
-			Message: "recovery kit file no longer present; it is regenerated at the next startup"}, nil
+			Message: i18n.T(ctx, "recovery kit file no longer present; it is regenerated at the next startup", "恢复套件文件已不存在；下次启动时会重新生成")}, nil
 	}
 	return api.DownloadRecoveryKit200TextxShellscriptResponse{
 		Body:          f,

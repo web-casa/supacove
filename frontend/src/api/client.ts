@@ -1,6 +1,7 @@
 // Typed API client generated from the OpenAPI contract (types) plus a thin
 // runtime wrapper. Generated types do not replace server-side validation.
 import type { operations } from "./schema.d";
+import { getLang } from "../i18n";
 
 type User = operations["getAuthMe"]["responses"]["200"]["content"]["application/json"];
 type HealthDetails = operations["getHealthDetails"]["responses"]["200"]["content"]["application/json"];
@@ -33,6 +34,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body) headers.set("Content-Type", "application/json");
   if (init?.method && init.method !== "GET") headers.set("X-CSRF-Token", csrfToken());
+  // Server-side messages (validation errors, remediation) follow the UI language.
+  headers.set("Accept-Language", getLang());
 
   const resp = await fetch(path, { ...init, headers, credentials: "same-origin" });
   if (resp.status === 204) return undefined as T;

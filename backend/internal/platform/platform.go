@@ -4,7 +4,11 @@
 // never credentials or API calls.
 package platform
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
+)
 
 // Platform represents a known PostgreSQL hosting platform.
 type Platform string
@@ -49,7 +53,9 @@ func Detect(host string) Platform {
 }
 
 // PoolingHint returns a human-readable warning if the host/port suggests a
-// pooled connection that is incompatible with pg_dump.
+// pooled connection that is incompatible with pg_dump. Both languages are
+// returned so the caller picks: API responses localize via Accept-Language,
+// persisted job records stay English.
 //
 // Detection covers both pooling markers documented by the platforms:
 //   - Supabase pooler hostnames (pooler.<ref>.supabase.com): port 6543 is
@@ -57,7 +63,7 @@ func Detect(host string) Platform {
 //   - Neon pooled endpoints embed a "-pooler" label in the hostname
 //     (ep-xxx-pooler.<region>.aws.neon.tech) and are transaction-mode
 //     pgbouncer regardless of port; the direct endpoint omits the label.
-func PoolingHint(host string, port string) string {
+func PoolingHint(host string, port string) i18n.Msg {
 	h := normalizeHost(host)
 	p := port
 	if p == "" {
@@ -68,22 +74,31 @@ func PoolingHint(host string, port string) string {
 	case hostSuffix(h, "supabase.co") || hostSuffix(h, "supabase.com"):
 		if strings.HasPrefix(h, "pooler.") || strings.Contains(h, ".pooler.") {
 			if p == "6543" {
-				return "Supabase transaction pooler (port 6543) is NOT compatible with pg_dump. Use the session pooler (port 5432) or the direct connection string."
+				return i18n.Msg{
+					En: "Supabase transaction pooler (port 6543) is NOT compatible with pg_dump. Use the session pooler (port 5432) or the direct connection string.",
+					Zh: "Supabase transaction pooler（端口 6543）与 pg_dump 不兼容。请使用 session pooler（端口 5432）或直连字符串。",
+				}
 			}
-			return "" // session pooler is OK
+			return i18n.Msg{} // session pooler is OK
 		}
-		return ""
+		return i18n.Msg{}
 	// Neon: the -pooler label marks the pooled endpoint on ANY port.
 	case hostSuffix(h, "neon.tech"):
 		if p == "6543" {
-			return "Neon pooled connection (port 6543) is NOT compatible with pg_dump. Use the direct connection string (port 5432, no '-pooler' in the host)."
+			return i18n.Msg{
+				En: "Neon pooled connection (port 6543) is NOT compatible with pg_dump. Use the direct connection string (port 5432, no '-pooler' in the host).",
+				Zh: "Neon 池化连接（端口 6543）与 pg_dump 不兼容。请使用直连字符串（端口 5432，主机名中不含“-pooler”）。",
+			}
 		}
 		if containsLabel(h, "-pooler") {
-			return "This Neon endpoint is a POOLED endpoint ('-pooler' host) and is NOT compatible with pg_dump, regardless of port. Use the direct connection string (same host without '-pooler', port 5432)."
+			return i18n.Msg{
+				En: "This Neon endpoint is a POOLED endpoint ('-pooler' host) and is NOT compatible with pg_dump, regardless of port. Use the direct connection string (same host without '-pooler', port 5432).",
+				Zh: "这个 Neon 端点是池化端点（主机名含“-pooler”），无论端口如何都与 pg_dump 不兼容。请使用直连字符串（同一主机去掉“-pooler”，端口 5432）。",
+			}
 		}
-		return ""
+		return i18n.Msg{}
 	}
-	return ""
+	return i18n.Msg{}
 }
 
 // containsLabel reports whether part contains marker such that it is

@@ -37,29 +37,29 @@ func TestDetectPlatforms(t *testing.T) {
 }
 
 func TestPoolingHints(t *testing.T) {
-	if h := PoolingHint("pooler.supabase.com", "6543"); h == "" {
+	if h := PoolingHint("pooler.supabase.com", "6543"); h.En == "" {
 		t.Error("Supabase transaction pooler must produce a warning")
 	}
-	if h := PoolingHint("pooler.supabase.com", "5432"); h != "" {
+	if h := PoolingHint("pooler.supabase.com", "5432"); h.En != "" {
 		t.Errorf("Supabase session pooler should be OK: %q", h)
 	}
-	if h := PoolingHint("db.ref.supabase.co", "6543"); h != "" {
+	if h := PoolingHint("db.ref.supabase.co", "6543"); h.En != "" {
 		t.Errorf("direct Supabase host should not warn on 6543: %q", h)
 	}
 	// Neon port marker
-	if h := PoolingHint("ep-name.neon.tech", "6543"); h == "" {
+	if h := PoolingHint("ep-name.neon.tech", "6543"); h.En == "" {
 		t.Error("Neon pooled connection must produce a warning")
 	}
 	// Neon -pooler HOSTNAME marker on the default port (P2-01: the review's
 	// exact false-negative case — pooled endpoint, port 5432, no warning).
-	if h := PoolingHint("ep-cool-123456-pooler.eu-central-1.aws.neon.tech", "5432"); h == "" {
+	if h := PoolingHint("ep-cool-123456-pooler.eu-central-1.aws.neon.tech", "5432"); h.En == "" {
 		t.Error("Neon '-pooler' endpoint must warn even on port 5432")
 	}
-	if h := PoolingHint("ep-cool-123456.eu-central-1.aws.neon.tech", "5432"); h != "" {
+	if h := PoolingHint("ep-cool-123456.eu-central-1.aws.neon.tech", "5432"); h.En != "" {
 		t.Errorf("Neon direct endpoint should not warn: %q", h)
 	}
 	// lookalike hosts must not inherit platform hints
-	if h := PoolingHint("pooler.supabase.com.evil.invalid", "6543"); h != "" {
+	if h := PoolingHint("pooler.supabase.com.evil.invalid", "6543"); h.En != "" {
 		t.Errorf("lookalike host must not warn: %q", h)
 	}
 }

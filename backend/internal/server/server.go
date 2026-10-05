@@ -25,6 +25,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 
 	"github.com/cloudfan/supabackup/backend/internal/api"
+	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/auth"
 	"github.com/cloudfan/supabackup/backend/internal/config"
 	"github.com/cloudfan/supabackup/backend/internal/db"
@@ -139,6 +140,8 @@ func New(store *db.Store, authStore *auth.Store, cfg *config.Config, key []byte,
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID, s.requestLogger, s.recoverer, s.secureHeaders)
+	// Response language for every handler and guard error (Accept-Language).
+	r.Use(i18n.Middleware)
 	// Only trust X-Forwarded-For from explicitly configured proxy ranges
 	// (review P0-01: unconditional RealIP let any client rotate spoofed
 	// headers to bypass login rate limiting).
@@ -149,36 +152,36 @@ func (s *Server) Router() http.Handler {
 		}
 		r.Use(chimw.ClientIPFromXFF(prefixes...))
 	}
-	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", i18n.T(req.Context(), "resource not found", "资源不存在"))
 	})
-	r.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", i18n.T(req.Context(), "method not allowed", "不允许的请求方法"))
 	})
 
 	strictOpts := api.StrictHTTPServerOptions{
-		RequestErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+		RequestErrorHandlerFunc: func(w http.ResponseWriter, req *http.Request, err error) {
 			// Decode failures must use the contract Error shape; an
 			// oversized body is 413, everything else is a 400.
 			var mbe *http.MaxBytesError
 			if errorsAs(err, &mbe) {
 				writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large",
-					"request body exceeds the allowed size")
+					i18n.T(req.Context(), "request body exceeds the allowed size", "请求体超出允许的大小"))
 				return
 			}
-			writeError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+			writeError(w, http.StatusBadRequest, "invalid_request", i18n.T(req.Context(), "malformed request body", "请求体格式错误"))
 		},
-		ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, req *http.Request, err error) {
 			s.log.Error("handler error", "err", err)
-			writeError(w, http.StatusInternalServerError, "internal", "unexpected internal error")
+			writeError(w, http.StatusInternalServerError, "internal", i18n.T(req.Context(), "unexpected internal error", "意外的内部错误"))
 		},
 	}
 	apiRouter := chi.NewRouter()
-	apiRouter.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "not_found", "resource not found")
+	apiRouter.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", i18n.T(req.Context(), "resource not found", "资源不存在"))
 	})
-	apiRouter.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	apiRouter.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", i18n.T(req.Context(), "method not allowed", "不允许的请求方法"))
 	})
 	// HandlerWithOptions (not HandlerFromMux) so that std-layer parameter
 	// errors (e.g. the contract-required CSRF header on logout) also use the
@@ -186,16 +189,16 @@ func (s *Server) Router() http.Handler {
 	// P1-09 remainder).
 	apiHandler := api.HandlerWithOptions(api.NewStrictHandlerWithOptions(&apiService{srv: s}, nil, strictOpts), api.ChiServerOptions{
 		BaseRouter: apiRouter,
-		ErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, err error) {
+		ErrorHandlerFunc: func(w http.ResponseWriter, req *http.Request, err error) {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		},
 	})
 	if mux, ok := apiHandler.(*chi.Mux); ok {
-		mux.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-			writeError(w, http.StatusNotFound, "not_found", "resource not found")
+		mux.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			writeError(w, http.StatusNotFound, "not_found", i18n.T(req.Context(), "resource not found", "资源不存在"))
 		})
-		mux.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		mux.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", i18n.T(req.Context(), "method not allowed", "不允许的请求方法"))
 		})
 	}
 	// The API mounts under the real /api prefix (spec servers.url = /api); the
@@ -238,7 +241,7 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 			if rv := recover(); rv != nil {
 				s.log.Error("panic recovered", "panic", fmt.Sprint(rv), "stack", string(debug.Stack()))
 				if strings.HasPrefix(req.URL.Path, "/api") {
-					writeError(w, http.StatusInternalServerError, "internal", "unexpected internal error")
+					writeError(w, http.StatusInternalServerError, "internal", i18n.T(req.Context(), "unexpected internal error", "意外的内部错误"))
 				} else {
 					http.Error(w, "internal server error", http.StatusInternalServerError)
 				}
@@ -309,17 +312,17 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			}
 			if mt != "application/json" {
 				writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
-					"Content-Type must be application/json")
+					i18n.T(req.Context(), "Content-Type must be application/json", "Content-Type 必须是 application/json"))
 				return
 			}
 		}
 		// A repeated Origin header is never a valid browser signature.
 		if len(req.Header.Values("Origin")) > 1 {
-			writeError(w, http.StatusForbidden, "cross_origin", "invalid Origin header")
+			writeError(w, http.StatusForbidden, "cross_origin", i18n.T(req.Context(), "invalid Origin header", "Origin 头无效"))
 			return
 		}
 		if !safeMethod(req.Method) && !s.sameOrigin(req) {
-			writeError(w, http.StatusForbidden, "cross_origin", "cross-origin state changes are rejected")
+			writeError(w, http.StatusForbidden, "cross_origin", i18n.T(req.Context(), "cross-origin state changes are rejected", "已拒绝跨域的状态变更请求"))
 			return
 		}
 
@@ -335,7 +338,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			// bypass the limiter).
 			ip := s.clientIP(req)
 			if !s.lim.Allow(ip) {
-				writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, try again later")
+				writeError(w, http.StatusTooManyRequests, "rate_limited", i18n.T(req.Context(), "too many attempts, try again later", "尝试次数过多，请稍后再试"))
 				return
 			}
 			if req.ContentLength != 0 {
@@ -363,15 +366,15 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		user, raw, err := s.session(req)
 		if err != nil {
 			s.log.Error("session lookup", "err", err)
-			writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "session store unavailable")
+			writeError(w, http.StatusServiceUnavailable, "storage_unavailable", i18n.T(req.Context(), "session store unavailable", "会话存储不可用"))
 			return
 		}
 		if user == nil {
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "login required")
+			writeError(w, http.StatusUnauthorized, "unauthenticated", i18n.T(req.Context(), "login required", "需要登录"))
 			return
 		}
 		if !safeMethod(req.Method) && !s.csrfValid(raw, req) {
-			writeError(w, http.StatusForbidden, "csrf", "missing or invalid CSRF token")
+			writeError(w, http.StatusForbidden, "csrf", i18n.T(req.Context(), "missing or invalid CSRF token", "缺少或无效的 CSRF 令牌"))
 			return
 		}
 		ctx := withUser(req.Context(), user)
@@ -390,15 +393,15 @@ func (s *Server) readWholeJSON(w http.ResponseWriter, req *http.Request) ([]byte
 		var mbe *http.MaxBytesError
 		if errorsAs(err, &mbe) {
 			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large",
-				"request body exceeds the allowed size")
+				i18n.T(req.Context(), "request body exceeds the allowed size", "请求体超出允许的大小"))
 		} else {
-			writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
+			writeError(w, http.StatusBadRequest, "invalid_request", i18n.T(req.Context(), "could not read request body", "无法读取请求体"))
 		}
 		return nil, false
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := dec.Decode(new(json.RawMessage)); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "malformed request body")
+		writeError(w, http.StatusBadRequest, "invalid_request", i18n.T(req.Context(), "malformed request body", "请求体格式错误"))
 		return nil, false
 	}
 	// A second Decode MUST hit exactly EOF: More() only looks inside the
@@ -614,7 +617,7 @@ func (s *Server) staticHandler() http.Handler {
 	fileServer := http.FileServerFS(dist)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != http.MethodGet && req.Method != http.MethodHead {
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", i18n.T(req.Context(), "method not allowed", "不允许的请求方法"))
 			return
 		}
 		path := strings.TrimPrefix(req.URL.Path, "/")
