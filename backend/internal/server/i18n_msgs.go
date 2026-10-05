@@ -98,11 +98,18 @@ var pgURIFixed = map[string]string{
 	"URI is missing the user":                                                     "URI 缺少用户",
 	"URI is missing the database name":                                            "URI 缺少数据库名",
 	"connection fields must not contain control characters (NUL, CR, LF, VT, FF)": "连接字段不能包含控制字符（NUL、CR、LF、VT、FF）",
+	"application_name too long":                                                   "application_name 过长",
+	"remote connections must set sslmode explicitly (recommend verify-full; allow/prefer/require/verify-ca/disable are accepted for explicit choices)": "远程连接必须显式设置 sslmode（推荐 verify-full；也接受 allow/prefer/require/verify-ca/disable）",
 }
 
 var pgURIPrefixes = map[string]string{
-	"invalid port ": "端口无效：",
-	"invalid host ": "主机名无效：",
+	"invalid port ":                     "端口无效：",
+	"invalid host ":                     "主机名无效：",
+	"invalid sslmode ":                  "sslmode 无效：",
+	"invalid connect_timeout ":          "connect_timeout 无效：",
+	"application_name: ":                "application_name：",
+	"parameter ":                        "参数 ",
+	"unsupported connection parameter ": "不支持的连接参数 ",
 }
 
 // destinationMsg localizes the app-owned destination name and storage config
