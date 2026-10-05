@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -393,14 +394,14 @@ func (s *Server) testWebhookDelivery(ctx context.Context, url, eventType, eventI
 // count a size that only has a current meaning).
 func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) (api.GetStatsResponseObject, error) {
 	var total, succeeded, failed, canceled int64
-	var avgDur float64
+	var avgDur sql.NullFloat64
 	var totalArtifact, totalDump int64
 	err := a.srv.store.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 END), 0),
 		       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 END), 0),
 		       COALESCE(SUM(CASE WHEN status = 'canceled' THEN 1 END), 0),
-		       COALESCE(AVG(CASE WHEN status = 'succeeded' AND duration_secs > 0 THEN duration_secs END), 0),
+		       AVG(CASE WHEN status = 'succeeded' AND duration_secs > 0 THEN duration_secs END),
 		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN artifact_size END), 0)
 		FROM jobs WHERE status NOT IN ('pending','running')`).
 		Scan(&total, &succeeded, &failed, &canceled, &avgDur, &totalArtifact)
@@ -427,23 +428,38 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 	}
 	successRate := rate(succeeded, total)
 
-	// Segmented success rates (Phase 8): the single job success rate conflates
-	// stages, so expose each stage's own denominator honestly.
-	//   export: dump finished without the storage_upload class
-	//   remote: committed (or deleted after committed life) vs upload failures
-	//   verify: verified vs failed/unsupported among succeeded backups
-	var exportOK, remoteOK, remoteFailed, vOK, vBad int64
+	// Segmented success rates (Phase 8): each stage gets its own honest
+	// denominator over TERMINAL jobs.
+	//   export: dump phase succeeded = succeeded jobs PLUS upload-phase
+	//     failures (the dump itself was fine; only the upload failed).
+	//     Canceled/interrupted jobs never attempted a dump — excluded.
+	//   remote: committed (or deleted after committed life) vs upload failures.
+	//   verify: verified vs failed/unsupported among SUCCEEDED backups
+	//     (matches the contract wording exactly).
+	var exportOK, remoteOK, remoteFailed, vOK, vBad, terminal int64
 	err = a.srv.store.DB.QueryRowContext(ctx, `
 		SELECT
-		  COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN status = 'succeeded' OR
+		                    (status = 'failed' AND error_class = 'storage_upload') THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN remote_state IN ('committed','deleted') THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN status = 'failed' AND error_class = 'storage_upload' THEN 1 END), 0),
-		  COALESCE(SUM(CASE WHEN verify_status = 'verified' THEN 1 END), 0),
-		  COALESCE(SUM(CASE WHEN verify_status IN ('failed','unsupported') THEN 1 END), 0)
+		  COALESCE(SUM(CASE WHEN status = 'succeeded' AND verify_status = 'verified' THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN status = 'succeeded' AND verify_status IN ('failed','unsupported') THEN 1 END), 0),
+		  COUNT(*)
 		FROM jobs WHERE status NOT IN ('pending','running')`).
-		Scan(&exportOK, &remoteOK, &remoteFailed, &vOK, &vBad)
+		Scan(&exportOK, &remoteOK, &remoteFailed, &vOK, &vBad, &terminal)
 	if err != nil {
 		a.srv.log.Error("stats segment query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
+	}
+
+	// Notification delivery segment (Phase 7 outbox): delivered vs dead.
+	var nDelivered, nDead int64
+	if err := a.srv.store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(CASE WHEN state = 'delivered' THEN 1 END), 0),
+		       COALESCE(SUM(CASE WHEN state = 'dead' THEN 1 END), 0)
+		FROM notification_outbox`).Scan(&nDelivered, &nDead); err != nil {
+		a.srv.log.Error("stats notify segment query", "err", err)
 		return api.GetStats500JSONResponse{}, nil
 	}
 
@@ -477,7 +493,11 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 		return api.GetStats500JSONResponse{}, nil
 	}
 
-	avg := avgDur
+	var avg *float64
+	if avgDur.Valid {
+		v := avgDur.Float64
+		avg = &v // no measured rows → null (unknown), never a fake 0.0s
+	}
 	last := lastSuccess
 	uptime := int64(time.Since(a.srv.started).Seconds())
 	out := api.GetStats200JSONResponse{
@@ -486,7 +506,7 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 		Failed:             failed,
 		Canceled:           canceled,
 		SuccessRate:        successRate,
-		AvgDurationSecs:    &avg,
+		AvgDurationSecs:    avg,
 		TotalArtifactBytes: totalArtifact,
 		TotalDumpBytes:     &totalDump,
 		TotalSourceBytes:   &totalSource,
@@ -495,8 +515,9 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 		Destinations:       destCount,
 		UptimeSeconds:      &uptime,
 	}
-	out.ExportSuccessRate = rate(exportOK, total)
+	out.ExportSuccessRate = rate(exportOK, terminal)
 	out.RemoteSuccessRate = rate(remoteOK, remoteOK+remoteFailed)
 	out.VerifySuccessRate = rate(vOK, vOK+vBad)
+	out.NotifySuccessRate = rate(nDelivered, nDelivered+nDead)
 	return out, nil
 }

@@ -1,1 +1,0 @@
-go test -count=1 -run TestDbgNotifierDelivery -v ./internal/outbox 2>&1 | entry:|entry:|webhook|---" | head -8

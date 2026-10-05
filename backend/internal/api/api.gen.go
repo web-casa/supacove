@@ -438,7 +438,7 @@ type ScheduleUpdate struct {
 
 // StatsSummary defines model for StatsSummary.
 type StatsSummary struct {
-	// AvgDurationSecs Measured dump durations only (rows that never recorded one are excluded, not averaged as 0).
+	// AvgDurationSecs Mean BACKUP EXECUTION duration (dump through remote commit — it includes the upload, not only pg_dump) over succeeded jobs that recorded one; null when no job has a measurement.
 	AvgDurationSecs   *float64 `json:"avgDurationSecs"`
 	Canceled          int64    `json:"canceled"`
 	Databases         int      `json:"databases"`
@@ -446,6 +446,9 @@ type StatsSummary struct {
 	ExportSuccessRate *float64 `json:"exportSuccessRate"`
 	Failed            int64    `json:"failed"`
 	LastSuccessAt     *int64   `json:"lastSuccessAt,omitempty"`
+
+	// NotifySuccessRate Delivered vs dead entries in the notification outbox (null when the outbox is empty).
+	NotifySuccessRate *float64 `json:"notifySuccessRate"`
 
 	// RemoteSuccessRate Remote commits vs upload failures (null when no upload attempted).
 	RemoteSuccessRate *float64 `json:"remoteSuccessRate"`
@@ -457,7 +460,7 @@ type StatsSummary struct {
 	// TotalArtifactBytes Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
 	TotalArtifactBytes int64 `json:"totalArtifactBytes"`
 
-	// TotalDumpBytes Sum of compressed pg_dump archive sizes over succeeded backups (volume metric 2).
+	// TotalDumpBytes Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind.
 	TotalDumpBytes *int64 `json:"totalDumpBytes,omitempty"`
 	TotalJobs      int64  `json:"totalJobs"`
 

@@ -27,8 +27,9 @@ for i in $(seq 60); do
 done
 echo "container ready on port $PORT"
 
-# 2) LOW-COMPRESSION fixture: true random bytes hex-encoded (payload is
-#    incompressible entropy; hex keeps it text so zlib cannot find structure).
+# 2) Random hex TEXT fixture: true random bytes hex-encoded. zlib still
+#    compresses hex somewhat (measured ratio ≈0.57) — it is NOT the worst
+#    case; use bytea for a truly incompressible payload.
 echo "== seeding $ROWS rows =="
 SEED_T0=$(date +%s)
 docker exec "$CONTAINER" psql -U postgres -d capdb -v ON_ERROR_STOP=1 -c \
@@ -70,8 +71,9 @@ age-keygen -o "$WORK/identity.txt" >/dev/null 2>&1
 echo "== age encrypt =="
 phase encrypt age --encrypt -i "$WORK/identity.txt" -o "$AGE_FILE" "$WORK/bench.dump"
 
-# 5) Embedded-instance restore (the verifier's exact phases: initdb →
-#    start → pg_restore --exit-on-error → stop), measured end-to-end.
+# 5) Embedded-instance restore (the verifier's core phases: initdb →
+#    start → pg_restore --exit-on-error → stop). The start/stop steps are
+#    NOT part of the timed restore figure.
 echo "== embedded restore =="
 VDIR="$WORK/verify"; mkdir -p "$VDIR/data" "$VDIR/sock"
 phase initdb /usr/lib/postgresql/18/bin/initdb -D "$VDIR/data" -A trust -U verifier

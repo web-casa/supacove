@@ -15,18 +15,29 @@ func TestPhase8GetStatsRegression(t *testing.T) {
 	env := newTestEnv(t)
 	env.bootstrapAdmin(t)
 
-	// Empty database: every segment denominator is zero (rates null), the
-	// request must still be 200.
+	// Empty database: every segment denominator is zero — the rates must be
+	// null and the avg duration unknown (never a fake 0).
 	code, body := getJSON(t, env, "/api/stats")
 	if code != 200 {
 		t.Fatalf("empty-db stats status = %d (%v)", code, body)
 	}
-	if b, _ := json.Marshal(body); strings.Contains(string(b), "0.00") && false {
-		_ = b
+	b, _ := json.Marshal(body)
+	for _, want := range []string{
+		`"successRate":null`,
+		`"exportSuccessRate":null`,
+		`"remoteSuccessRate":null`,
+		`"verifySuccessRate":null`,
+		`"notifySuccessRate":null`,
+		`"avgDurationSecs":null`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("empty-db stats missing %s: %s", want, b)
+		}
 	}
 
-	// Populate: a succeeded job with both sizes and a measured duration, a
-	// failed upload, and a failed job.
+	// Populate MIXED states: one succeeded/verified/committed with a real
+	// measurement + stats row; one upload-phase failure (dump was fine); one
+	// pre-dump failure (network); one verify-failed success.
 	if _, err := env.store.DB.Exec(`
 		INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
 		VALUES ('sdb', 'generic', '', 'x', 0, 0)`); err != nil {
@@ -36,8 +47,24 @@ func TestPhase8GetStatsRegression(t *testing.T) {
 	_ = env.store.DB.QueryRow(`SELECT id FROM databases WHERE name='sdb'`).Scan(&dbID)
 	if _, err := env.store.DB.Exec(`
 		INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at,
-		                  artifact_size, duration_secs, source_db_bytes, verify_status, remote_state)
-		VALUES (?, 'succeeded', 0, 0, 100, 110, 405, 10.0, 873, 'verified', 'committed')`, dbID); err != nil {
+		                  artifact_size, duration_secs, source_db_bytes, verify_status, remote_state, error_class)
+		VALUES (?, 'succeeded', 0, 0, 100, 110, 405, 10.0, 873, 'verified', 'committed', '')`, dbID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.DB.Exec(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at, error_class)
+		VALUES (?, 'failed', 0, 0, 120, 'storage_upload')`, dbID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.DB.Exec(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at, error_class)
+		VALUES (?, 'failed', 0, 0, 130, 'network')`, dbID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.DB.Exec(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at,
+		                  artifact_size, verify_status)
+		VALUES (?, 'succeeded', 0, 0, 140, 100, 'failed')`, dbID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.store.DB.Exec(`
@@ -51,20 +78,23 @@ func TestPhase8GetStatsRegression(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("populated stats status = %d (%v)", code, body)
 	}
-	b, _ := json.Marshal(body)
+	b, _ = json.Marshal(body)
+	// terminal = 4; export OK = succeeded(2) + upload-failure(1) = 3 → 75%.
+	// remote OK = 1 committed vs 1 failure → 50%. verify: 1/2 → 50%.
 	for _, want := range []string{
+		`"totalJobs":4`,
 		`"totalDumpBytes":300`,
-		`"totalArtifactBytes":405`,
+		`"totalArtifactBytes":505`,
 		`"totalSourceBytes":873`,
-		`"exportSuccessRate":100`,
-		`"remoteSuccessRate":100`,
-		`"verifySuccessRate":100`,
+		`"exportSuccessRate":75`,
+		`"remoteSuccessRate":50`,
+		`"verifySuccessRate":50`,
 	} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("stats missing %s: %s", want, b)
 		}
 	}
-	if strings.Contains(string(b), `"avgDurationSecs":0`) {
-		t.Fatalf("avgDurationSecs must reflect the measured 10s, not a zero average: %s", b)
+	if !strings.Contains(string(b), `"avgDurationSecs":10`) {
+		t.Fatalf("avgDurationSecs must be the measured 10s: %s", b)
 	}
 }

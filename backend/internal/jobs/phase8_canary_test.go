@@ -169,9 +169,15 @@ func TestPhase8SecretCanary(t *testing.T) {
 		t.Fatal("exit 2 positive evidence missing: receiver got no request")
 	}
 	empty := true
+	eventMatched := false
 	for _, body := range bodies {
 		if len(body) > 0 {
 			empty = false
+		}
+		// The received payload must carry the expected event identity —
+		// correlating delivery with the enqueued event, not just any traffic.
+		if strings.Contains(string(body), `"event":"backup_failed"`) {
+			eventMatched = true
 		}
 		if strings.Contains(string(body), canaryPassword) {
 			t.Fatalf("EXIT 2 LEAK: canary in delivered webhook body: %s", body)
@@ -179,6 +185,9 @@ func TestPhase8SecretCanary(t *testing.T) {
 	}
 	if empty {
 		t.Fatal("exit 2 positive evidence missing: all received bodies empty")
+	}
+	if !eventMatched {
+		t.Fatal("exit 2 positive evidence missing: no received body carries the backup_failed event")
 	}
 	rows, err := store.DB.Query(`SELECT payload FROM notification_outbox`)
 	if err != nil {

@@ -27,14 +27,19 @@ func TestSanitizeMessageValues(t *testing.T) {
 			t.Errorf("SanitizeMessage(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
-	// Composition: Sanitize AFTER redact.Secrets must not break whole-secret
-	// matching, and the marker must be stable.
-	once := SanitizeMessage("dial failed password=alpha,beta host=x")
-	twice := SanitizeMessage(once)
-	if once != "dial failed password=[REDACTED],beta host=x" {
-		t.Errorf("first pass: %q", once)
+	// Composition (round-3): the supported order is Secrets → Sanitize —
+	// whole secret removed first, syntax scrub second. The reverse order
+	// truncates the body and is NOT supported (documented on SanitizeMessage).
+	sanitizedOnce := SanitizeMessage("dial failed password=alpha,beta host=x")
+	if sanitizedOnce != "dial failed password=[REDACTED],beta host=x" {
+		t.Errorf("first pass: %q", sanitizedOnce)
 	}
-	if twice != once {
-		t.Errorf("not idempotent: %q vs %q", once, twice)
+	if got := SanitizeMessage(sanitizedOnce); got != sanitizedOnce {
+		t.Errorf("not idempotent: %q vs %q", sanitizedOnce, got)
+	}
+	// Newline after the URI authority must terminate it (diagnostic text on
+	// the next line survives).
+	if got := SanitizeMessage("postgres://u:p@host\nerror reading /tmp/x"); got != "postgres-uri://[REDACTED]\nerror reading /tmp/x" {
+		t.Errorf("newline authority: %q", got)
 	}
 }

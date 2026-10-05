@@ -674,12 +674,17 @@ export interface components {
             verifySuccessRate?: number | null;
             /**
              * Format: double
-             * @description Measured dump durations only (rows that never recorded one are excluded, not averaged as 0).
+             * @description Delivered vs dead entries in the notification outbox (null when the outbox is empty).
+             */
+            notifySuccessRate?: number | null;
+            /**
+             * Format: double
+             * @description Mean BACKUP EXECUTION duration (dump through remote commit — it includes the upload, not only pg_dump) over succeeded jobs that recorded one; null when no job has a measurement.
              */
             avgDurationSecs?: number | null;
             /**
              * Format: int64
-             * @description Sum of compressed pg_dump archive sizes over succeeded backups (volume metric 2).
+             * @description Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind.
              */
             totalDumpBytes?: number;
             /**

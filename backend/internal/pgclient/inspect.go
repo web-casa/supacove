@@ -166,12 +166,15 @@ func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error
 }
 
 // SanitizeMessage is the shared credential scrubber for stored error text:
-// URI schemes are rewritten, then every `password = value` occurrence has
-// its VALUE replaced — quoted values in full, bare values up to the next
-// delimiter (phase-8 canary: the old replacer kept the secret body).
-// Idempotent: an already-redacted value is left alone, so composing with
-// redact.Secrets in either order is safe (run SanitizeMessage AFTER
-// redact.Secrets to keep whole-secret matching intact; see the log path).
+// URI schemes+userinfo are rewritten, then every `password = value`
+// occurrence has its VALUE replaced — quoted values in full, bare values up
+// to the next delimiter (phase-8 canary: the old replacer kept the secret
+// body). Idempotent.
+//
+// COMPOSITION ORDER (round-2 review): callers MUST run redact.Secrets
+// (whole-known-secret removal) BEFORE this function. The reverse order
+// truncates the secret body, so a later whole-secret match no longer finds
+// it — the constraint is enforced by convention and tested, not by magic.
 func SanitizeMessage(msg string) string {
 	msg = redactURIUserinfo(msg)
 	return redactKeywordValues(msg)
@@ -215,7 +218,7 @@ func redactURIUserinfo(msg string) string {
 			// Skip the authority: through the next '/', whitespace, or end.
 			authStart := abs + schemeLen
 			e := authStart
-			for e < len(msg) && msg[e] != '/' && msg[e] != ' ' && msg[e] != '\t' {
+			for e < len(msg) && msg[e] != '/' && msg[e] != ' ' && msg[e] != '\t' && msg[e] != '\n' && msg[e] != '\r' {
 				e++
 			}
 			i = e // keep the path (dbname)
