@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +24,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/db"
 	"github.com/cloudfan/supabackup/backend/internal/dumper"
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
+	"github.com/cloudfan/supabackup/backend/internal/outbox"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
 	"github.com/cloudfan/supabackup/backend/internal/recovery"
@@ -60,6 +62,11 @@ const (
 )
 
 var ErrAlreadyQueued = errors.New("this database already has a pending or running job")
+
+// heartbeatClient bounds dead-man switch pings (Phase 7). Loopback and
+// private targets are legitimate for self-hosted monitors; nothing else
+// here needs custom dialing.
+var heartbeatClient = &http.Client{Timeout: 5 * time.Second}
 
 // ErrDatabaseNotFound for unknown database ids.
 var ErrDatabaseNotFound = errors.New("database not found")
@@ -889,7 +896,13 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	r.log.Info("backup succeeded", "job", jobID, "database", name,
 		"bytes", result.SizeBytes, "sha256", result.SHA256[:16],
 		"stderr_excerpt", redactpkg.Secrets(knownSecrets, result.StdErrExcerpt))
-	r.pingHeartbeat()
+	// Dead-man switch (Phase 7): bound to REAL freshness — only a remotely
+	// committed backup whose SNAPSHOT is still within period+grace pings.
+	// uploadAndCommitRemote returned nil above: the ciphertext is either
+	// remotely committed (destination assigned) or local-only by design.
+	remoteCommitted := true
+	dec := r.heartbeatFor(dbID, dumpStart, remoteCommitted, destSnapshot != nil)
+	r.pingSuccess(dbID, dec)
 
 	// Recovery kit (Phase 5): platform-aware restore.sh, persisted and
 	// referenced on the job so the API can serve it (phase-5 review P1-09).
@@ -976,18 +989,57 @@ func (r *Runner) ranToCancellation(jobID int64) bool {
 
 func (r *Runner) fail(jobID int64, class, msg string) {
 	msg = pgclient.SanitizeMessage(msg)
-	// A failure AFTER the artifact was committed must not lose the
-	// reference: the ciphertext is restorable regardless of job status.
-	res, err := r.authDB.Exec(`
-		UPDATE jobs SET status = 'failed', finished_at = strftime('%s','now'),
-		  error_class = ?, error_message = ?
-		WHERE id = ? AND status IN ('pending','running')`, class, msg, jobID)
+
+	// The failure record and its notification are ONE transaction (Phase 7
+	// outbox): a crash between them can no longer lose the notification,
+	// and a webhook outage can never roll the backup failure back.
+	tx, err := r.authDB.Begin()
 	if err != nil {
-		r.log.Error("job failure update failed", "job", jobID, "err", err)
-		return
+		r.log.Error("job failure tx begin failed", "job", jobID, "err", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		r.log.Error("job failure update affected 0 rows (job not in an active state)", "job", jobID)
+	if tx != nil {
+		res, err := tx.Exec(`
+			UPDATE jobs SET status = 'failed', finished_at = strftime('%s','now'),
+			  error_class = ?, error_message = ?
+			WHERE id = ? AND status IN ('pending','running')`, class, msg, jobID)
+		if err != nil {
+			r.log.Error("job failure update failed", "job", jobID, "err", err)
+			tx.Rollback()
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			r.log.Error("job failure update affected 0 rows (job not in an active state)", "job", jobID)
+			tx.Rollback()
+			return
+		}
+		var dbID int64
+		var dbName string
+		_ = tx.QueryRow(`
+			SELECT j.database_id, COALESCE(d.name, '')
+			FROM jobs j LEFT JOIN databases d ON d.id = j.database_id
+			WHERE j.id = ?`, jobID).Scan(&dbID, &dbName)
+		if err := outbox.EnqueueTx(context.Background(), tx, outbox.Event{
+			EventID:      fmt.Sprintf("backup_failed:job:%d", jobID),
+			EventType:    outbox.EventBackupFailed,
+			DatabaseID:   dbID,
+			DatabaseName: dbName,
+			Payload: map[string]any{
+				"event":         "backup_failed",
+				"job_id":        jobID,
+				"database_id":   dbID,
+				"database":      dbName,
+				"error_class":   class,
+				"error_message": truncate(msg, 300),
+			},
+		}, time.Now()); err != nil {
+			// The failure record is authoritative; a notification-write
+			// failure is logged and must not hide the backup failure.
+			r.log.Error("outbox enqueue for failure failed", "job", jobID, "err", err)
+		}
+		if err := tx.Commit(); err != nil {
+			r.log.Error("job failure tx commit failed", "job", jobID, "err", err)
+			return
+		}
 	}
 	r.log.Error("backup failed", "job", jobID, "class", class, "error", msg)
 }
@@ -1003,6 +1055,14 @@ func classify(err error) string {
 		return string(dc.Class)
 	}
 	return ClassUnknown
+}
+
+// truncate bounds a string for notification payloads.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 func toManifestExts(in []pgclient.Extension) []manifest.PgExtension {

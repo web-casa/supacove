@@ -18,6 +18,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
+	"github.com/cloudfan/supabackup/backend/internal/outbox"
 )
 
 // Scheduler polls the databases table for due backups and enqueues jobs.
@@ -25,7 +26,6 @@ type Scheduler struct {
 	store    *sql.DB
 	runner   *jobs.Runner
 	log      *slog.Logger
-	webhooks []WebhookConfig
 	interval time.Duration
 	mu       sync.Mutex
 	stopCh   chan struct{}
@@ -78,14 +78,6 @@ func New(store *sql.DB, runner *jobs.Runner, log *slog.Logger, interval time.Dur
 		interval: interval,
 		stopCh:   make(chan struct{}),
 	}
-}
-
-// SetWebhooks configures webhook notification targets. Must be called
-// before Start.
-func (s *Scheduler) SetWebhooks(wh []WebhookConfig) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.webhooks = wh
 }
 
 // ValidateCronExpr checks a cron expression for parse errors and reachability.
@@ -162,11 +154,25 @@ func (s *Scheduler) tick(ctx context.Context) {
 				s.log.Warn("backup expired",
 					"database", sch.Name, "database_id", sch.DatabaseID,
 					"age_hours", fmtFloat(age), "max_age_hours", sch.MaxAgeHours)
-				s.fireWebhooks(ctx, "expired", map[string]any{
-					"event": "backup_expired", "database": sch.Name,
-					"database_id": sch.DatabaseID, "age_hours": age,
-					"max_age_hours": sch.MaxAgeHours,
-				})
+				// Phase 7 outbox: the event is recorded transactionally and
+				// delivered with retries. While a database STAYS stale the
+				// event re-fires at most once per 4h bucket (event_id dedup).
+				bucket := now.Unix() / (4 * 3600)
+				if err := outbox.EnqueueTx(ctx, s.store, outbox.Event{
+					EventID:      fmt.Sprintf("backup_expired:db:%d:%d", sch.DatabaseID, bucket),
+					EventType:    outbox.EventBackupExpired,
+					DatabaseID:   sch.DatabaseID,
+					DatabaseName: sch.Name,
+					Payload: map[string]any{
+						"event":         "backup_expired",
+						"database":      sch.Name,
+						"database_id":   sch.DatabaseID,
+						"age_hours":     age,
+						"max_age_hours": sch.MaxAgeHours,
+					},
+				}, now); err != nil {
+					s.log.Error("expired-event enqueue failed", "database", sch.Name, "err", err)
+				}
 			}
 		}
 
@@ -190,6 +196,13 @@ func (s *Scheduler) tick(ctx context.Context) {
 
 	// Failure webhook: check for recently failed jobs
 	s.checkFailures(ctx)
+}
+
+// DueNow reports whether a cron expression's next fire time (from the last
+// schedule cursor) has passed. Exported for the overview endpoint; unknown
+// expressions and timezones evaluate to false.
+func DueNow(cronExpr string, lastScheduled int64, now time.Time) bool {
+	return isDue(ScheduleInfo{CronExpr: cronExpr, LastScheduled: lastScheduled}, now)
 }
 
 // isDue evaluates whether the cron schedule is due at the given time.
@@ -337,12 +350,24 @@ func (s *Scheduler) checkFailures(ctx context.Context) {
 		s.log.Error("failure scan", "err", err)
 		return
 	}
+	// Legacy net: jobs.fail enqueues backup_failed transactionally now; this
+	// sweep only catches rows written by an OLDER binary before the outbox
+	// existed (upgrade window). Dedup keeps it idempotent.
 	for _, f := range failed {
-		s.fireWebhooks(ctx, "failure", map[string]any{
-			"event": "backup_failed", "job_id": f.id,
-			"database_id": f.dbID, "error_class": f.class,
-			"error_message": f.message,
-		})
+		if err := outbox.EnqueueTx(ctx, s.store, outbox.Event{
+			EventID:    fmt.Sprintf("backup_failed:job:%d", f.id),
+			EventType:  outbox.EventBackupFailed,
+			DatabaseID: f.dbID,
+			Payload: map[string]any{
+				"event":         "backup_failed",
+				"job_id":        f.id,
+				"database_id":   f.dbID,
+				"error_class":   f.class,
+				"error_message": f.message,
+			},
+		}, time.Now()); err != nil {
+			s.log.Error("legacy failure enqueue failed", "job", f.id, "err", err)
+		}
 	}
 }
 
@@ -369,21 +394,3 @@ func truncate(s string, max int) string {
 func fmtFloat(f float64) string {
 	return strconv.FormatFloat(f, 'f', 1, 64)
 }
-
-// fireWebhooks sends a POST to every webhook subscribed to the event type.
-// Webhook URLs are treated as bearer secrets: only the status code is logged,
-// never the URL itself (round-4 review P1-06).
-func (s *Scheduler) fireWebhooks(ctx context.Context, event string, payload map[string]any) {
-	s.mu.Lock()
-	whs := s.webhooks
-	s.mu.Unlock()
-	for _, wh := range whs {
-		if !strings.Contains(wh.Events, event) {
-			continue
-		}
-		go s.postWebhook(wh.Name, wh.URL, payload)
-	}
-}
-
-// ErrDangling marker removed; unused.
-var _ = fmt.Sprintf

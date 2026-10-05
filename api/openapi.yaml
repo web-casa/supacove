@@ -692,49 +692,405 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /databases/{id}/schedule:
+    get:
+      operationId: getDatabaseSchedule
+      summary: Schedule, freshness and heartbeat configuration for a database.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The current configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleConfig"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: putDatabaseSchedule
+      summary: Update schedule, freshness and heartbeat configuration.
+      description: >
+        Heartbeat URL accepts only http/https. The dead-man switch fires on
+        silence: the success ping is gated on remote commit AND snapshot age
+        (period+grace); failures ping url+"/fail".
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleUpdate"
+      responses:
+        "200":
+          description: The updated configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleConfig"
+        "400":
+          description: Invalid cron expression, timezone, or heartbeat URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /webhooks:
+    get:
+      operationId: listWebhooks
+      summary: List configured webhook targets.
+      responses:
+        "200":
+          description: The webhook list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookList"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createWebhook
+      summary: Register a webhook target.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+        "400":
+          description: Invalid name, URL scheme, or event list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A webhook with this name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /webhooks/{id}:
+    delete:
+      operationId: deleteWebhook
+      summary: Soft-delete a webhook target.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /webhooks/test:
+    post:
+      operationId: testWebhook
+      summary: Synchronously deliver a test event to a webhook URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookCreate"
+      responses:
+        "200":
+          description: Delivered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookTestResult"
+        "400":
+          description: Invalid request or URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Delivery failed (status/rejection).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookTestResult"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /notifications:
+    get:
+      operationId: listNotifications
+      summary: Recent notification-outbox entries (delivery state machine).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: Recent entries, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /overview:
+    get:
+      operationId: getOverview
+      summary: Per-database protection state (the homepage answer).
+      description: >
+        Answers "which databases lack a fresh, verified, successful backup":
+        state is never | expired | fresh; unverified and failing are
+        orthogonal flags (fresh-but-unverified and fresh-with-failed-retry
+        are distinct concerns and shown separately).
+      responses:
+        "200":
+          description: The per-database states.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Overview"
+        "500":
+          $ref: "#/components/responses/Internal"
 components:
-  responses:
-    PayloadTooLarge:
-      description: Request body exceeds the allowed size.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-    UnsupportedMediaType:
-      description: Content-Type must be application/json.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-    RateLimited:
-      description: Rate limited; retry later.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-    Internal:
-      description: Unexpected internal error (nothing persisted, no state change reported as success).
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-    Overloaded:
-      description: Temporary overload (e.g. password-hashing budget exhausted); retry later.
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-  securitySchemes:
-    cookieAuth:
-      type: apiKey
-      in: cookie
-      name: sb_session
-      description: >-
-        Server-side session. The cookie name is `sb_session` in plain-HTTP dev
-        mode and `__Host-sb_session` when Secure cookies are enabled (production).
-        State-changing requests additionally require the `X-CSRF-Token` header
-        echoing the session-bound CSRF cookie.
   schemas:
+    ScheduleConfig:
+      type: object
+      required: [databaseId, cronTz, maxAgeHours, paused, heartbeatPeriodHours, heartbeatGraceHours]
+      properties:
+        databaseId:
+          type: integer
+          format: int64
+        cronExpr:
+          type: string
+          description: Standard 5-field crontab; empty = no schedule.
+        cronTz:
+          type: string
+          description: IANA timezone for the cron evaluation.
+        maxAgeHours:
+          type: integer
+          description: Freshness threshold; 0 disables expiry checks.
+        paused:
+          type: boolean
+        heartbeatUrl:
+          type: string
+          description: Dead-man switch URL (http/https); empty = disabled.
+        heartbeatPeriodHours:
+          type: integer
+          description: Expected backup period for the dead-man switch; 0 disables the age gate.
+        heartbeatGraceHours:
+          type: integer
+          description: Extra tolerance added to the period before silence alarms.
+        lastScheduledAt:
+          type: integer
+          format: int64
+          nullable: true
+        lastHeartbeatAt:
+          type: integer
+          format: int64
+          nullable: true
+    ScheduleUpdate:
+      type: object
+      properties:
+        cronExpr:
+          type: string
+          maxLength: 100
+        cronTz:
+          type: string
+          maxLength: 64
+        maxAgeHours:
+          type: integer
+          minimum: 0
+          maximum: 8760
+        paused:
+          type: boolean
+        heartbeatUrl:
+          type: string
+          maxLength: 500
+          description: http/https only; must not be a link-local address.
+        heartbeatPeriodHours:
+          type: integer
+          minimum: 0
+          maximum: 8760
+        heartbeatGraceHours:
+          type: integer
+          minimum: 0
+          maximum: 8760
+    Webhook:
+      type: object
+      required: [id, name, url, events, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        url:
+          type: string
+          description: Returned only to the authenticated admin; never logged by the server.
+        events:
+          type: array
+          items:
+            type: string
+            enum: [backup_failed, backup_expired, verification_failed]
+        createdAt:
+          type: integer
+          format: int64
+    WebhookCreate:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        url:
+          type: string
+          minLength: 8
+          maxLength: 500
+          format: password
+        events:
+          type: array
+          items:
+            type: string
+            enum: [backup_failed, backup_expired, verification_failed]
+          default: [backup_failed, backup_expired]
+    WebhookList:
+      type: object
+      required: [webhooks]
+      properties:
+        webhooks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Webhook"
+    WebhookTestResult:
+      type: object
+      required: [delivered]
+      properties:
+        delivered:
+          type: boolean
+        detail:
+          type: string
+    Notification:
+      type: object
+      required: [id, eventId, eventType, databaseName, state, attempts, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        eventId:
+          type: string
+        eventType:
+          type: string
+          enum: [backup_failed, backup_expired, verification_failed]
+        databaseName:
+          type: string
+        state:
+          type: string
+          enum: [pending, delivering, delivered, dead]
+        attempts:
+          type: integer
+        lastError:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+        deliveredAt:
+          type: integer
+          format: int64
+          nullable: true
+    NotificationList:
+      type: object
+      required: [notifications]
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+    OverviewEntry:
+      type: object
+      required: [databaseId, name, platform, state]
+      properties:
+        databaseId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+        state:
+          type: string
+          enum: [fresh, expired, never]
+          description: >
+            fresh = a succeeded backup exists whose snapshot age is within
+            maxAgeHours (or no threshold set); expired = threshold exceeded;
+            never = no succeeded backup. A FAILED RETRY does not make a
+            database fresh — state derives from the last SUCCESS.
+        lastSuccessAt:
+          type: integer
+          format: int64
+          nullable: true
+        lastSuccessAgeHours:
+          type: number
+          format: double
+          nullable: true
+        lastSuccessVerifyStatus:
+          type: string
+          enum: ["", pending, running, verified, failed, unsupported, skipped]
+          description: Verification state of the newest succeeded backup (未验证 shown separately from freshness).
+        lastJobStatus:
+          type: string
+          enum: ["", pending, running, succeeded, failed, canceled, interrupted]
+          description: Newest job of any status; a failed retry is visible here without changing `state`.
+        schedulePaused:
+          type: boolean
+        scheduleDue:
+          type: boolean
+          description: A cron schedule exists and the next fire time has passed.
+        maxAgeHours:
+          type: integer
+    Overview:
+      type: object
+      required: [databases]
+      properties:
+        databases:
+          type: array
+          items:
+            $ref: "#/components/schemas/OverviewEntry"
     HealthStatus:
       type: object
       required: [status]
@@ -1036,6 +1392,10 @@ components:
           type: boolean
         cancelRequested:
           type: boolean
+        remoteState:
+          type: string
+          enum: ["", uploading, committed, deleted]
+          description: Protocol C remote-commit state (empty = local-only).
         scheduledAt:
           type: integer
           format: int64
@@ -1093,3 +1453,44 @@ components:
         message:
           type: string
           description: Human-readable, credential-free.
+  responses:
+    PayloadTooLarge:
+      description: Request body exceeds the allowed size.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedMediaType:
+      description: Content-Type must be application/json.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: Rate limited; retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Internal:
+      description: Unexpected internal error (nothing persisted, no state change reported as success).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Overloaded:
+      description: Temporary overload (e.g. password-hashing budget exhausted); retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sb_session
+      description: >-
+        Server-side session. The cookie name is `sb_session` in plain-HTTP dev
+        mode and `__Host-sb_session` when Secure cookies are enabled (production).
+        State-changing requests additionally require the `X-CSRF-Token` header
+        echoing the session-bound CSRF cookie.

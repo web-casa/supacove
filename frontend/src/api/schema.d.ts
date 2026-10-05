@@ -406,10 +406,232 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/{id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Schedule, freshness and heartbeat configuration for a database. */
+        get: operations["getDatabaseSchedule"];
+        /**
+         * Update schedule, freshness and heartbeat configuration.
+         * @description Heartbeat URL accepts only http/https. The dead-man switch fires on silence: the success ping is gated on remote commit AND snapshot age (period+grace); failures ping url+"/fail".
+         */
+        put: operations["putDatabaseSchedule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List configured webhook targets. */
+        get: operations["listWebhooks"];
+        put?: never;
+        /** Register a webhook target. */
+        post: operations["createWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Soft-delete a webhook target. */
+        delete: operations["deleteWebhook"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Synchronously deliver a test event to a webhook URL. */
+        post: operations["testWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent notification-outbox entries (delivery state machine). */
+        get: operations["listNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per-database protection state (the homepage answer).
+         * @description Answers "which databases lack a fresh, verified, successful backup": state is never | expired | fresh; unverified and failing are orthogonal flags (fresh-but-unverified and fresh-with-failed-retry are distinct concerns and shown separately).
+         */
+        get: operations["getOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ScheduleConfig: {
+            /** Format: int64 */
+            databaseId: number;
+            /** @description Standard 5-field crontab; empty = no schedule. */
+            cronExpr?: string;
+            /** @description IANA timezone for the cron evaluation. */
+            cronTz: string;
+            /** @description Freshness threshold; 0 disables expiry checks. */
+            maxAgeHours: number;
+            paused: boolean;
+            /** @description Dead-man switch URL (http/https); empty = disabled. */
+            heartbeatUrl?: string;
+            /** @description Expected backup period for the dead-man switch; 0 disables the age gate. */
+            heartbeatPeriodHours: number;
+            /** @description Extra tolerance added to the period before silence alarms. */
+            heartbeatGraceHours: number;
+            /** Format: int64 */
+            lastScheduledAt?: number | null;
+            /** Format: int64 */
+            lastHeartbeatAt?: number | null;
+        };
+        ScheduleUpdate: {
+            cronExpr?: string;
+            cronTz?: string;
+            maxAgeHours?: number;
+            paused?: boolean;
+            /** @description http/https only; must not be a link-local address. */
+            heartbeatUrl?: string;
+            heartbeatPeriodHours?: number;
+            heartbeatGraceHours?: number;
+        };
+        Webhook: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description Returned only to the authenticated admin; never logged by the server. */
+            url: string;
+            events: ("backup_failed" | "backup_expired" | "verification_failed")[];
+            /** Format: int64 */
+            createdAt: number;
+        };
+        WebhookCreate: {
+            name: string;
+            /** Format: password */
+            url: string;
+            /**
+             * @default [
+             *       "backup_failed",
+             *       "backup_expired"
+             *     ]
+             */
+            events: ("backup_failed" | "backup_expired" | "verification_failed")[];
+        };
+        WebhookList: {
+            webhooks: components["schemas"]["Webhook"][];
+        };
+        WebhookTestResult: {
+            delivered: boolean;
+            detail?: string;
+        };
+        Notification: {
+            /** Format: int64 */
+            id: number;
+            eventId: string;
+            /** @enum {string} */
+            eventType: "backup_failed" | "backup_expired" | "verification_failed";
+            databaseName: string;
+            /** @enum {string} */
+            state: "pending" | "delivering" | "delivered" | "dead";
+            attempts: number;
+            lastError?: string;
+            /** Format: int64 */
+            createdAt: number;
+            /** Format: int64 */
+            deliveredAt?: number | null;
+        };
+        NotificationList: {
+            notifications: components["schemas"]["Notification"][];
+        };
+        OverviewEntry: {
+            /** Format: int64 */
+            databaseId: number;
+            name: string;
+            /** @enum {string} */
+            platform: "supabase" | "neon" | "railway" | "generic";
+            /**
+             * @description fresh = a succeeded backup exists whose snapshot age is within maxAgeHours (or no threshold set); expired = threshold exceeded; never = no succeeded backup. A FAILED RETRY does not make a database fresh — state derives from the last SUCCESS.
+             * @enum {string}
+             */
+            state: "fresh" | "expired" | "never";
+            /** Format: int64 */
+            lastSuccessAt?: number | null;
+            /** Format: double */
+            lastSuccessAgeHours?: number | null;
+            /**
+             * @description Verification state of the newest succeeded backup (未验证 shown separately from freshness).
+             * @enum {string}
+             */
+            lastSuccessVerifyStatus?: "" | "pending" | "running" | "verified" | "failed" | "unsupported" | "skipped";
+            /**
+             * @description Newest job of any status; a failed retry is visible here without changing `state`.
+             * @enum {string}
+             */
+            lastJobStatus?: "" | "pending" | "running" | "succeeded" | "failed" | "canceled" | "interrupted";
+            schedulePaused?: boolean;
+            /** @description A cron schedule exists and the next fire time has passed. */
+            scheduleDue?: boolean;
+            maxAgeHours?: number;
+        };
+        Overview: {
+            databases: components["schemas"]["OverviewEntry"][];
+        };
         HealthStatus: {
             /** @enum {string} */
             status: "ok" | "unavailable";
@@ -573,6 +795,11 @@ export interface components {
             artifactSize?: number;
             hasManifest?: boolean;
             cancelRequested?: boolean;
+            /**
+             * @description Protocol C remote-commit state (empty = local-only).
+             * @enum {string}
+             */
+            remoteState?: "" | "uploading" | "committed" | "deleted";
             /** Format: int64 */
             scheduledAt?: number;
             /** Format: int64 */
@@ -1610,6 +1837,264 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+        };
+    };
+    getDatabaseSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The current configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleConfig"];
+                };
+            };
+            /** @description Unknown id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    putDatabaseSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated configuration. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleConfig"];
+                };
+            };
+            /** @description Invalid cron expression, timezone, or heartbeat URL. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unknown id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    listWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The webhook list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookList"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    createWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookCreate"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            /** @description Invalid name, URL scheme, or event list. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A webhook with this name already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    deleteWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    testWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookCreate"];
+            };
+        };
+        responses: {
+            /** @description Delivered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookTestResult"];
+                };
+            };
+            /** @description Invalid request or URL. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Delivery failed (status/rejection). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookTestResult"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent entries, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationList"];
+                };
+            };
+            500: components["responses"]["Internal"];
+        };
+    };
+    getOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The per-database states. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Overview"];
+                };
+            };
+            500: components["responses"]["Internal"];
         };
     };
 }

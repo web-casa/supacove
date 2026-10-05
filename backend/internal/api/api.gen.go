@@ -55,6 +55,58 @@ const (
 	Unavailable HealthStatusStatus = "unavailable"
 )
 
+// Defines values for NotificationEventType.
+const (
+	NotificationEventTypeBackupExpired      NotificationEventType = "backup_expired"
+	NotificationEventTypeBackupFailed       NotificationEventType = "backup_failed"
+	NotificationEventTypeVerificationFailed NotificationEventType = "verification_failed"
+)
+
+// Defines values for NotificationState.
+const (
+	NotificationStateDead       NotificationState = "dead"
+	NotificationStateDelivered  NotificationState = "delivered"
+	NotificationStateDelivering NotificationState = "delivering"
+	NotificationStatePending    NotificationState = "pending"
+)
+
+// Defines values for OverviewEntryLastJobStatus.
+const (
+	OverviewEntryLastJobStatusCanceled    OverviewEntryLastJobStatus = "canceled"
+	OverviewEntryLastJobStatusEmpty       OverviewEntryLastJobStatus = ""
+	OverviewEntryLastJobStatusFailed      OverviewEntryLastJobStatus = "failed"
+	OverviewEntryLastJobStatusInterrupted OverviewEntryLastJobStatus = "interrupted"
+	OverviewEntryLastJobStatusPending     OverviewEntryLastJobStatus = "pending"
+	OverviewEntryLastJobStatusRunning     OverviewEntryLastJobStatus = "running"
+	OverviewEntryLastJobStatusSucceeded   OverviewEntryLastJobStatus = "succeeded"
+)
+
+// Defines values for OverviewEntryLastSuccessVerifyStatus.
+const (
+	OverviewEntryLastSuccessVerifyStatusEmpty       OverviewEntryLastSuccessVerifyStatus = ""
+	OverviewEntryLastSuccessVerifyStatusFailed      OverviewEntryLastSuccessVerifyStatus = "failed"
+	OverviewEntryLastSuccessVerifyStatusPending     OverviewEntryLastSuccessVerifyStatus = "pending"
+	OverviewEntryLastSuccessVerifyStatusRunning     OverviewEntryLastSuccessVerifyStatus = "running"
+	OverviewEntryLastSuccessVerifyStatusSkipped     OverviewEntryLastSuccessVerifyStatus = "skipped"
+	OverviewEntryLastSuccessVerifyStatusUnsupported OverviewEntryLastSuccessVerifyStatus = "unsupported"
+	OverviewEntryLastSuccessVerifyStatusVerified    OverviewEntryLastSuccessVerifyStatus = "verified"
+)
+
+// Defines values for OverviewEntryPlatform.
+const (
+	OverviewEntryPlatformGeneric  OverviewEntryPlatform = "generic"
+	OverviewEntryPlatformNeon     OverviewEntryPlatform = "neon"
+	OverviewEntryPlatformRailway  OverviewEntryPlatform = "railway"
+	OverviewEntryPlatformSupabase OverviewEntryPlatform = "supabase"
+)
+
+// Defines values for OverviewEntryState.
+const (
+	Expired OverviewEntryState = "expired"
+	Fresh   OverviewEntryState = "fresh"
+	Never   OverviewEntryState = "never"
+)
+
 // Defines values for TaskErrorClass.
 const (
 	TaskErrorClassAuth          TaskErrorClass = "auth"
@@ -70,10 +122,18 @@ const (
 
 // Defines values for TaskPlatform.
 const (
-	Generic  TaskPlatform = "generic"
-	Neon     TaskPlatform = "neon"
-	Railway  TaskPlatform = "railway"
-	Supabase TaskPlatform = "supabase"
+	TaskPlatformGeneric  TaskPlatform = "generic"
+	TaskPlatformNeon     TaskPlatform = "neon"
+	TaskPlatformRailway  TaskPlatform = "railway"
+	TaskPlatformSupabase TaskPlatform = "supabase"
+)
+
+// Defines values for TaskRemoteState.
+const (
+	TaskRemoteStateCommitted TaskRemoteState = "committed"
+	TaskRemoteStateDeleted   TaskRemoteState = "deleted"
+	TaskRemoteStateEmpty     TaskRemoteState = ""
+	TaskRemoteStateUploading TaskRemoteState = "uploading"
 )
 
 // Defines values for TaskStatus.
@@ -95,6 +155,20 @@ const (
 	TaskVerifyStatusSkipped     TaskVerifyStatus = "skipped"
 	TaskVerifyStatusUnsupported TaskVerifyStatus = "unsupported"
 	TaskVerifyStatusVerified    TaskVerifyStatus = "verified"
+)
+
+// Defines values for WebhookEvents.
+const (
+	WebhookEventsBackupExpired      WebhookEvents = "backup_expired"
+	WebhookEventsBackupFailed       WebhookEvents = "backup_failed"
+	WebhookEventsVerificationFailed WebhookEvents = "verification_failed"
+)
+
+// Defines values for WebhookCreateEvents.
+const (
+	BackupExpired      WebhookCreateEvents = "backup_expired"
+	BackupFailed       WebhookCreateEvents = "backup_failed"
+	VerificationFailed WebhookCreateEvents = "verification_failed"
 )
 
 // AgeRecipientRequest defines model for AgeRecipientRequest.
@@ -249,6 +323,70 @@ type LoginRequest struct {
 	Username string `json:"username"`
 }
 
+// Notification defines model for Notification.
+type Notification struct {
+	Attempts     int                   `json:"attempts"`
+	CreatedAt    int64                 `json:"createdAt"`
+	DatabaseName string                `json:"databaseName"`
+	DeliveredAt  *int64                `json:"deliveredAt"`
+	EventId      string                `json:"eventId"`
+	EventType    NotificationEventType `json:"eventType"`
+	Id           int64                 `json:"id"`
+	LastError    *string               `json:"lastError,omitempty"`
+	State        NotificationState     `json:"state"`
+}
+
+// NotificationEventType defines model for Notification.EventType.
+type NotificationEventType string
+
+// NotificationState defines model for Notification.State.
+type NotificationState string
+
+// NotificationList defines model for NotificationList.
+type NotificationList struct {
+	Notifications []Notification `json:"notifications"`
+}
+
+// Overview defines model for Overview.
+type Overview struct {
+	Databases []OverviewEntry `json:"databases"`
+}
+
+// OverviewEntry defines model for OverviewEntry.
+type OverviewEntry struct {
+	DatabaseId int64 `json:"databaseId"`
+
+	// LastJobStatus Newest job of any status; a failed retry is visible here without changing `state`.
+	LastJobStatus       *OverviewEntryLastJobStatus `json:"lastJobStatus,omitempty"`
+	LastSuccessAgeHours *float64                    `json:"lastSuccessAgeHours"`
+	LastSuccessAt       *int64                      `json:"lastSuccessAt"`
+
+	// LastSuccessVerifyStatus Verification state of the newest succeeded backup (未验证 shown separately from freshness).
+	LastSuccessVerifyStatus *OverviewEntryLastSuccessVerifyStatus `json:"lastSuccessVerifyStatus,omitempty"`
+	MaxAgeHours             *int                                  `json:"maxAgeHours,omitempty"`
+	Name                    string                                `json:"name"`
+	Platform                OverviewEntryPlatform                 `json:"platform"`
+
+	// ScheduleDue A cron schedule exists and the next fire time has passed.
+	ScheduleDue    *bool `json:"scheduleDue,omitempty"`
+	SchedulePaused *bool `json:"schedulePaused,omitempty"`
+
+	// State fresh = a succeeded backup exists whose snapshot age is within maxAgeHours (or no threshold set); expired = threshold exceeded; never = no succeeded backup. A FAILED RETRY does not make a database fresh — state derives from the last SUCCESS.
+	State OverviewEntryState `json:"state"`
+}
+
+// OverviewEntryLastJobStatus Newest job of any status; a failed retry is visible here without changing `state`.
+type OverviewEntryLastJobStatus string
+
+// OverviewEntryLastSuccessVerifyStatus Verification state of the newest succeeded backup (未验证 shown separately from freshness).
+type OverviewEntryLastSuccessVerifyStatus string
+
+// OverviewEntryPlatform defines model for OverviewEntry.Platform.
+type OverviewEntryPlatform string
+
+// OverviewEntryState fresh = a succeeded backup exists whose snapshot age is within maxAgeHours (or no threshold set); expired = threshold exceeded; never = no succeeded backup. A FAILED RETRY does not make a database fresh — state derives from the last SUCCESS.
+type OverviewEntryState string
+
 // ReconcileReport defines model for ReconcileReport.
 type ReconcileReport struct {
 	DestinationId int64     `json:"destinationId"`
@@ -258,6 +396,44 @@ type ReconcileReport struct {
 	Orphaned      *[]string `json:"orphaned,omitempty"`
 	RemoteObjects int       `json:"remoteObjects"`
 	Uncommitted   *[]string `json:"uncommitted,omitempty"`
+}
+
+// ScheduleConfig defines model for ScheduleConfig.
+type ScheduleConfig struct {
+	// CronExpr Standard 5-field crontab; empty = no schedule.
+	CronExpr *string `json:"cronExpr,omitempty"`
+
+	// CronTz IANA timezone for the cron evaluation.
+	CronTz     string `json:"cronTz"`
+	DatabaseId int64  `json:"databaseId"`
+
+	// HeartbeatGraceHours Extra tolerance added to the period before silence alarms.
+	HeartbeatGraceHours int `json:"heartbeatGraceHours"`
+
+	// HeartbeatPeriodHours Expected backup period for the dead-man switch; 0 disables the age gate.
+	HeartbeatPeriodHours int `json:"heartbeatPeriodHours"`
+
+	// HeartbeatUrl Dead-man switch URL (http/https); empty = disabled.
+	HeartbeatUrl    *string `json:"heartbeatUrl,omitempty"`
+	LastHeartbeatAt *int64  `json:"lastHeartbeatAt"`
+	LastScheduledAt *int64  `json:"lastScheduledAt"`
+
+	// MaxAgeHours Freshness threshold; 0 disables expiry checks.
+	MaxAgeHours int  `json:"maxAgeHours"`
+	Paused      bool `json:"paused"`
+}
+
+// ScheduleUpdate defines model for ScheduleUpdate.
+type ScheduleUpdate struct {
+	CronExpr             *string `json:"cronExpr,omitempty"`
+	CronTz               *string `json:"cronTz,omitempty"`
+	HeartbeatGraceHours  *int    `json:"heartbeatGraceHours,omitempty"`
+	HeartbeatPeriodHours *int    `json:"heartbeatPeriodHours,omitempty"`
+
+	// HeartbeatUrl http/https only; must not be a link-local address.
+	HeartbeatUrl *string `json:"heartbeatUrl,omitempty"`
+	MaxAgeHours  *int    `json:"maxAgeHours,omitempty"`
+	Paused       *bool   `json:"paused,omitempty"`
 }
 
 // Task defines model for Task.
@@ -277,10 +453,13 @@ type Task struct {
 	Id             int64 `json:"id"`
 
 	// Platform Auto-detected source platform (drives the recovery kit).
-	Platform    *TaskPlatform `json:"platform,omitempty"`
-	ScheduledAt *int64        `json:"scheduledAt,omitempty"`
-	StartedAt   *int64        `json:"startedAt"`
-	Status      TaskStatus    `json:"status"`
+	Platform *TaskPlatform `json:"platform,omitempty"`
+
+	// RemoteState Protocol C remote-commit state (empty = local-only).
+	RemoteState *TaskRemoteState `json:"remoteState,omitempty"`
+	ScheduledAt *int64           `json:"scheduledAt,omitempty"`
+	StartedAt   *int64           `json:"startedAt"`
+	Status      TaskStatus       `json:"status"`
 
 	// VerifyDetail Human-readable verification outcome or skip reason (redacted).
 	VerifyDetail       *string  `json:"verifyDetail,omitempty"`
@@ -302,6 +481,9 @@ type TaskErrorClass string
 // TaskPlatform Auto-detected source platform (drives the recovery kit).
 type TaskPlatform string
 
+// TaskRemoteState Protocol C remote-commit state (empty = local-only).
+type TaskRemoteState string
+
 // TaskStatus defines model for Task.Status.
 type TaskStatus string
 
@@ -319,6 +501,41 @@ type User struct {
 	CreatedAt int64  `json:"createdAt"`
 	Id        int64  `json:"id"`
 	Username  string `json:"username"`
+}
+
+// Webhook defines model for Webhook.
+type Webhook struct {
+	CreatedAt int64           `json:"createdAt"`
+	Events    []WebhookEvents `json:"events"`
+	Id        int64           `json:"id"`
+	Name      string          `json:"name"`
+
+	// Url Returned only to the authenticated admin; never logged by the server.
+	Url string `json:"url"`
+}
+
+// WebhookEvents defines model for Webhook.Events.
+type WebhookEvents string
+
+// WebhookCreate defines model for WebhookCreate.
+type WebhookCreate struct {
+	Events *[]WebhookCreateEvents `json:"events,omitempty"`
+	Name   string                 `json:"name"`
+	Url    string                 `json:"url"`
+}
+
+// WebhookCreateEvents defines model for WebhookCreate.Events.
+type WebhookCreateEvents string
+
+// WebhookList defines model for WebhookList.
+type WebhookList struct {
+	Webhooks []Webhook `json:"webhooks"`
+}
+
+// WebhookTestResult defines model for WebhookTestResult.
+type WebhookTestResult struct {
+	Delivered bool    `json:"delivered"`
+	Detail    *string `json:"detail,omitempty"`
 }
 
 // Internal defines model for Internal.
@@ -342,6 +559,11 @@ type PostAuthLogoutParams struct {
 	XCSRFToken string `json:"X-CSRF-Token"`
 }
 
+// ListNotificationsParams defines parameters for ListNotifications.
+type ListNotificationsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // PutAgeRecipientJSONRequestBody defines body for PutAgeRecipient for application/json ContentType.
 type PutAgeRecipientJSONRequestBody = AgeRecipientRequest
 
@@ -357,8 +579,17 @@ type CreateDatabaseJSONRequestBody = DatabaseCreate
 // AssignDatabaseDestinationJSONRequestBody defines body for AssignDatabaseDestination for application/json ContentType.
 type AssignDatabaseDestinationJSONRequestBody = DestinationAssign
 
+// PutDatabaseScheduleJSONRequestBody defines body for PutDatabaseSchedule for application/json ContentType.
+type PutDatabaseScheduleJSONRequestBody = ScheduleUpdate
+
 // CreateDestinationJSONRequestBody defines body for CreateDestination for application/json ContentType.
 type CreateDestinationJSONRequestBody = DestinationCreate
+
+// CreateWebhookJSONRequestBody defines body for CreateWebhook for application/json ContentType.
+type CreateWebhookJSONRequestBody = WebhookCreate
+
+// TestWebhookJSONRequestBody defines body for TestWebhook for application/json ContentType.
+type TestWebhookJSONRequestBody = WebhookCreate
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -398,6 +629,12 @@ type ServerInterface interface {
 	// Attach or clear the destination for a database.
 	// (PUT /databases/{id}/destination)
 	AssignDatabaseDestination(w http.ResponseWriter, r *http.Request, id int64)
+	// Schedule, freshness and heartbeat configuration for a database.
+	// (GET /databases/{id}/schedule)
+	GetDatabaseSchedule(w http.ResponseWriter, r *http.Request, id int64)
+	// Update schedule, freshness and heartbeat configuration.
+	// (PUT /databases/{id}/schedule)
+	PutDatabaseSchedule(w http.ResponseWriter, r *http.Request, id int64)
 	// List storage destinations (no secrets).
 	// (GET /destinations)
 	ListDestinations(w http.ResponseWriter, r *http.Request)
@@ -419,6 +656,12 @@ type ServerInterface interface {
 	// Liveness (process alive). Anonymous and information-free.
 	// (GET /healthz)
 	GetHealthz(w http.ResponseWriter, r *http.Request)
+	// Recent notification-outbox entries (delivery state machine).
+	// (GET /notifications)
+	ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams)
+	// Per-database protection state (the homepage answer).
+	// (GET /overview)
+	GetOverview(w http.ResponseWriter, r *http.Request)
 	// Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 	// (GET /ready)
 	GetReady(w http.ResponseWriter, r *http.Request)
@@ -440,6 +683,18 @@ type ServerInterface interface {
 	// Stream the generated restore.sh recovery kit for this backup.
 	// (GET /tasks/{id}/recovery-kit)
 	DownloadRecoveryKit(w http.ResponseWriter, r *http.Request, id int64)
+	// List configured webhook targets.
+	// (GET /webhooks)
+	ListWebhooks(w http.ResponseWriter, r *http.Request)
+	// Register a webhook target.
+	// (POST /webhooks)
+	CreateWebhook(w http.ResponseWriter, r *http.Request)
+	// Synchronously deliver a test event to a webhook URL.
+	// (POST /webhooks/test)
+	TestWebhook(w http.ResponseWriter, r *http.Request)
+	// Soft-delete a webhook target.
+	// (DELETE /webhooks/{id})
+	DeleteWebhook(w http.ResponseWriter, r *http.Request, id int64)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -518,6 +773,18 @@ func (_ Unimplemented) AssignDatabaseDestination(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Schedule, freshness and heartbeat configuration for a database.
+// (GET /databases/{id}/schedule)
+func (_ Unimplemented) GetDatabaseSchedule(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Update schedule, freshness and heartbeat configuration.
+// (PUT /databases/{id}/schedule)
+func (_ Unimplemented) PutDatabaseSchedule(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List storage destinations (no secrets).
 // (GET /destinations)
 func (_ Unimplemented) ListDestinations(w http.ResponseWriter, r *http.Request) {
@@ -560,6 +827,18 @@ func (_ Unimplemented) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Recent notification-outbox entries (delivery state machine).
+// (GET /notifications)
+func (_ Unimplemented) ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Per-database protection state (the homepage answer).
+// (GET /overview)
+func (_ Unimplemented) GetOverview(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 // (GET /ready)
 func (_ Unimplemented) GetReady(w http.ResponseWriter, r *http.Request) {
@@ -599,6 +878,30 @@ func (_ Unimplemented) GetTaskDownloadURL(w http.ResponseWriter, r *http.Request
 // Stream the generated restore.sh recovery kit for this backup.
 // (GET /tasks/{id}/recovery-kit)
 func (_ Unimplemented) DownloadRecoveryKit(w http.ResponseWriter, r *http.Request, id int64) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// List configured webhook targets.
+// (GET /webhooks)
+func (_ Unimplemented) ListWebhooks(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Register a webhook target.
+// (POST /webhooks)
+func (_ Unimplemented) CreateWebhook(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Synchronously deliver a test event to a webhook URL.
+// (POST /webhooks/test)
+func (_ Unimplemented) TestWebhook(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Soft-delete a webhook target.
+// (DELETE /webhooks/{id})
+func (_ Unimplemented) DeleteWebhook(w http.ResponseWriter, r *http.Request, id int64) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -913,6 +1216,68 @@ func (siw *ServerInterfaceWrapper) AssignDatabaseDestination(w http.ResponseWrit
 	handler.ServeHTTP(w, r)
 }
 
+// GetDatabaseSchedule operation middleware
+func (siw *ServerInterfaceWrapper) GetDatabaseSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDatabaseSchedule(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutDatabaseSchedule operation middleware
+func (siw *ServerInterfaceWrapper) PutDatabaseSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutDatabaseSchedule(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListDestinations operation middleware
 func (siw *ServerInterfaceWrapper) ListDestinations(w http.ResponseWriter, r *http.Request) {
 
@@ -1071,6 +1436,59 @@ func (siw *ServerInterfaceWrapper) GetHealthz(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealthz(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListNotifications operation middleware
+func (siw *ServerInterfaceWrapper) ListNotifications(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNotificationsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNotifications(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetOverview(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOverview(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1269,6 +1687,97 @@ func (siw *ServerInterfaceWrapper) DownloadRecoveryKit(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// ListWebhooks operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhooks(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhooks(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWebhook operation middleware
+func (siw *ServerInterfaceWrapper) CreateWebhook(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWebhook(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestWebhook operation middleware
+func (siw *ServerInterfaceWrapper) TestWebhook(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestWebhook(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWebhook operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// ------------- Path parameter "id" -------------
+	var id int64
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWebhook(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1419,6 +1928,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/databases/{id}/destination", wrapper.AssignDatabaseDestination)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/databases/{id}/schedule", wrapper.GetDatabaseSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/databases/{id}/schedule", wrapper.PutDatabaseSchedule)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/destinations", wrapper.ListDestinations)
 	})
 	r.Group(func(r chi.Router) {
@@ -1440,6 +1955,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/healthz", wrapper.GetHealthz)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/notifications", wrapper.ListNotifications)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/overview", wrapper.GetOverview)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/ready", wrapper.GetReady)
 	})
 	r.Group(func(r chi.Router) {
@@ -1459,6 +1980,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/tasks/{id}/recovery-kit", wrapper.DownloadRecoveryKit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/webhooks", wrapper.ListWebhooks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/webhooks", wrapper.CreateWebhook)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/webhooks/test", wrapper.TestWebhook)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/webhooks/{id}", wrapper.DeleteWebhook)
 	})
 
 	return r
@@ -2038,6 +2571,86 @@ func (response AssignDatabaseDestination500JSONResponse) VisitAssignDatabaseDest
 	return json.NewEncoder(w).Encode(response)
 }
 
+type GetDatabaseScheduleRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type GetDatabaseScheduleResponseObject interface {
+	VisitGetDatabaseScheduleResponse(w http.ResponseWriter) error
+}
+
+type GetDatabaseSchedule200JSONResponse ScheduleConfig
+
+func (response GetDatabaseSchedule200JSONResponse) VisitGetDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDatabaseSchedule404JSONResponse Error
+
+func (response GetDatabaseSchedule404JSONResponse) VisitGetDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetDatabaseSchedule500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetDatabaseSchedule500JSONResponse) VisitGetDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutDatabaseScheduleRequestObject struct {
+	Id   int64 `json:"id"`
+	Body *PutDatabaseScheduleJSONRequestBody
+}
+
+type PutDatabaseScheduleResponseObject interface {
+	VisitPutDatabaseScheduleResponse(w http.ResponseWriter) error
+}
+
+type PutDatabaseSchedule200JSONResponse ScheduleConfig
+
+func (response PutDatabaseSchedule200JSONResponse) VisitPutDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutDatabaseSchedule400JSONResponse Error
+
+func (response PutDatabaseSchedule400JSONResponse) VisitPutDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutDatabaseSchedule404JSONResponse Error
+
+func (response PutDatabaseSchedule404JSONResponse) VisitPutDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PutDatabaseSchedule500JSONResponse struct{ InternalJSONResponse }
+
+func (response PutDatabaseSchedule500JSONResponse) VisitPutDatabaseScheduleResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 type ListDestinationsRequestObject struct {
 }
 
@@ -2284,6 +2897,57 @@ type GetHealthz200JSONResponse HealthStatus
 func (response GetHealthz200JSONResponse) VisitGetHealthzResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListNotificationsRequestObject struct {
+	Params ListNotificationsParams
+}
+
+type ListNotificationsResponseObject interface {
+	VisitListNotificationsResponse(w http.ResponseWriter) error
+}
+
+type ListNotifications200JSONResponse NotificationList
+
+func (response ListNotifications200JSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListNotifications500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListNotifications500JSONResponse) VisitListNotificationsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetOverviewRequestObject struct {
+}
+
+type GetOverviewResponseObject interface {
+	VisitGetOverviewResponse(w http.ResponseWriter) error
+}
+
+type GetOverview200JSONResponse Overview
+
+func (response GetOverview200JSONResponse) VisitGetOverviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetOverview500JSONResponse struct{ InternalJSONResponse }
+
+func (response GetOverview500JSONResponse) VisitGetOverviewResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
 
 	return json.NewEncoder(w).Encode(response)
 }
@@ -2542,6 +3206,153 @@ func (response DownloadRecoveryKit500JSONResponse) VisitDownloadRecoveryKitRespo
 	return json.NewEncoder(w).Encode(response)
 }
 
+type ListWebhooksRequestObject struct {
+}
+
+type ListWebhooksResponseObject interface {
+	VisitListWebhooksResponse(w http.ResponseWriter) error
+}
+
+type ListWebhooks200JSONResponse WebhookList
+
+func (response ListWebhooks200JSONResponse) VisitListWebhooksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type ListWebhooks500JSONResponse struct{ InternalJSONResponse }
+
+func (response ListWebhooks500JSONResponse) VisitListWebhooksResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateWebhookRequestObject struct {
+	Body *CreateWebhookJSONRequestBody
+}
+
+type CreateWebhookResponseObject interface {
+	VisitCreateWebhookResponse(w http.ResponseWriter) error
+}
+
+type CreateWebhook201JSONResponse Webhook
+
+func (response CreateWebhook201JSONResponse) VisitCreateWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateWebhook400JSONResponse Error
+
+func (response CreateWebhook400JSONResponse) VisitCreateWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateWebhook409JSONResponse Error
+
+func (response CreateWebhook409JSONResponse) VisitCreateWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type CreateWebhook500JSONResponse struct{ InternalJSONResponse }
+
+func (response CreateWebhook500JSONResponse) VisitCreateWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestWebhookRequestObject struct {
+	Body *TestWebhookJSONRequestBody
+}
+
+type TestWebhookResponseObject interface {
+	VisitTestWebhookResponse(w http.ResponseWriter) error
+}
+
+type TestWebhook200JSONResponse WebhookTestResult
+
+func (response TestWebhook200JSONResponse) VisitTestWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestWebhook400JSONResponse Error
+
+func (response TestWebhook400JSONResponse) VisitTestWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestWebhook422JSONResponse WebhookTestResult
+
+func (response TestWebhook422JSONResponse) VisitTestWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type TestWebhook500JSONResponse struct{ InternalJSONResponse }
+
+func (response TestWebhook500JSONResponse) VisitTestWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteWebhookRequestObject struct {
+	Id int64 `json:"id"`
+}
+
+type DeleteWebhookResponseObject interface {
+	VisitDeleteWebhookResponse(w http.ResponseWriter) error
+}
+
+type DeleteWebhook204Response struct {
+}
+
+func (response DeleteWebhook204Response) VisitDeleteWebhookResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteWebhook404JSONResponse Error
+
+func (response DeleteWebhook404JSONResponse) VisitDeleteWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type DeleteWebhook500JSONResponse struct{ InternalJSONResponse }
+
+func (response DeleteWebhook500JSONResponse) VisitDeleteWebhookResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// Set the age recipient (public key) used to encrypt backups.
@@ -2580,6 +3391,12 @@ type StrictServerInterface interface {
 	// Attach or clear the destination for a database.
 	// (PUT /databases/{id}/destination)
 	AssignDatabaseDestination(ctx context.Context, request AssignDatabaseDestinationRequestObject) (AssignDatabaseDestinationResponseObject, error)
+	// Schedule, freshness and heartbeat configuration for a database.
+	// (GET /databases/{id}/schedule)
+	GetDatabaseSchedule(ctx context.Context, request GetDatabaseScheduleRequestObject) (GetDatabaseScheduleResponseObject, error)
+	// Update schedule, freshness and heartbeat configuration.
+	// (PUT /databases/{id}/schedule)
+	PutDatabaseSchedule(ctx context.Context, request PutDatabaseScheduleRequestObject) (PutDatabaseScheduleResponseObject, error)
 	// List storage destinations (no secrets).
 	// (GET /destinations)
 	ListDestinations(ctx context.Context, request ListDestinationsRequestObject) (ListDestinationsResponseObject, error)
@@ -2601,6 +3418,12 @@ type StrictServerInterface interface {
 	// Liveness (process alive). Anonymous and information-free.
 	// (GET /healthz)
 	GetHealthz(ctx context.Context, request GetHealthzRequestObject) (GetHealthzResponseObject, error)
+	// Recent notification-outbox entries (delivery state machine).
+	// (GET /notifications)
+	ListNotifications(ctx context.Context, request ListNotificationsRequestObject) (ListNotificationsResponseObject, error)
+	// Per-database protection state (the homepage answer).
+	// (GET /overview)
+	GetOverview(ctx context.Context, request GetOverviewRequestObject) (GetOverviewResponseObject, error)
 	// Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data.
 	// (GET /ready)
 	GetReady(ctx context.Context, request GetReadyRequestObject) (GetReadyResponseObject, error)
@@ -2622,6 +3445,18 @@ type StrictServerInterface interface {
 	// Stream the generated restore.sh recovery kit for this backup.
 	// (GET /tasks/{id}/recovery-kit)
 	DownloadRecoveryKit(ctx context.Context, request DownloadRecoveryKitRequestObject) (DownloadRecoveryKitResponseObject, error)
+	// List configured webhook targets.
+	// (GET /webhooks)
+	ListWebhooks(ctx context.Context, request ListWebhooksRequestObject) (ListWebhooksResponseObject, error)
+	// Register a webhook target.
+	// (POST /webhooks)
+	CreateWebhook(ctx context.Context, request CreateWebhookRequestObject) (CreateWebhookResponseObject, error)
+	// Synchronously deliver a test event to a webhook URL.
+	// (POST /webhooks/test)
+	TestWebhook(ctx context.Context, request TestWebhookRequestObject) (TestWebhookResponseObject, error)
+	// Soft-delete a webhook target.
+	// (DELETE /webhooks/{id})
+	DeleteWebhook(ctx context.Context, request DeleteWebhookRequestObject) (DeleteWebhookResponseObject, error)
 }
 
 type StrictHandlerFunc = strictnethttp.StrictHTTPHandlerFunc
@@ -2986,6 +3821,65 @@ func (sh *strictHandler) AssignDatabaseDestination(w http.ResponseWriter, r *htt
 	}
 }
 
+// GetDatabaseSchedule operation middleware
+func (sh *strictHandler) GetDatabaseSchedule(w http.ResponseWriter, r *http.Request, id int64) {
+	var request GetDatabaseScheduleRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetDatabaseSchedule(ctx, request.(GetDatabaseScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetDatabaseSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetDatabaseScheduleResponseObject); ok {
+		if err := validResponse.VisitGetDatabaseScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutDatabaseSchedule operation middleware
+func (sh *strictHandler) PutDatabaseSchedule(w http.ResponseWriter, r *http.Request, id int64) {
+	var request PutDatabaseScheduleRequestObject
+
+	request.Id = id
+
+	var body PutDatabaseScheduleJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutDatabaseSchedule(ctx, request.(PutDatabaseScheduleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutDatabaseSchedule")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutDatabaseScheduleResponseObject); ok {
+		if err := validResponse.VisitPutDatabaseScheduleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListDestinations operation middleware
 func (sh *strictHandler) ListDestinations(w http.ResponseWriter, r *http.Request) {
 	var request ListDestinationsRequestObject
@@ -3167,6 +4061,56 @@ func (sh *strictHandler) GetHealthz(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListNotifications operation middleware
+func (sh *strictHandler) ListNotifications(w http.ResponseWriter, r *http.Request, params ListNotificationsParams) {
+	var request ListNotificationsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListNotifications(ctx, request.(ListNotificationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListNotifications")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListNotificationsResponseObject); ok {
+		if err := validResponse.VisitListNotificationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOverview operation middleware
+func (sh *strictHandler) GetOverview(w http.ResponseWriter, r *http.Request) {
+	var request GetOverviewRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOverview(ctx, request.(GetOverviewRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOverview")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOverviewResponseObject); ok {
+		if err := validResponse.VisitGetOverviewResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetReady operation middleware
 func (sh *strictHandler) GetReady(w http.ResponseWriter, r *http.Request) {
 	var request GetReadyRequestObject
@@ -3338,6 +4282,118 @@ func (sh *strictHandler) DownloadRecoveryKit(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DownloadRecoveryKitResponseObject); ok {
 		if err := validResponse.VisitDownloadRecoveryKitResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListWebhooks operation middleware
+func (sh *strictHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
+	var request ListWebhooksRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListWebhooks(ctx, request.(ListWebhooksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListWebhooks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListWebhooksResponseObject); ok {
+		if err := validResponse.VisitListWebhooksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateWebhook operation middleware
+func (sh *strictHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
+	var request CreateWebhookRequestObject
+
+	var body CreateWebhookJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateWebhook(ctx, request.(CreateWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateWebhookResponseObject); ok {
+		if err := validResponse.VisitCreateWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// TestWebhook operation middleware
+func (sh *strictHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
+	var request TestWebhookRequestObject
+
+	var body TestWebhookJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.TestWebhook(ctx, request.(TestWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "TestWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(TestWebhookResponseObject); ok {
+		if err := validResponse.VisitTestWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteWebhook operation middleware
+func (sh *strictHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request, id int64) {
+	var request DeleteWebhookRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteWebhook(ctx, request.(DeleteWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteWebhookResponseObject); ok {
+		if err := validResponse.VisitDeleteWebhookResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

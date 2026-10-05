@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
+	"github.com/cloudfan/supabackup/backend/internal/outbox"
 	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	"github.com/cloudfan/supabackup/backend/internal/verifier"
 )
@@ -52,6 +53,11 @@ func (r *Runner) SetVerifier(v VerifyEngine) { r.verifier = v }
 // verification. Empty (default) means verification cannot decrypt and is
 // recorded as skipped with that reason — never a silent no-op.
 func (r *Runner) SetVerifyIdentity(identity string) { r.verifyIdentity = identity }
+
+// SetHeartbeatURL configures the FALLBACK dead-man switch URL for databases
+// without their own heartbeat config (Phase 7: per-database config wins).
+// Must be called before Start. Empty string disables the fallback.
+func (r *Runner) SetHeartbeatURL(url string) { r.heartbeatURL = url }
 
 // SetVerifyTimeout overrides the per-run verification budget (test hook).
 func (r *Runner) SetVerifyTimeout(d time.Duration) {
@@ -396,6 +402,33 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 		return
 	}
 	r.finishVerification(jobID, string(res.Status), res.Detail, req.redact, &res)
+
+	// A verification failure is a reliability signal worth a notification,
+	// but the BACKUP itself is fine — the event is recorded through the
+	// outbox without touching the job's success state.
+	if !res.Pass() && (res.Status == verifier.StatusFailed || res.Status == verifier.StatusUnsupported) {
+		var dbID int64
+		var dbName string
+		_ = r.authDB.QueryRow(`
+			SELECT j.database_id, COALESCE(d.name, '') FROM jobs j
+			LEFT JOIN databases d ON d.id = j.database_id
+			WHERE j.id = ?`, jobID).Scan(&dbID, &dbName)
+		if err := outbox.Enqueue(context.Background(), r.authDB, outbox.Event{
+			EventID:      fmt.Sprintf("verification_failed:job:%d", jobID),
+			EventType:    outbox.EventVerificationFailed,
+			DatabaseID:   dbID,
+			DatabaseName: dbName,
+			Payload: map[string]any{
+				"event":         "verification_failed",
+				"job_id":        jobID,
+				"database":      dbName,
+				"verify_status": string(res.Status),
+				"detail":        req.redact(truncate(res.Detail, 300)),
+			},
+		}, time.Now()); err != nil {
+			r.log.Error("outbox enqueue for verification failure failed", "job", jobID, "err", err)
+		}
+	}
 
 	if res.Pass() {
 		r.log.Info("restore verification passed", "job", jobID, "tables", res.TablesFound, "profile", verifyProfileOf(res))

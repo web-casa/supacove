@@ -350,6 +350,10 @@ func taskToAPI(t *jobs.Task) api.Task {
 	}
 	hrk := t.HasRecoveryKit
 	out.HasRecoveryKit = &hrk
+	if t.RemoteState != "" {
+		rs := api.TaskRemoteState(t.RemoteState)
+		out.RemoteState = &rs
+	}
 	return out
 }
 

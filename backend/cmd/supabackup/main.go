@@ -29,6 +29,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/db"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
 	"github.com/cloudfan/supabackup/backend/internal/limiter"
+	"github.com/cloudfan/supabackup/backend/internal/outbox"
 	"github.com/cloudfan/supabackup/backend/internal/scheduler"
 	"github.com/cloudfan/supabackup/backend/internal/server"
 	"github.com/cloudfan/supabackup/backend/internal/staging"
@@ -225,9 +226,12 @@ func runServe() error {
 	runner.SetQuota(cfg.StagingQuotaBytes)
 	runner.SetLocalKeep(cfg.LocalKeep)
 	runner.SetStatsRecorder(stats.New(store.DB))
+	// SB_HEARTBEAT_URL is the FALLBACK heartbeat for databases without
+	// their own config (Phase 7: per-database dead-man switches take
+	// precedence; set via PUT /api/databases/{id}/schedule).
 	if hb := os.Getenv("SB_HEARTBEAT_URL"); hb != "" {
 		runner.SetHeartbeatURL(hb)
-		log.Info("heartbeat configured", "url_prefix", hb[:min(len(hb), 20)])
+		log.Info("fallback heartbeat configured", "url_prefix", hb[:min(len(hb), 20)])
 	}
 	// Restore verification (ADR-004): OFF unless the administrator
 	// explicitly enabled it AND provided the age identity — a deliberate
@@ -285,14 +289,19 @@ func runServe() error {
 	runner.Start(ctx)
 	defer runner.Stop()
 
-	// Phase 4: cron scheduler for automatic backups.
+	// Phase 4: cron scheduler for automatic backups. Webhooks are read from
+	// the DB by the notifier at delivery time — no preloading needed.
 	sched := scheduler.New(store.DB, runner, log, 30*time.Second)
-	if whs, werr := scheduler.LoadWebhooks(ctx, store.DB); werr == nil && len(whs) > 0 {
-		sched.SetWebhooks(whs)
-		log.Info("webhooks loaded", "count", len(whs))
-	}
 	sched.Start(ctx)
 	defer sched.Stop()
+
+	// Phase 7: transactional notification outbox with bounded retries.
+	notifier := outbox.New(store.DB, log, 10*time.Second)
+	notifier.Start(ctx)
+	defer notifier.Stop()
+	if pending, _, nerr := outbox.Counts(ctx, store.DB); nerr == nil && pending > 0 {
+		log.Info("notification outbox state", "pending", pending)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              cfg.Addr,
