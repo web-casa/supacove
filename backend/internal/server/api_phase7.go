@@ -401,12 +401,21 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 		       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 END), 0),
 		       COALESCE(SUM(CASE WHEN status = 'canceled' THEN 1 END), 0),
 		       COALESCE(AVG(CASE WHEN status = 'succeeded' AND duration_secs > 0 THEN duration_secs END), 0),
-		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN artifact_size END), 0),
-		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN dump_size END), 0)
+		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN artifact_size END), 0)
 		FROM jobs WHERE status NOT IN ('pending','running')`).
-		Scan(&total, &succeeded, &failed, &canceled, &avgDur, &totalArtifact, &totalDump)
+		Scan(&total, &succeeded, &failed, &canceled, &avgDur, &totalArtifact)
 	if err != nil {
 		a.srv.log.Error("stats query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
+	}
+	// The compressed-archive total lives in backup_stats (the jobs table
+	// never carried it) — round-2 review R2-P1-01: this was a deterministic
+	// "no such column: dump_size" 500.
+	err = a.srv.store.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(dump_size), 0) FROM backup_stats WHERE dump_size > 0`).
+		Scan(&totalDump)
+	if err != nil {
+		a.srv.log.Error("stats dump-size query", "err", err)
 		return api.GetStats500JSONResponse{}, nil
 	}
 	rate := func(part, whole int64) *float64 {
@@ -423,7 +432,7 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 	//   export: dump finished without the storage_upload class
 	//   remote: committed (or deleted after committed life) vs upload failures
 	//   verify: verified vs failed/unsupported among succeeded backups
-	var exportOK, remoteOK, remoteFailed, vOK, vFailed, vUnsupported int64
+	var exportOK, remoteOK, remoteFailed, vOK, vBad int64
 	err = a.srv.store.DB.QueryRowContext(ctx, `
 		SELECT
 		  COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 END), 0),
@@ -432,7 +441,7 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 		  COALESCE(SUM(CASE WHEN verify_status = 'verified' THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN verify_status IN ('failed','unsupported') THEN 1 END), 0)
 		FROM jobs WHERE status NOT IN ('pending','running')`).
-		Scan(&exportOK, &remoteOK, &remoteFailed, &vOK, &vFailed, &vUnsupported)
+		Scan(&exportOK, &remoteOK, &remoteFailed, &vOK, &vBad)
 	if err != nil {
 		a.srv.log.Error("stats segment query", "err", err)
 		return api.GetStats500JSONResponse{}, nil
@@ -488,6 +497,6 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 	}
 	out.ExportSuccessRate = rate(exportOK, total)
 	out.RemoteSuccessRate = rate(remoteOK, remoteOK+remoteFailed)
-	out.VerifySuccessRate = rate(vOK, vOK+vFailed+vUnsupported)
+	out.VerifySuccessRate = rate(vOK, vOK+vBad)
 	return out, nil
 }

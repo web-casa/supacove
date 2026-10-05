@@ -17,6 +17,10 @@ func TestSanitizeMessageValues(t *testing.T) {
 		{"no secrets here", "no secrets here"},
 		{"notpassword=keep", "notpassword=keep"},
 		{"password='it\\'s' x", "password=[REDACTED] x"},
+		{"İ password=secret", "İ password=[REDACTED]"}, // U+0130 must not shift byte offsets
+		{"İ postgres://u:secret@host/db", "İ postgres-uri://[REDACTED]/db"},
+		{"postgres://u:p@host error reading /tmp/x", "postgres-uri://[REDACTED] error reading /tmp/x"},
+		{"password=alpha\\ beta host=x", "password=[REDACTED] host=x"}, // escaped space is part of the value
 	}
 	for _, c := range cases {
 		if got := SanitizeMessage(c.in); got != c.want {

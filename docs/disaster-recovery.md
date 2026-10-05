@@ -29,7 +29,8 @@
    （LoadOrCreateSecret 拒绝），实例不能起来。修复权限或换回好文件。
 3. **文件完好但内容被换**：能启动，但所有旧凭据解密失败。
 
-情况 2/3 的重建清单（丢失的不只是连接串）：
+情况 2/3（以及无法找回原文件的情况 1；格式损坏的文件需先安全移除才能
+启动生成新密钥）的重建清单（丢失的不只是连接串）：
 
 - **每个注册的数据库**：删除后用连接串重新注册；
 - **每个存储目的地**：同样以主密钥加密——访问密钥不可读，目的地会报
@@ -52,22 +53,23 @@ AGE_IDENTITY_FILE=/secure/age-identity.txt PGPASSWORD='…' \
   sh restore.sh "postgresql://user@host:5432/restored" ./backup.dump.age
 ```
 
-手动等价流程（umask 077，全程不把密码放进 argv）：
+手动等价流程（任何一步失败都必须停止；umask 077；密码不进 argv）：
 
 ```bash
+set -eu
 umask 077
 # 1. 从桶下载 <prefix>/backups/<backup_uuid>.dump.age 与 .manifest.json
-# 2. 必做：密文哈希校验（协议 C.1 的哈希是检错，不是签名）
+# 2. 必做：密文哈希校验（协议 C.1 的哈希是检错，不是签名；失败即停止）
 echo "$(python3 -c "import json;print(json.load(open('backup.dump.age.manifest.json'))['archive']['sha256'])")  backup.dump.age" | sha256sum -c -
 
-# 3. 解密（私钥是唯一的钥匙）到受限临时文件
+# 3. 解密（私钥是唯一的钥匙）到受限临时目录
 AGE_IDENTITY=age-identity.txt
-umask 077; TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 age --decrypt -i "$AGE_IDENTITY" -o "$TMP/restored.dump" backup.dump.age
 
-# 4. 恢复到全新数据库（统一用同一个目标连接串）
+# 4. 恢复到全新数据库（createdb 的位置参数是库名，连接走 --maintenance-db）
 TARGET="postgresql://user@host:5432/restored"
-createdb "$TARGET"
+createdb --maintenance-db="postgresql://user@host:5432/postgres" restored
 pg_restore --exit-on-error --no-owner -d "$TARGET" "$TMP/restored.dump"
 
 # 5. 对照 manifest 声明的表数量基线
@@ -86,7 +88,7 @@ manifest.json 内含 dump 工具版本、服务端版本、依赖扩展/角色�
 
 - 启动前自动备份：每次迁移前对 `supabackup.db` 做带版本号的
   `pre-migrate-v<源版本>-<时间戳>.db` 快照；按**升级批次**保留（每个源版本
-  保留最新一份，上限 5 个批次），存放在数据目录。
+  保留最新一份，上限 5 个批次），存放在数据目录的 `backups/` 子目录。
 - 回滚：停止新版本 → 把最近的 pre-migrate 快照恢复为 `supabackup.db`
   （同时移走/隔离同目录的 `-wal`/`-shm` 文件，避免新旧混用）→ 启动上一个
   正常版本。goose 版本表随快照一起回退。

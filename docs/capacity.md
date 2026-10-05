@@ -7,9 +7,9 @@
 
 | 项 | 值 |
 |---|---|
-| 测试机 | Apple Silicon (arm64) 宿主机，Docker Desktop VM |
+| 测试机 | Apple Silicon 宿主机上的 **Linux arm64 虚拟机**（Docker Desktop VM 内；脚本依赖 /proc 与 Debian PG 布局，宿主机不可直接运行） |
 | 数据库 | postgres:18-alpine 容器（限容器单核附近吞吐） |
-| fixture | 2,000,000 行 × 360 字符**随机 hex 文本**（`encode(gen_random_bytes(180),'hex')`）。注意：hex 文本的 zlib 压缩比实测 ≈0.57，**不是** zlib 最坏情况（原始随机字节 ≈1.00）；要复现更接近不可压的行为请改用 bytea |
+| fixture | 2,000,000 行 × 360 字符**随机 hex 文本**（`encode(gen_random_bytes(180),'hex')`）。**两个不同的比不要混淆**：payload 自身的 zlib 压缩比实测 ≈0.57；而 archive/源库物理体积 ≈ 0.464（分母含表/索引/页开销，非同一口径） |
 | 源库物理体积 | 873 MB（`pg_database_size`） |
 | 客户端 | 宿主机 pg_dump 18.4，custom 格式（zlib） |
 | 加密 | age X25519（与产品一致） |
@@ -19,7 +19,7 @@
 
 | 阶段 | 耗时 | 产出 | 峰值 RSS（采样，见边界） |
 |---|---|---|---|
-| pg_dump（源库 873 MB） | 17.0 s | 405 MB archive（**archive 吞吐 ~24 MB/s；源库吞吐 ~51 MB/s**） | 11.4 MB（pg_dump 客户端进程） |
+| pg_dump（源库 873 MB） | 17.0 s | 405 MB archive（**archive 口径 ~24 MiB/s；源库口径 ~51 MB/s**） | 11.4 MB（pg_dump 客户端进程） |
 | age 加密（对落盘 archive） | 0.83 s | 405 MB 密文 | 6.5 MB |
 | initdb（模拟内嵌实例） | 0.41 s | — | 9.1 MB（initdb 进程） |
 | pg_restore（模拟验证恢复） | 6.2 s | — | 5.7 MB（pg_restore 进程） |
@@ -46,8 +46,9 @@
 以本机数据为参照（线性外推，需自测验证；hex fixture 的压缩比≈0.57，随机
 bytea 会更慢更接近 1:1）：
 
-- 每晚备份窗口内可支撑的总量 ≈ 窗口时长 × 源库吞吐（本测 ~51 MB/s；
-  bytea fixture 会低于此值）。例：4 小时窗口，hex fixture ≈ 700 GB 源库。
+- **dump-only 理想外推上界**：备份窗口 × 源库吞吐（本测 ~51 MB/s）。
+  例：4 小时窗口，hex fixture ≈ 700 GB 源库。这只是 dump 阶段；同一 worker
+  还有远端上传等阶段，实际支撑总量低于此值。
 - 恢复验证（异步，不占备份 worker 但共享 CPU/磁盘）按 pg_restore ~65 MB/s
   追平积压：405 MB archive ≈ 6 s。
 - 多库稳定调度条件按利用率写：Σ(单库服务时长_i / 调度周期_i) ≪ 1（各库

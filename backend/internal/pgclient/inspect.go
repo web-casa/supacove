@@ -177,11 +177,24 @@ func SanitizeMessage(msg string) string {
 	return redactKeywordValues(msg)
 }
 
+// asciiLower folds A-Z only — byte-for-byte length-preserving, unlike
+// strings.ToLower (whose Unicode folding, e.g. İ, shifts byte offsets and
+// made index arithmetic on the original string wrong — round-2 review).
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
 // redactURIUserinfo rewrites postgres URIs, dropping the entire authority
 // userinfo: postgresql://user:secret@host/db → postgres-uri://[REDACTED]/db.
 // (The old scheme-prefix replacer kept user:secret — a round-1 review note.)
 func redactURIUserinfo(msg string) string {
-	lower := strings.ToLower(msg)
+	lower := asciiLower(msg)
 	var out strings.Builder
 	i := 0
 	for i < len(msg) {
@@ -199,10 +212,10 @@ func redactURIUserinfo(msg string) string {
 			}
 			out.WriteString(msg[i:abs])
 			out.WriteString("postgres-uri://[REDACTED]")
-			// Skip the authority: through the next '/', or to the end.
+			// Skip the authority: through the next '/', whitespace, or end.
 			authStart := abs + schemeLen
 			e := authStart
-			for e < len(msg) && msg[e] != '/' {
+			for e < len(msg) && msg[e] != '/' && msg[e] != ' ' && msg[e] != '\t' {
 				e++
 			}
 			i = e // keep the path (dbname)
@@ -220,7 +233,7 @@ func redactURIUserinfo(msg string) string {
 // with escapes; bare → to the next delimiter).
 func redactKeywordValues(msg string) string {
 	const marker = "[REDACTED]"
-	lower := strings.ToLower(msg)
+	lower := asciiLower(msg)
 	var out strings.Builder
 	i := 0
 	writeTailFrom := func(from int) { out.WriteString(msg[from:]) }
@@ -281,7 +294,14 @@ func redactKeywordValues(msg string) string {
 			continue
 		}
 		e := m
-		for e < len(msg) && !strings.ContainsRune(" \t,'\")]", rune(msg[e])) {
+		for e < len(msg) {
+			if msg[e] == '\\' && e+1 < len(msg) {
+				e += 2 // escaped byte (e.g. '\ ') belongs to the value
+				continue
+			}
+			if strings.ContainsRune(" \t,'\")]", rune(msg[e])) {
+				break
+			}
 			e++
 		}
 		out.WriteString(marker)

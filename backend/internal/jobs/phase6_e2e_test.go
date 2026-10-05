@@ -16,6 +16,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/config"
 	"github.com/cloudfan/supabackup/backend/internal/db"
 	"github.com/cloudfan/supabackup/backend/internal/manifest"
+	"github.com/cloudfan/supabackup/backend/internal/pgclient"
 	"github.com/cloudfan/supabackup/backend/internal/verifier"
 )
 
@@ -63,13 +64,17 @@ func TestPhase6RealVerificationEndToEnd(t *testing.T) {
 	uri := startTestPostgres(t)
 	const rows = 500
 	seedTestTable(t, uri, rows)
-	// The canary password rides the REAL pipeline end to end: after the
-	// backup, no generated artifact (manifest, recovery kit) and no API view
-	// may contain it (phase-8 four-exit gate, real-pipeline half).
-	canaryPassword := "CANARY-e2e-P@ss-7c21"
-	uri = strings.Replace(uri, ":cap", ":"+canaryPassword+"@", 1)
-	if !strings.Contains(uri, canaryPassword) {
-		uri = strings.Replace(uri, "postgres://postgres@", "postgres://postgres:"+canaryPassword+"@", 1)
+	// The REAL pipeline password (testPW) is the canary: after the backup,
+	// no generated artifact (manifest, recovery kit) and no API view may
+	// contain it (phase-8 four-exit gate, real-pipeline half). We assert on
+	// the password the pipeline ACTUALLY used — verify it is parsed.
+	ci, err := pgclient.ParseURI(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canaryPassword := ci.Password
+	if canaryPassword == "" || canaryPassword != testPW {
+		t.Fatalf("canary setup: parsed password %q != testPW", canaryPassword)
 	}
 
 	// --- application side: the real backup pipeline ---
