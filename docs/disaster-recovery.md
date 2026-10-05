@@ -17,36 +17,65 @@
    `INSERT INTO settings (key,value) VALUES ('age_recipient','<原recipient>'),('age_key_id','<原指纹>');`
    （recipient 是公钥，从你的 manifest 或旧记录里都能找到。）
 3. 重新注册数据库与目的地；重建调度。
-4. 旧密文可直接下载恢复（见场景 4）；不受本场景影响。
+4. 旧密文可直接下载恢复（见场景 3）；不受本场景影响。
 
-## 场景 2：应用主密钥丢失（`secret.key` 丢失/损坏）
+## 场景 2：应用主密钥不可用（`secret.key`）
 
-**会怎样**：SQLite 里 AES-GCM 加密的**连接串凭据不可读**（登录后报错
-"stored credentials are unreadable"）。调度照跑但每次备份都会失败。
+分三种情况，先尝试**找回原文件**（找回 = 一切照旧，无需任何重建）：
+
+1. **文件丢失**（存在过但没了）：启动时会生成一个**新**密钥，SQLite 里的
+   旧凭据从此不可解密。
+2. **文件格式损坏**（截断/非 64 位 hex/权限过宽）：启动**直接失败**
+   （LoadOrCreateSecret 拒绝），实例不能起来。修复权限或换回好文件。
+3. **文件完好但内容被换**：能启动，但所有旧凭据解密失败。
+
+情况 2/3 的重建清单（丢失的不只是连接串）：
+
+- **每个注册的数据库**：删除后用连接串重新注册；
+- **每个存储目的地**：同样以主密钥加密——访问密钥不可读，目的地会报
+  "destination secret unreadable … re-create the destination"。重建目的地、
+  重新指派到各库、跑一次诊断测试；
+- 重新执行 `age verify --identity-file …` 确认备份密钥不受影响（协议 B：
+  它从不经过主密钥）；
+- 之后跑一次手动备份验证远端提交恢复。
+
 **备份文件**：完好——主密钥从不参与备份文件加密（协议 B）。
-
-恢复步骤：重新录入各数据库的连接串（删除库后重新注册）；备份链立即恢复。
-历史备份照常可恢复。
 
 ## 场景 3：整台实例丢失，只剩桶里的密文 + 离线 age 私钥
 
 **这是设计保证的最坏情况**——恢复完全不依赖 supabackup：
 
+**优先使用恢复套件**（自动完成下列所有检查）：
+
 ```bash
-# 1. 从桶下载 <prefix>/backups/<backup_uuid>.dump.age 与 .manifest.json
-# 2. 校验（可选但推荐）：manifest.archive.sha256 与文件一致
-sha256sum backup.dump.age   # 对照 manifest
-
-# 3. 解密（私钥是唯一的钥匙）
-age --decrypt -i age-identity.txt -o restored.dump backup.dump.age
-
-# 4. 恢复到全新数据库
-createdb -h <target> restored
-pg_restore --exit-on-error --no-owner -d "postgresql://user@host/restored" restored.dump
-
-# 5. 检查
-psql -d restored -c "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')"
+AGE_IDENTITY_FILE=/secure/age-identity.txt PGPASSWORD='…' \
+  sh restore.sh "postgresql://user@host:5432/restored" ./backup.dump.age
 ```
+
+手动等价流程（umask 077，全程不把密码放进 argv）：
+
+```bash
+umask 077
+# 1. 从桶下载 <prefix>/backups/<backup_uuid>.dump.age 与 .manifest.json
+# 2. 必做：密文哈希校验（协议 C.1 的哈希是检错，不是签名）
+echo "$(python3 -c "import json;print(json.load(open('backup.dump.age.manifest.json'))['archive']['sha256'])")  backup.dump.age" | sha256sum -c -
+
+# 3. 解密（私钥是唯一的钥匙）到受限临时文件
+AGE_IDENTITY=age-identity.txt
+umask 077; TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+age --decrypt -i "$AGE_IDENTITY" -o "$TMP/restored.dump" backup.dump.age
+
+# 4. 恢复到全新数据库（统一用同一个目标连接串）
+TARGET="postgresql://user@host:5432/restored"
+createdb "$TARGET"
+pg_restore --exit-on-error --no-owner -d "$TARGET" "$TMP/restored.dump"
+
+# 5. 对照 manifest 声明的表数量基线
+psql "$TARGET" -c "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema')"
+```
+
+表数核对只是初步检查，不等于完整的数据一致性验证；正式演练用
+`supabackup` 内嵌验证或逐表断言。
 
 manifest.json 内含 dump 工具版本、服务端版本、依赖扩展/角色、表数量基线
 与源库物理体积，恢复前先读它。`restore.sh` 恢复套件把以上流程（含哈希
@@ -56,9 +85,11 @@ manifest.json 内含 dump 工具版本、服务端版本、依赖扩展/角色�
 ## 场景 4：升级失败（迁移中断/新版本起不来）
 
 - 启动前自动备份：每次迁移前对 `supabackup.db` 做带版本号的
-  `pre-migrate-v<源版本>-<时间戳>.db` 快照，保留最近数份。
-- 回滚：停止新版本 → 恢复最近的 pre-migrate 快照为 `supabackup.db` →
-  启动上一个正常版本。goose 版本表会随快照一起回退。
+  `pre-migrate-v<源版本>-<时间戳>.db` 快照；按**升级批次**保留（每个源版本
+  保留最新一份，上限 5 个批次），存放在数据目录。
+- 回滚：停止新版本 → 把最近的 pre-migrate 快照恢复为 `supabackup.db`
+  （同时移走/隔离同目录的 `-wal`/`-shm` 文件，避免新旧混用）→ 启动上一个
+  正常版本。goose 版本表随快照一起回退。
 - 新版本拒绝启动时不会写业务数据（schema 兼容性门禁在监听前生效；
   旧版本二进制会被拒于新 schema，防止双重写入）。
 

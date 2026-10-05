@@ -115,9 +115,12 @@ func (a *apiService) CreateDatabase(ctx context.Context, request api.CreateDatab
 		// The full classified error goes to the server log, redacted.
 		// ONE redacted error field only — the raw err field leaked the
 		// credential in combination-escaped forms (round-9 review R9-P1-01).
+		// Order matters (phase-8 review P1-01): whole-secret removal FIRST,
+		// syntax-aware scrubbing second — the reverse order truncated the
+		// secret and broke the whole-secret matcher downstream.
 		a.srv.log.Error("connection test failed", "name", name,
 			"keyword_view", ci.KeywordView(),
-			"err", redact.Secrets([]string{ci.Password}, pgclient.SanitizeMessage(err.Error())))
+			"err", pgclient.SanitizeMessage(redact.Secrets([]string{ci.Password}, err.Error())))
 		return api.CreateDatabase422JSONResponse{Code: "connection_test_failed",
 			Message: "connection test failed — verify host, port, credentials and TLS mode"}, nil
 	}

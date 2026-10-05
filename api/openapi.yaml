@@ -1125,9 +1125,31 @@ components:
         successRate:
           type: number
           format: double
+          nullable: true
+          description: succeeded / terminal-state jobs; null when nothing has finished.
+        exportSuccessRate:
+          type: number
+          format: double
+          nullable: true
+        remoteSuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: Remote commits vs upload failures (null when no upload attempted).
+        verifySuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: verified vs failed/unsupported among succeeded backups (null when none verified).
         avgDurationSecs:
           type: number
           format: double
+          nullable: true
+          description: Measured dump durations only (rows that never recorded one are excluded, not averaged as 0).
+        totalDumpBytes:
+          type: integer
+          format: int64
+          description: Sum of compressed pg_dump archive sizes over succeeded backups (volume metric 2).
         totalArtifactBytes:
           type: integer
           format: int64
@@ -1135,7 +1157,7 @@ components:
         totalSourceBytes:
           type: integer
           format: int64
-          description: Newest known source database physical size summed over registered databases (volume metric 1; unknown sizes count as 0).
+          description: Sum of the NEWEST known source database physical size per database (volume metric 1; unmeasured databases count as 0).
         lastSuccessAt:
           type: integer
           format: int64

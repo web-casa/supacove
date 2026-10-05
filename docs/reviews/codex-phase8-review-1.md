@@ -1,147 +1,152 @@
-# Phase 8 首轮评审
+# Phase 8 评审 — 90f41ac
 
-评审日期：2026-10-04。对照 `docs/dev-plan.md:228` 的 Phase 8 任务及统一发布门禁。
+评审日期：2026-10-05。范围：`git diff f373926..90f41ac`；HEAD 确认为 `90f41ac449da54a553f17433f8dac225265ef57b`。对照 `docs/dev-plan.md:228` 的 Phase 8 与统一发布门禁，并沿用历轮“真实出口、权威状态、历史迁移、恢复证据”的评审口径。此报告替换同路径针对早期 `a5b0032` 的报告；不把早期已修复的问题当作本次新增缺陷。
 
-## 范围与结论摘要
+## 总体结论
 
-当前 HEAD 为 `a5b00323d9d862aad1c5f63d2cd5660e78ccfd2f`，即 Phase 8 提交本身；`git log a5b0032..HEAD` 实际为空。按照请求中“基线 a5b0032 前的 commit 到当前 HEAD”的描述，本次实际评审 `a5b0032^..HEAD`（父提交 `129d4af`），共 7 个变更文件，并检查必要的启动、路由、契约、镜像和测试上下文。未修改业务代码。
+**P0：0；P1：5；P2：4。暂不通过 Phase 8 完成 / 公测发布门禁。**
 
-发现 **P0：0；P1：8；P2：4**。统计链路尚未接通，查询可确定失败；发布门禁缺少可复核证据。**不建议将本次提交标记为 Phase 8 完成或据此通过公测发布门禁。** 未取得扫描原始结果，不把未知漏洞直接定为 P0，也不据此宣称安全。
+源库大小链路、契约路由、失败任务 remediation 接线已经落地；`/api/stats` 确实受认证保护，生成代码没有漂移。但脱敏仍有可复现的残留/组合回归，四出口 canary 存在空断言，三体积及分段成功率尚未完整交付，容量结论超出实际测量范围。没有证据把这些问题升级为 P0，也不能由此宣称已完成全面安全审计。
 
-## P0
+## P1 发现
 
-本次范围内未确认新的 P0。安全扫描缺少漏洞 ID、调用链和修复版本，因此无法判定所称 19 项中是否存在达到 P0 的可利用问题；这不是“已证明 P0 为零”。
+### P1-01：值级擦除不处理引号，并会破坏后续已知 secret 的完整匹配
 
-## P1
+证据：`backend/internal/pgclient/inspect.go:183`、`:199`、`:204`；实际组合调用方 `backend/internal/server/api_phase2.go:120`；对照 `backend/internal/jobs/jobs.go:643`、`:989`。
 
-### P1-01：聚合查询读错表，所有耗时 SQL 都引用不存在的列
+无监听 Go 探针直接调用提交中的函数，得到：
 
-位置：`backend/internal/stats/stats.go:79`、`:95`、`:120`；`backend/internal/server/stats_handler.go:15`；`backend/internal/db/migrations/0010_stats.sql:9`。
+| 输入 | SanitizeMessage 输出 |
+| --- | --- |
+| `PASSWORD=one password=two` | `PASSWORD=[REDACTED] password=[REDACTED]` |
+| `password='alpha beta' host=x` | `password=[REDACTED]'alpha beta' host=x` |
+| `password=alpha beta` | `password=[REDACTED] beta` |
+| `password=alpha,beta` | `password=[REDACTED],beta` |
+| `password=[REDACTED]` | `password=[REDACTED]]` |
+| `password = alpha` | 原样保留 |
 
-`duration_secs` 仅新增在 `backup_stats`，没有任何迁移为 `jobs` 添加该列。两个总体查询却从 `jobs` 读取它，分库和近期查询还读取 `j.duration_secs`。`COALESCE` 无法处理不存在的列。在应用全部 SQL Up 迁移后的 SQLite 上，逐一执行原查询，分别返回 `no such column: duration_secs` / `no such column: j.duration_secs`；空库也失败。`Recorder.Summary` 直接返回错误，handler 即使挂载也只能返回 500。
+遇到起始引号立即停止，意味着合法 quoted keyword conninfo 中的密码全文仍在。更直接的新增回归是先 `SanitizeMessage`、后 `redact.Secrets`：以完整已知密码 `alpha,beta` 调用 `redact.Secrets([]string{secret}, SanitizeMessage("password="+secret))`，仍输出 `password=[REDACTED],beta`。旧函数虽然仅换前缀，但还保留连续的完整密码，后面的 `Secrets` 可以擦掉；新函数先截去一部分，完整匹配不再成立。空格、右方括号、单引号同样复现。连接测试日志使用的正是这个顺序。
 
-建议：统一查询实现，用稳定 job/database ID 关联真实统计来源，明确旧 job 无统计时的 NULL/未知语义；避免一对多关联重复 SUM/COUNT。修复后用真实迁移生成的数据库验证总体、分库、近期查询，不能只在手造含额外列的 schema 上测试。
+主备份路径先 `Secrets` 再 `SanitizeMessage`，完整已知密码在该路径通常已被消除；不能据此推断所有真实任务均泄漏，也不能忽略反向顺序的日志调用方。URI 前缀替换依然不擦除 userinfo，故不能把 SanitizeMessage 单独视为完整 URI scrubber。
 
-### P1-02：统计写入器和 `/api/stats` 均未接入，表格展示也未交付
+建议：统一先移除已知 secret，再进行语法感知的兜底脱敏；支持引号/转义、等号两边空白，并保证 marker 幂等。增加两种调用顺序、多个字段、大小写、引号/空格/标点的回归测试。没有发现业务消费者需要依赖旧的泄漏格式；这里的兼容性风险是脱敏组合，而非展示格式。
 
-位置：`backend/internal/jobs/jobs.go:416`、`:838`；`backend/internal/server/stats_handler.go:10`。关联上下文：`backend/cmd/supabackup/main.go:208`、`backend/internal/server/server.go:187`、`:204`。
+### P1-02：四出口 canary 只证明部分 fail() 出口，工件和 webhook 可无条件漏测
 
-全仓搜索只有 `SetStatsRecorder` 定义，没有调用；`NewRunner` 不初始化 recorder，生产路径始终跳过写入。`handleStats` 同样只有定义，没有路由注册，OpenAPI、生成类型和前端没有 stats 接口/表格。正常认证用户请求 `/api/stats` 会进入 API 的 NotFound，而不是该 handler。统计包的 Summary（databases 数组、recent）与 handler 的独立响应（databases 数量）也不一致。
+证据：`backend/internal/jobs/phase8_canary_test.go:34`、`:90`、`:111`、`:122`、`:136`、`:165`、`:208`。
 
-建议：启动时注入 recorder，按现有 OpenAPI/strict handler 模式增加契约和受保护路由，复用一个查询服务，完成表格展示。用 `httptest.NewRecorder` 经真实 Router 验证认证成功后返回 200、未认证拒绝，避免只直接调用 handler。
+- 测试直接 `r.fail(...)` 注入拼接好的错误，没有执行连接、dump 或 `runJob`，注释所述“真实坏主机失败”和“fake verifier failure”均未发生。数据库中虽然存了 canary URI，但它没有被解密使用。
+- exit 1 的任务落库/GetTask 检查，以及 exit 4 的真实 `backup failed` 日志 capture，有实际价值；不是全部测试都无效。GetTask 也不是 HTTP API 序列化出口。
+- exit 2 查询 raw payload 列值得保留，但没有断言行数非零，`Scan`/`rows.Err` 未完整检查；只配置 heartbeat_url，没有创建 webhook 订阅、启动 outbox delivery worker。heartbeat `/fail` 不是 outbox JSON 投递。最后等 3 秒后即使收包为零，循环也直接通过；接收端单次 `Read` 还可能只读到部分 body。
+- exit 3 自己写 `{"backupId":"canary"}`，未读取/断言这个 manifest 内容；kit 根本没有生成，`ReadFile` 的文件不存在错误被忽略。真实生成器就算泄漏，该测试也能绿灯。
 
-### P1-03：体积与分段状态记录失真，不满足首版统计口径
+建议：保留 fail 单测，但四出口门禁另走实际 backup/verifier 链；从已注册 webhook 驱动 outbox worker，要求至少一条预期 event、已送达状态和完整收包；要求真实 manifest/kit 存在且读取成功，逐一检查内容。故障路径不生成工件时，增加成功工件路径，而非用手写文件代替。
 
-位置：`backend/internal/jobs/jobs.go:837`；`backend/internal/stats/stats.go:33`；`backend/internal/db/migrations/0010_stats.sql:3`。对照 `docs/dev-plan.md:22`、`:231`。
+### P1-03：新增统计契约仍只有两体积和总成功率，旧 dump_size 错误也未修复
 
-一旦接通 recorder，`DumpSize` 和 `ArtifactSize` 都取 `result.SizeBytes`（密文字节数）；现有 `dumper.Result.PlaintextArc` 才是已压缩 archive 字节数。表中没有源库物理体积及测量/未知状态，默认 0 会把“未测量”表达成零。远端提交成功的 job 也没有传 `RemoteCommitted`，记录为 false；验证状态固定 `not_run`。写入只发生在整体成功之后，导出成功但远端上传失败的记录缺失，无法统计导出、远端提交、验证、通知各自的分母与结果。单个 `successRate` 不符合计划明确要求的分段成功率。
+证据：`api/openapi.yaml:1109`、`:1131`；`backend/internal/server/api_phase7.go:392`；`frontend/src/App.tsx:219`；`backend/internal/jobs/jobs.go:935`；`backend/internal/dumper/dumper.go:543`。要求：`docs/dev-plan.md:231`。
 
-建议：分别记录源库物理体积（不可测为 NULL）、`PlaintextArc`、密文大小和测量口径；从实际阶段结果持久化状态，覆盖失败/取消/中断/恢复提交路径，通知和验证的未配置、未执行、失败不能伪装为成功或零。
+StatsSummary/卡片只有源库物理大小与密文总量，没有 compressed archive 指标。`backup_stats.dump_size` 继续取 `result.SizeBytes`，和 artifact_size 完全相同；已有的正确来源是 `result.PlaintextArc`。注释写“三体积 / segmented success rate”不能补足缺失的字段。
 
-### P1-04：`/metrics` 删除现有监控序列，且 CHANGELOG 仍宣称存在
+successRate 仅为 succeeded/终态 job 总数，没有导出、远端提交、验证、通知的分段分母/结果。导出成功后上传失败会合并成一个失败任务，异步验证失败仍可计为 succeeded；因此不能用此百分比回答计划要求的各阶段可靠性。
 
-位置：`backend/internal/server/metrics.go:31`；`CHANGELOG.md:43`。
+建议：补 archive 持久化及公开字段，明确源库“每库最新已知”和 archive/ciphertext“累计历史”的不同口径；按权威阶段状态统计成功率，明确未配置/未执行/未知，不以 0 假装成功或有效测量。本项是历轮未关闭范围，不是声称这些底层问题全由本 diff 引入。
 
-本提交将已有 `supabackup_jobs_total{status=...}` 替换为两个新名称，删除 pending/running/canceled/interrupted 序列、`supabackup_last_success_age_seconds`、活跃数据库/目的地数量。既有看板/告警查询会失去数据，尤其失去备份陈旧度指标；这是本次实际引入的回归。CHANGELOG 却继续写“jobs by status, last success age, databases, destinations”。
+### P1-04：容量材料把可压 fixture 与客户端采样，写成不可压的产品端到端资源上限
 
-建议：保留已有序列并修正错误处理；如确需变更，应提供迁移与弃用安排及准确发布说明。增加指标名称、全部状态、陈旧度的回归断言。
+证据：`scripts/capacity-benchmark.sh:29`、`:42`、`:50`、`:65`、`:78`、`:87`；`docs/capacity.md:13`、`:23`、`:27`、`:31`、`:39`。产品管道：`backend/internal/dumper/dumper.go:353`、`:409`。
 
-### P1-05：安全扫描摘要不可审计，stdlib 来源不能视为应用不受影响
+1. `encode(gen_random_bytes(180),'hex')` 生成 360 字节、仅 16 种字符的文本，并非 zlib 最坏情况。本轮独立随机字节压缩探针：原始随机 bytes 的压缩比约 1.0003，hex 文本约 0.5697。405/873 的缩减不能全归因于页/行头开销。该 fixture 可保留为随机 hex 负载，但不能称“不可压”。
+2. 每 0.2 秒读取 VmHWM，只能获得该进程存活且可读时的历史高水位，退出前最后一段峰值可能漏掉；initdb 的子进程、恢复用 postgres 服务端、应用 Go 进程均未计入。“所有阶段/端到端 RSS <12 MB”不成立。计时还包含轮询尾延迟，对 0.41/0.83 秒阶段影响明显。
+3. 脚本顺序 dump 到明文文件再 age，加密后直接恢复原明文；没有密文 hash/decrypt/基线检查，没有上传/read-back，没有把 PG start/stop 纳入阶段计时。~24 秒只是所列阶段的近似和，不能标成产品“备份→可恢复验证”端到端结果。
+4. 产品备份是 pg_dump→age 流式写密文，不会同时落盘一份 archive；文档“协议 A 暂存 = archive+密文”混入了 benchmark 的做法。验证另需明文、展开数据目录/WAL及历史保留量，报告也没有实际峰值磁盘测量。
+5. 405/17≈24 MB/s 是 archive 吞吐，873/17≈51 MB/s 才是源库吞吐，表格却将前者标“对源库”。`du -m` 为分配空间的向上取整 MiB，并非逻辑字节数；不能与 pg_database_size 的原始 bytes 不加说明直接互换。由此推出“4h≈340GB 源库”依据不一致。
 
-位置：`CHANGELOG.md:49`、提交 `a5b0032` 的 message；关联 `go.mod:3`、`Dockerfile:8`、`.github/workflows/ci.yml`。对照计划任务 3。
+建议：保留原始测量值但修正标题/单位/测量边界；使用 bytea 随机 fixture 或明确 hex 压缩比。用进程退出资源统计与整个进程组/cgroup 峰值，补上传和真实验证链；区分源库、archive、密文以及验证临时盘。Apple Silicon 宿主机描述还需说明脚本实际运行的 Linux 环境：现脚本依赖 `/proc`、GNU date 和 `/usr/lib/postgresql/18/bin`，无法直接在 macOS 复现。
 
-仓库只有“19 stdlib findings、0 code vulnerabilities”的文字，没有扫描输出、GO/CVE ID、可达调用链、扫描命令/版本/时间/退出码、目标构建信息及逐项处置。无法知道 19 是模块级命中、导入级命中还是可达符号级命中，也无法验证“0 code vulnerabilities”。stdlib 是漏洞来源；应用是否调用受影响路径是另一维度。升级工具链可能是修复途径，但当前实际运行仍为 Go 1.26.0，不能把“上游有修复”写成发布产物已修复。govulncheck 也不替代应用鉴权、注入、secret 等人工审查。
+### P1-05：安全与真实恢复发布门禁仍无仓库内可判定证据
 
-官方说明：扫描取决于具体构建配置，源码分析显示受影响调用链，并有静态分析限制；JSON/SARIF 输出模式即使检出漏洞也可能退出 0，CI 不能只检查该模式的进程退出码。[govulncheck 官方文档](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck)。
+证据：`CHANGELOG.md:66`；`.github/workflows/ci.yml:8`；`docs/dev-plan.md:233`、`:238`；`docs/disaster-recovery.md:65`。
 
-本次尝试 `govulncheck ./backend/...`，因沙箱禁止 DNS/socket 请求 `vuln.go.dev` 而退出 1，属于**扫描未完成**，不是“发现漏洞”或“扫描通过”。未复现那 19 项，也不臆造 ID/修复版本。现有 CI 没有 govulncheck、Trivy、gitleaks 门禁，本提交没有四出口 secret canary 的复查记录。
+本次写入了 govulncheck=0 / gitleaks clean 的结论，升级工具链也确实生效，但没有提交可复核的扫描配置、版本、输出和目标产物标识；Trivy 门禁未交付，CI 无相应扫描步骤。四出口回归目前也不能作通过证据（P1-02）。季度演练建议不是三平台“备份→桶下载→新目标按恢复包手动恢复”的脱敏记录，CI 亦不能判定这些发布门禁。
 
-建议：提交脱敏原始报告与逐项来源/可达性/利用前提/修复版本表；选定覆盖相关修复的工具链重建实际镜像并复扫，记录 binary build info 与镜像 digest；补齐镜像、secret 和四出口复查的判定流程。
+这是 Phase 8 完成/发布条件未满足，不是推断当前存在某个漏洞，也不否定用户报告的本地扫描结果。建议提交绑定本 commit/镜像的扫描与三平台演练证据，并补能阻止不合格版本发布的门禁。CHANGELOG 的 Known limitations 同时仍写 Go 1.26.0 的 19 项问题（`:78`），需同步清理过时口径。
 
-### P1-06：推荐部署流程实际启用开发 Compose，生产恢复能力易被误解
+## P2 发现
 
-位置：`docs/deployment.md:8`、`:43`、`:78`；关联 `compose.yaml:1`、`Dockerfile` 的 runtime/runtime-spike。
+### P2-01：平均耗时读取从未写入的 jobs.duration_secs，成功任务仍显示空值
 
-指南将 `docker compose up -d` 作为推荐部署，但仓库 Compose 明确是开发环境：`SB_INSECURE_COOKIE=1`、debug 日志、固定 PG/MinIO 凭据，PG 和 MinIO 数据位于 tmpfs。端口仅绑定 loopback 降低直接暴露风险，但这不等于生产配置；经反代访问时仅设置 `SB_PUBLIC_ORIGIN` 也不会自动关闭 insecure cookie。操作者若把示例 MinIO 用作备份目的地，容器销毁/重建会丢失对象。
+证据：`backend/internal/server/api_phase7.go:402`；`backend/internal/jobs/jobs.go:861`、`:941`；`frontend/src/App.tsx:233`。
 
-此外发布 runtime 只安装 PG 客户端，没有 initdb/postgres 服务端二进制；启动路径没有接入 verifier，CHANGELOG 的嵌入式验证表述应限定为现有模块能力，不能暗示推荐镜像已执行验证。
+成功 UPDATE 不写 `jobs.duration_secs`；实际耗时只写 `backup_stats.duration_secs`。新接口 AVG 读取 jobs 的默认 0，卡片又将 0 渲染为 `—`。这次不会再因缺列报 SQL 错，但指标仍没有接通。
 
-建议：提供可直接使用的生产示例（TLS、Secure cookie、持久数据、UID 10001 卷权限、真实 BYOS、secret 挂载），明确开发 Compose 的临时数据边界和验证支持状态；不要要求用户自行猜测安全覆盖参数。
+建议以一个权威来源写入/查询实际耗时；旧记录应为未知或明确的历史估算，不和新记录混算。增加真实成功任务到 StatsSummary 的检查。
 
-### P1-07：恢复指南缺少关键自检，复制命令会暴露凭据及明文
+### P2-02：MAX(id) 相关子查询按每条历史任务重复扫描同库历史，形成平方成本
 
-位置：`docs/deployment.md:46`、`:55`、`:63`；对照计划协议 E、Phase 8 发布材料/真实恢复门禁。
+证据：`backend/internal/server/api_phase7.go:432`；`backend/internal/db/migrations/0004_backup_kernel.sql:47`；`frontend/src/App.tsx:220`。
 
-指南直接解密并将含密码 URI 传给 `pg_restore`/`psql`，密码进入 argv 和可能的 shell history；identity 重定向文件与明文 dump 均未要求 0600/受限 umask，未写明明文落盘及清理。没有下载 manifest、核对完整密文 SHA-256、格式/工具版本、角色/扩展依赖、平台 profile 和目标空库检查；`SELECT count(*) FROM pg_tables` 包含系统表，不能证明预期业务对象或数据恢复成功。单个通用模板没有体现 Supabase 专用恢复边界。
+每个外层成功 job 都计算该库 MAX(id)。现有索引 `(database_id, created_at DESC)` 不能直接满足“满足大小条件的最大 id”。SQLite EXPLAIN 显示 `SCAN j → CORRELATED SCALAR SUBQUERY → SEARCH j2 USING INDEX idx_jobs_database_created(database_id=?)`。
 
-建议：使用受限 `PGPASSFILE`，安全创建 identity/临时明文，增加解密前密文哈希校验（注明检错非来源签名）和 profile/版本依赖检查，恢复失败明确目标可能已部分写入；给出三平台独立恢复步骤与 fixture 数据断言。脚本语法通过也不能替代实际恢复演练。
+可复现数据：Python SQLite 同结构同查询，单库 1,000/3,000/6,000 行耗时约 0.125/1.169/4.963 秒。另用实际生产迁移和项目 modernc 驱动、直接调用 GetStats 的无监听探针，3,000 行耗时 **3.43 秒**。前端每分钟刷新，历史增长后会持续占用 DB 连接/CPU。
 
-### P1-08：升级、灾难恢复、三平台演练与容量门禁缺少发布证据
+值语义本身在当前单备份 worker、ID 顺序执行条件下正确：每库只取最大成功且 >0 的已知值，不会把多份备份重复求和；后续 unknown=0 不覆盖已知值。注意包含已软删除库的历史，API 应明确口径。
 
-位置：`docs/deployment.md:74`、`CHANGELOG.md:5`；关联 `backend/internal/db/upgrade_test.go`、`.github/workflows/ci.yml`。对照 `docs/dev-plan.md:232`、`:234`、`:239`。
+建议先 `GROUP BY database_id` 求最大合格 id 再按主键回连，或提供与条件/排序相符的索引并验证计划。补新值、旧值、unknown、失败、多库及大历史集测试。
 
-既有 upgrade 测试覆盖历史 v1 schema 到当前版本，但本提交没有带历史 job/凭据的 v9→v10 专项迁移、迁移失败后的恢复演练。文档只解释主密钥丢失，缺少 SQLite/WAL 丢失、仅桶+私钥幸存时的操作、旧桶归属/清理禁用边界、升级前备份与失败恢复流程。没有三平台从桶下载到新目标手动恢复的脱敏记录；`scripts/spike1-supabase-restore.sh` 的存在不能证明本发布版本已完成三平台门禁。
+### P2-03：主密钥灾难恢复步骤不完整，照做仍可能无法启动或上传
 
-容量材料也未给出固定测试机、低压缩比 fixture、dump/upload/verify 分段耗时、峰值 RSS/磁盘、总负载边界和 RPO 语义；CI 无法判定这些发布门禁。alpha 标签可以说明成熟度，但不能作为计划共用 beta 发布门禁已完成的证据。
+证据：`docs/disaster-recovery.md:22`、`:28`；`backend/internal/config/config.go:169`、`:184`；`backend/internal/jobs/jobs.go:669`；`backend/internal/jobs/destinations.go:146`。
 
-建议：补充带 commit/artifact/profile/工具版本/数据断言的演练报告、迁移与灾难恢复操作清单、容量报告，并让发布流程检查必需证据；未覆盖的平台应公开缩减支持范围。
+文档把“丢失/损坏”统一写成能登录、调度照跑，实际格式损坏/权限不合规会在 LoadOrCreateSecret 阶段阻止启动。只有文件缺失后生成新密钥，或格式正确但内容改变，才进入旧凭据无法解密的状态。
 
-## P2
+即使重新注册数据库，目的地的 secret 同样由旧主密钥加密，仍会报 `destination secret unreadable — the master secret changed; re-create the destination`。仅重录连接串不等于“备份链立即恢复”，还需重建目的地凭据、重新绑定并验证远端提交。`stored credentials are unreadable` 是任务失败文案，不是登录错误。
 
-### P2-01：总体、分库、近期过滤与身份口径不一致
+建议按密钥缺失、格式损坏、有效但错误三种情况写步骤，优先恢复原密钥；必须重建时列出所有受影响凭据和配置。场景 3 命令也应统一目标连接（createdb、pg_restore、psql 当前不一致）、强制校验密文哈希、设受限 umask/清理明文并优先复用现有恢复套件，避免把未比较基线的表数查询当作恢复验证。
 
-位置：`backend/internal/stats/stats.go:86`、`:101`、`:124`。
+### P2-04：remediation 混淆两种 verification，且 Supabase pooler 建议过度排除
 
-总体含软删除库和 interrupted，分库只含活跃且至少一次 succeeded 的库，近期又包含软删除库但排除 canceled/interrupted。仅失败或从未备份的活跃库在分库表完全消失；总数也不一定等于 succeeded+failed+canceled。软删除会改名，近期 JOIN 显示 tombstone 名而非历史名称。`GROUP BY d.id,d.name` 本身按稳定 ID 分组是正确的，但响应只返回 name，没有 ID。`ORDER BY j.id` 表示入队顺序，不能保证完成时间的最近顺序。
+证据：`backend/internal/jobs/remediation.go:13`、`:17`、`:21`、`:23`；`backend/internal/dumper/dumper.go:357`、`:508`、`:583`；`backend/internal/server/api_phase2.go:305`；`backend/cmd/supabackup/main.go:82`。
 
-复现：仅为后续诊断在临时 SQLite 的 jobs 添加 duration 列，准备 3 个库（活跃成功、活跃仅失败、软删除成功）和 5 个终态 job（2 成功、1 失败、1 中断、1 取消）：总体 total=5、succeeded=2、failed=1、canceled=1；分库仅返回活跃成功库；近期返回软删除 tombstone、失败、成功三条。该辅助列未写入仓库，不能视为 P1-01 已修复。
+- verification 文案说常见原因是“pg_dump warnings treated as errors”，但当前 dumper 没有把 warnings 升为 ClassVerify 的逻辑；非零退出按 classifyDumpFailure 分类，提交前失败还会删除 `.inprogress`，不能泛称 artifact retained。真正的异步 restore 验证写独立 verify_status，任务仍 succeeded，不进入仅失败任务的 remediation 分支，因此实际验证失败用户看不到这段建议。应将建议绑定真实 verify_status/verify_detail，分别描述导出失败和恢复验证失败。
+- Supabase “not the pooler”把 session pooler 一并排除；官方允许 direct 或 session pooler 的迁移路径，IPv4-only 部署可能需要后者，应明确禁止/不支持的是哪种模式，不能一律换 direct。[Supabase 迁移说明](https://supabase.com/docs/guides/platform/migrating-to-supabase/postgres)。
+- `supabackup version` 只打印应用版本，不会显示 pg_dump client 版本；客户端版本排查应使用实际选中二进制的 `--version`。storage 文案将 retention cleanup 也描述成失败任务原因，而正常保留清理失败仅日志告警。
 
-建议：明确历史/活跃统计范围与成功率分母，展示 interrupted，分库采用保留零结果库的 LEFT JOIN 并在 JOIN 内放状态条件，返回 ID，保留历史名称，最近完成按 finished_at+id 排序。若保留累计产出字节，应说明它不等于当前存储占用。
+Neon 冷启动作为网络超时的排查方向、磁盘配额环境变量、容器 UID 10001 均未发现本次明确错误；permission 文案是初步检查，不应当作完整 SELECT/sequence/RLS 权限配置保证。
 
-### P2-02：统计 HTTP 辅助查询吞错，metrics 复用变量可输出错误计数
+## 重点核查中可认可的部分与边界
 
-位置：`backend/internal/server/stats_handler.go:35`、`:40`；`backend/internal/server/metrics.go:32`、`:38`。
+- **认证和契约**：`server.go:201` 将生成 API 挂在 `/api`，先经过 default-deny guard，匿名白名单没有 stats。无监听真实 Router 探针实测 GET `/api/stats` 返回 **401**。`make api-check` 通过。未发现 stats 被挂到 root/metrics 边界之外。
+- **物理体积采集**：`inspect.go:124` 忽略单独 size 查询错误，且没有显式事务，普通权限拒绝不会让后续 role 查询进入 aborted transaction。PostgreSQL 对该函数要求目标库 CONNECT 或 pg_read_all_stats，并非必须 superuser；不能把所有 Supabase/Neon 受限角色都推断为必失败。[PostgreSQL 官方文档](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-DBSIZE)。本轮没有真实托管库权限测试；超时/连接断开仍可能令后续查询失败，不等于“所有错误都不影响备份”。当前 0=unknown 有代码/契约约定；多库合计缺少已测量覆盖率，展示需防误解。
+- **Go 版本**：本轮测试实际使用已缓存 Go **1.26.6**；CI 的 `go-version-file: go.mod` 会跟随最低版本。Dockerfile `ARG GO_VERSION=1.26` 是浮动 minor tag，不意味着固定在 1.26.0；若缓存基础镜像较旧，默认 GOTOOLCHAIN=auto 可下载满足 go 指令的工具链，否则构建失败，而非悄悄使用旧版本。[Go 工具链说明](https://go.dev/doc/toolchain)。未实建镜像，不宣称验证其 digest/扫描状态；锁定构建版本和记录 build info 可提高可复现性，当前未单列为阻断缺陷。
+- **迁移回退测试**：改为 Down 到 `<14` 与新增 0015 一致，db 全包测试及相关 race 测试通过，未发现无限循环/回错目标。
+- **灾难文档场景 1 SQL**：`settings(key,value)` 与 0004 schema 和 age init 使用的列、键名一致，不能沿用“schema 不匹配”的疑虑。recipient 是公钥，manifest 中可取得。场景 1 的“见场景 4”应为场景 3。
+- **pre-migrate 保留**：`db/backup.go:15`、`:55` 实际为最多 5 个有版本升级批次，每源版本保留最新一份，不是简单最近 5 次尝试；无法分类的 legacy 文件另有保留规则。“最近数份”虽不构成份数冲突，最好写出目录与批次规则。回滚说明还应提醒隔离旧 DB/WAL/SHM，避免故障现场混用。
+- **RPO / 负载**：单 worker 及 per-DB cron 与描述一致，但公式只能是健康、稳定负载下的近似，不是故障条件下的上限。运行中再到期会去重并推进游标（`scheduler.go:184`），不能保证每次 cron 都对应一份备份；还需计入轮询抖动、失败/重试与恢复时间。稳定条件应按各库周期写 `Σ(service_time_i / period_i) < 1` 并留余量，同一窗口则比较所有库完整服务时间总和；不能仅以 dump 速率或“单库最慢×队列深度”作为异周期库的总负载条件。异步 verifier 不占备份 worker，但共享 CPU/盘，仍会影响吞吐。
+- **脱敏复杂度**：每个 password= 都重新 lowercase 剩余字符串并重建全文，最坏约 O(k·n)，不是单次线性扫描。通常短错误消息成本有限，本次没有将其夸大为独立 DoS；仍建议一次扫描构建输出并限制错误长度。
+- **其他统计边界**：`api_phase7.go:417` 起多个查询忽略错误，异常时会返回 HTTP 200 + 零值；应统一返回错误或明确 unknown，不能把 DB/ctx 错误伪装为 0。本轮未把每个可靠性欠缺拆成单独计数。
 
-最近成功、库/目的地数量的 Scan 错误被忽略，会返回 200 和看似有效的零值；metrics 第二次查询失败时，同一个 n 可能保留第一次成功数并被输出为失败数。建议统一处理 Query/Scan 错误、记录脱敏诊断，查询失败不要冒充真实零值，并给出对应故障注入测试。
+## 验证记录
 
-### P2-03：新增迁移缺少单 job 唯一约束与补偿策略
+所有 Go 命令使用 `GOCACHE=/tmp/codex-phase8-cache`。临时探针已删除，仅保留此报告。
 
-位置：`backend/internal/db/migrations/0010_stats.sql:5`；`backend/internal/stats/stats.go:21`；`backend/internal/jobs/jobs.go:837`。
+| 验证 | 结果 |
+| --- | --- |
+| `make api-check` | 通过；后端/前端生成代码无漂移 |
+| `go test` pgclient、redact、db、stats | 前三包通过；stats 无测试文件 |
+| 同批 jobs / server 全包测试 | 受沙箱监听限制中止：httptest `socket: operation not permitted`，不记作业务回归或通过 |
+| 无监听 SanitizeMessage / Secrets 探针 | 复现 P1-01 表内结果和组合残片 |
+| 无监听真实 Router / GetStats 探针 | 未认证 401；真实迁移 + 3,000 行查询约 3.43s，源库合计正确 |
+| `go test -race` 选定升级/词汇 Down-Up/重复名称/验证脱敏/并发入队/启动恢复/未配置 verifier 测试 | db、jobs 通过；同命令 pgclient/redact 的过滤模式无匹配，不算该两包 race 全覆盖 |
+| `go vet ./backend/...` | 通过 |
+| 前端 `npm run build` | tsc + Vite 通过 |
+| `bash -n scripts/capacity-benchmark.sh` | 通过；不代表性能数据可复现 |
+| capacity / Docker / 三平台 / 安全扫描 | 按环境约束未重跑；不为提交中的实测值与扫描结论背书 |
 
-注释称每 job 一条，但 job_id 没有 UNIQUE，重复 Record 会产生多条；成功 job 更新与 best-effort Record 不在同一事务，期间退出或写入失败会永久缺统计，恢复远端成功路径也不补记。当前查询还未读此表，不能声称现状已因重复行造成聚合翻倍；接入 JOIN 后则须防范。
+WaitGroup.Go 等机械替换未发现新的明确 race；有限 race 结果不能证明完整异步链无竞态。新 canary 本身需要监听，本轮只静态评估其路径与断言，未将它记作运行通过。
 
-建议：为 job_id 加唯一约束，定义幂等插入/更新、阶段状态更新及启动补偿策略；验证重复调用、崩溃窗口和恢复路径。
+## 最关键的 3 件事
 
-### P2-04：发布说明与实际版本/支持契约不同步
-
-位置：`docs/deployment.md:6`、`:11`、`:79`、`:80`；`CHANGELOG.md:39`、`:43`；`README.md:5`。
-
-文档写 Go 1.24+，实际 go.mod 要求 1.26.0（旧 Go 可能自动下载工具链，并非直接满足版本要求）；clone URL 仍为 `your-org` 占位；README 仍为 Phase 1 开发中。指南声称 API Token 自动化，但当前 guard/契约只有 session cookie，bootstrap/CSRF token 不是自动化 API Token。metrics 默认认证是真的，但反代 IP 白名单本身不能替代应用会话认证。
-
-建议：按发布时实际能力修订版本、仓库地址、认证和监控接入示例，补发布日期/可定位版本、升级与恢复文档链接，并准确表述已实现、未接入和未验证能力。
-
-## 验证结果与测试缺口
-
-| 验证 | 结果与边界 |
-|---|---|
-| `GOCACHE=/tmp/codex-phase8-go-cache go build ./backend/...` | 通过，Go 1.26.0 linux/arm64。出现 module stat cache 只读警告，最终退出 0；不是镜像构建验证。 |
-| `GOCACHE=/tmp/codex-phase8-go-cache go test -race ./backend/...` | 整体退出 1：server 首个测试启动 httptest listener 被环境拒绝（socket: operation not permitted）。其余带测试的包通过；不能称全套 race 通过，不能把环境限制计为实现缺陷。 |
-| Python SQLite 执行所有 SQL Up 迁移及原统计查询 | SQL 迁移通过；4 个含 duration 的查询全部复现缺列。Go migration 0003 属于认证迁移，此 SQL 复现不替代 goose 完整升级测试。 |
-| Python YAML | compose、OpenAPI、codegen 配置、CI YAML 可解析。 |
-| `bash -n` | 两个 scripts/*.sh 以及 CI 所有 run 脚本语法通过。 |
-| `govulncheck ./backend/...` | 网络/DNS 被沙箱阻止，扫描未完成。没有给 19 项摘要背书。 |
-
-Phase 8 提交没有新增任何测试；stats 包输出 `[no test files]`。优先补充：
-
-1. 从真实迁移 schema 执行所有查询：空库、各终态、仅失败库、零记录库、软删除、不同完成顺序、缺统计、重复记录、NULL 未测量，以及分段分母。
-2. 经实际启动装配完成一次成功/失败/远端恢复提交，断言 backup_stats 数量、三体积和远端状态；经过真实 Router 检查 stats 路由、认证、响应契约和 DB 故障。
-3. v9→v10 历史数据保持、失败回滚/恢复、重复 Record 与终态写入之间的中断补偿；已有 metrics 契约回归。
-4. 在允许监听端口的环境重跑全部 race 测试；在可联网的发布环境保存安全扫描证据、实际镜像扫描和三平台恢复/容量演练结果。
-
-## 总体结论与最关键 3 件事
-
-**本提交可以作为 Phase 8 的初步实现，尚不具备按计划验收或通过公测发布门禁的条件。** 0010 建表语句及参数化 INSERT 无明显注入问题，但编译通过没有覆盖 SQL 执行、装配和发布可恢复性；19 项 stdlib 摘要也不能证明应用没有受影响的漏洞。
-
-1. **接通并修正统计链路**：修复读错表/缺列、注入 recorder、挂载受保护契约路由，真实记录三体积和分段结果，补真实迁移 schema 与路由测试。
-2. **建立可复核的安全发布结果**：保存漏洞 ID/可达性/修复版本，升级工具链重建并复扫实际产物，补 Trivy、gitleaks、secret canary 门禁，恢复被删除的监控序列。
-3. **补齐生产部署与恢复证据**：区分开发 Compose 与生产配置，安全且平台感知地恢复，提交升级/灾难恢复、三平台手动演练和容量/RPO 报告，再按 Phase 8 清单验收。
+1. **修复脱敏组合并重做真实四出口 canary**：完整 secret、部分残片、空出口都必须能令门禁失败。
+2. **接通真实统计**：archive 与 ciphertext 分离、分段成功率、有效耗时，并消除每分钟刷新的平方查询成本。
+3. **收紧发布证据**：更正容量/灾难文档，补真实产品链测量、三平台恢复与扫描结果；证据齐备之前不要将 Phase 8 或公测门禁标为通过。

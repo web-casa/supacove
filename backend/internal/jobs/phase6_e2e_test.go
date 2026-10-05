@@ -63,6 +63,14 @@ func TestPhase6RealVerificationEndToEnd(t *testing.T) {
 	uri := startTestPostgres(t)
 	const rows = 500
 	seedTestTable(t, uri, rows)
+	// The canary password rides the REAL pipeline end to end: after the
+	// backup, no generated artifact (manifest, recovery kit) and no API view
+	// may contain it (phase-8 four-exit gate, real-pipeline half).
+	canaryPassword := "CANARY-e2e-P@ss-7c21"
+	uri = strings.Replace(uri, ":cap", ":"+canaryPassword+"@", 1)
+	if !strings.Contains(uri, canaryPassword) {
+		uri = strings.Replace(uri, "postgres://postgres@", "postgres://postgres:"+canaryPassword+"@", 1)
+	}
 
 	// --- application side: the real backup pipeline ---
 	dataDir := t.TempDir()
@@ -172,10 +180,25 @@ func TestPhase6RealVerificationEndToEnd(t *testing.T) {
 	}
 	t.Logf("VERIFICATION DETAIL: %s", tk.VerifyDetail)
 
+	// Four-exit canary (real pipeline): the password must not leak into the
+	// API task view, the manifest, or the recovery kit.
+	for name, blob := range map[string]string{
+		"task.errorMessage": tk.ErrorMessage,
+		"task.verifyDetail": tk.VerifyDetail,
+	} {
+		if strings.Contains(blob, canaryPassword) {
+			t.Fatalf("CANARY LEAK via %s", name)
+		}
+	}
+
 	// The recovery kit must be persisted and REAL: run it against a fresh
 	// database in the same container.
 	if tk.RecoveryKitPath == "" {
 		t.Fatal("recovery_kit_path not persisted")
+	}
+	artifact := filepath.Join(stagingDir, fmt.Sprintf("backup-job%d.dump.age", jobID))
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("staged ciphertext missing: %v", err)
 	}
 	kitBytes, err := os.ReadFile(tk.RecoveryKitPath)
 	if err != nil {
@@ -183,6 +206,16 @@ func TestPhase6RealVerificationEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(kitBytes), "SHA-256:     "+tk.ArtifactSHA256) {
 		t.Fatal("kit does not embed the committed ciphertext hash")
+	}
+	if strings.Contains(string(kitBytes), canaryPassword) {
+		t.Fatal("CANARY LEAK via recovery kit")
+	}
+	manifestBytes, err := os.ReadFile(artifact + ".manifest.json")
+	if err != nil {
+		t.Fatalf("manifest unreadable: %v", err)
+	}
+	if strings.Contains(string(manifestBytes), canaryPassword) {
+		t.Fatal("CANARY LEAK via manifest")
 	}
 
 	// Fresh restore target inside the container.
@@ -205,10 +238,6 @@ func TestPhase6RealVerificationEndToEnd(t *testing.T) {
 	scriptPath := filepath.Join(runDir, "restore.sh")
 	if err := os.WriteFile(scriptPath, kitBytes, 0o700); err != nil {
 		t.Fatal(err)
-	}
-	artifact := filepath.Join(stagingDir, fmt.Sprintf("backup-job%d.dump.age", jobID))
-	if _, err := os.Stat(artifact); err != nil {
-		t.Fatalf("staged ciphertext missing: %v", err)
 	}
 	cmd := exec.Command("sh", scriptPath, target, artifact)
 	cmd.Dir = runDir

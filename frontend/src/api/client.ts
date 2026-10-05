@@ -62,12 +62,14 @@ type WebhookCreate = operations["createWebhook"]["requestBody"]["content"]["appl
 type WebhookTest = operations["testWebhook"]["responses"]["200"]["content"]["application/json"];
 type NotificationList = operations["listNotifications"]["responses"]["200"]["content"]["application/json"];
 type StatsSummary = operations["getStats"]["responses"]["200"]["content"]["application/json"];
+type FailedTask = operations["getTask"]["responses"]["200"]["content"]["application/json"];
 
 export type {
   Overview,
   OverviewEntry,
   Task,
   StatsSummary,
+  FailedTask,
   WebhookList,
   Database,
   DatabaseCreate,

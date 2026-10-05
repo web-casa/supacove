@@ -225,15 +225,24 @@ function StatsSection() {
     <div className="card">
       <h1>Statistics</h1>
       <div className="grid2">
-        <div className="kv"><span>Success rate</span><span>{d.successRate.toFixed(1)}% ({d.succeeded}/{d.totalJobs})</span></div>
+        <div className="kv"><span>Success rate</span><span>{pct(d.successRate)}</span></div>
         <div className="kv"><span>Failed</span><span>{d.failed}</span></div>
+        <div className="kv"><span>Export rate</span><span>{pct(d.exportSuccessRate)}</span></div>
+        <div className="kv"><span>Remote commit rate</span><span>{pct(d.remoteSuccessRate)}</span></div>
+        <div className="kv"><span>Verification rate</span><span>{pct(d.verifySuccessRate)}</span></div>
+        <div className="kv"><span>Avg duration</span><span>{d.avgDurationSecs != null ? `${d.avgDurationSecs.toFixed(1)}s` : "—"}</span></div>
         <div className="kv"><span>Source DBs (newest known)</span><span>{mb(d.totalSourceBytes)}</span></div>
-        <div className="kv"><span>Encrypted archive total</span><span>{mb(d.totalArtifactBytes)}</span></div>
+        <div className="kv"><span>Dump archive total</span><span>{mb(d.totalDumpBytes)}</span></div>
+        <div className="kv"><span>Encrypted total</span><span>{mb(d.totalArtifactBytes)}</span></div>
         <div className="kv"><span>Last success</span><span>{d.lastSuccessAt ? new Date(d.lastSuccessAt * 1000).toLocaleString() : "never"}</span></div>
-        <div className="kv"><span>Avg duration</span><span>{d.avgDurationSecs ? `${d.avgDurationSecs.toFixed(1)}s` : "—"}</span></div>
       </div>
     </div>
   );
+}
+
+function pct(v?: number | null): string {
+  if (v == null) return "—";
+  return `${v.toFixed(1)}%`;
 }
 
 function humanBytes(b: number): string {

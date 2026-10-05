@@ -655,10 +655,33 @@ export interface components {
             failed: number;
             /** Format: int64 */
             canceled: number;
+            /**
+             * Format: double
+             * @description succeeded / terminal-state jobs; null when nothing has finished.
+             */
+            successRate: number | null;
             /** Format: double */
-            successRate: number;
-            /** Format: double */
-            avgDurationSecs?: number;
+            exportSuccessRate?: number | null;
+            /**
+             * Format: double
+             * @description Remote commits vs upload failures (null when no upload attempted).
+             */
+            remoteSuccessRate?: number | null;
+            /**
+             * Format: double
+             * @description verified vs failed/unsupported among succeeded backups (null when none verified).
+             */
+            verifySuccessRate?: number | null;
+            /**
+             * Format: double
+             * @description Measured dump durations only (rows that never recorded one are excluded, not averaged as 0).
+             */
+            avgDurationSecs?: number | null;
+            /**
+             * Format: int64
+             * @description Sum of compressed pg_dump archive sizes over succeeded backups (volume metric 2).
+             */
+            totalDumpBytes?: number;
             /**
              * Format: int64
              * @description Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
@@ -666,7 +689,7 @@ export interface components {
             totalArtifactBytes: number;
             /**
              * Format: int64
-             * @description Newest known source database physical size summed over registered databases (volume metric 1; unknown sizes count as 0).
+             * @description Sum of the NEWEST known source database physical size per database (volume metric 1; unmeasured databases count as 0).
              */
             totalSourceBytes?: number;
             /** Format: int64 */

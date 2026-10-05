@@ -38,6 +38,23 @@ jobs:
       - name: Fail on drift
         run: git diff --exit-code -- backend/internal/api || { echo "::error::api.gen.go drifted from api/openapi.yaml"; exit 1; }
 
+  security:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   frontend:
     runs-on: ubuntu-latest
     steps:

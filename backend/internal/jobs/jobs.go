@@ -858,21 +858,25 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// observer ever sees a succeeded job without a verification state
 	// (phase-5 review P2-02).
 	verifyStatus, verifyDetail := r.initialVerifyState()
+	dumpDuration := time.Since(dumpStart).Seconds()
 	successSQL := `
 		UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
 		  artifact_path = ?, artifact_sha256 = ?, artifact_size = ?, manifest_path = ?,
-		  platform = ?, verify_status = ?, verify_detail = ?, source_db_bytes = ?
+		  platform = ?, verify_status = ?, verify_detail = ?, source_db_bytes = ?,
+		  duration_secs = ?
 		WHERE id = ? AND status = 'running' AND cancel_requested = 0`
 	res, err := r.authDB.Exec(successSQL,
 		result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath,
-		string(detectedPlatform), verifyStatus, verifyDetail, deps.SourceDBBytes, jobID)
+		string(detectedPlatform), verifyStatus, verifyDetail, deps.SourceDBBytes,
+		dumpDuration, jobID)
 	if err != nil {
 		// SQLITE_BUSY/ENOSPC here would leave a committed artifact with a
 		// 'running' job — bounded retry, then a loud failure record.
 		time.Sleep(500 * time.Millisecond)
 		res, err = r.authDB.Exec(successSQL,
 			result.ArtifactPath, result.SHA256, result.SizeBytes, manifestPath,
-			string(detectedPlatform), verifyStatus, verifyDetail, deps.SourceDBBytes, jobID)
+			string(detectedPlatform), verifyStatus, verifyDetail, deps.SourceDBBytes,
+			dumpDuration, jobID)
 	}
 	if err != nil {
 		r.log.Error("job success update failed twice", "job", jobID, "err", err)
@@ -932,12 +936,11 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// explicit skip reason) — the API serves the authoritative live value
 	// from the jobs row, never this snapshot (phase-5 review P2-02).
 	if r.statsRecorder != nil {
-		dumpSz := result.SizeBytes
 		if err := r.statsRecorder.Record(ctx, stats.Entry{
 			JobID: jobID, DatabaseName: name,
 			SourceDBBytes: deps.SourceDBBytes,
-			DumpSize:      dumpSz, ArtifactSize: result.SizeBytes,
-			DurationSecs: time.Since(dumpStart).Seconds(),
+			DumpSize:      result.PlaintextArc, ArtifactSize: result.SizeBytes,
+			DurationSecs: dumpDuration,
 			VerifyStatus: verifyStatus,
 		}); err != nil {
 			r.log.Error("stats recording failed", "job", jobID, "err", err)

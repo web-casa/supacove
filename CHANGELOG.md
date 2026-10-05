@@ -75,7 +75,7 @@ All notable changes to supabackup.
 - Health endpoints (`/api/healthz` liveness, `/api/ready` readiness)
 
 ### Known limitations
-- Go 1.26.0 stdlib vulnerabilities (19 findings — fixed by toolchain updates, not code changes)
+- Toolchain updated to Go 1.26.6: govulncheck reports 0 known stdlib vulnerabilities affecting this build (CI gate: security job).
 - Restore verification does not check row-level data content (structure + count only)
 - Single admin user (no team/RBAC)
 - No PITR / WAL archiving (logical backup only)

@@ -394,50 +394,84 @@ func (s *Server) testWebhookDelivery(ctx context.Context, url, eventType, eventI
 func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) (api.GetStatsResponseObject, error) {
 	var total, succeeded, failed, canceled int64
 	var avgDur float64
-	var totalArtifact int64
+	var totalArtifact, totalDump int64
 	err := a.srv.store.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*),
 		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 END), 0),
 		       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 END), 0),
 		       COALESCE(SUM(CASE WHEN status = 'canceled' THEN 1 END), 0),
-		       COALESCE(AVG(CASE WHEN status = 'succeeded' THEN duration_secs END), 0),
-		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN artifact_size END), 0)
+		       COALESCE(AVG(CASE WHEN status = 'succeeded' AND duration_secs > 0 THEN duration_secs END), 0),
+		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN artifact_size END), 0),
+		       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN dump_size END), 0)
 		FROM jobs WHERE status NOT IN ('pending','running')`).
-		Scan(&total, &succeeded, &failed, &canceled, &avgDur, &totalArtifact)
+		Scan(&total, &succeeded, &failed, &canceled, &avgDur, &totalArtifact, &totalDump)
 	if err != nil {
 		a.srv.log.Error("stats query", "err", err)
 		return api.GetStats500JSONResponse{}, nil
 	}
-	successRate := 0.0
-	if total > 0 {
-		successRate = float64(succeeded) / float64(total) * 100
+	rate := func(part, whole int64) *float64 {
+		if whole <= 0 {
+			return nil // no denominator: report unknown, never a fake 0/100
+		}
+		v := float64(part) / float64(whole) * 100
+		return &v
+	}
+	successRate := rate(succeeded, total)
+
+	// Segmented success rates (Phase 8): the single job success rate conflates
+	// stages, so expose each stage's own denominator honestly.
+	//   export: dump finished without the storage_upload class
+	//   remote: committed (or deleted after committed life) vs upload failures
+	//   verify: verified vs failed/unsupported among succeeded backups
+	var exportOK, remoteOK, remoteFailed, vOK, vFailed, vUnsupported int64
+	err = a.srv.store.DB.QueryRowContext(ctx, `
+		SELECT
+		  COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN remote_state IN ('committed','deleted') THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN status = 'failed' AND error_class = 'storage_upload' THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN verify_status = 'verified' THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN verify_status IN ('failed','unsupported') THEN 1 END), 0)
+		FROM jobs WHERE status NOT IN ('pending','running')`).
+		Scan(&exportOK, &remoteOK, &remoteFailed, &vOK, &vFailed, &vUnsupported)
+	if err != nil {
+		a.srv.log.Error("stats segment query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
 	}
 
 	var lastSuccess int64
-	_ = a.srv.store.DB.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(finished_at),0) FROM jobs WHERE status = 'succeeded'`).Scan(&lastSuccess)
+	if err := a.srv.store.DB.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(finished_at),0) FROM jobs WHERE status = 'succeeded'`).Scan(&lastSuccess); err != nil {
+		a.srv.log.Error("stats last-success query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
+	}
 
 	var dbCount, destCount int
-	_ = a.srv.store.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM databases WHERE deleted_at IS NULL`).Scan(&dbCount)
-	_ = a.srv.store.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM destinations WHERE deleted_at IS NULL`).Scan(&destCount)
+	if err := a.srv.store.DB.QueryRowContext(ctx,
+		`SELECT (SELECT COUNT(*) FROM databases WHERE deleted_at IS NULL),
+		        (SELECT COUNT(*) FROM destinations WHERE deleted_at IS NULL)`).
+		Scan(&dbCount, &destCount); err != nil {
+		a.srv.log.Error("stats counts query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
+	}
 
-	// Newest KNOWN physical size per database (0 = never measured).
+	// Newest KNOWN physical size per database — GROUP BY first (linear plan),
+	// then join the winning row (round-1 review P2-02: the correlated
+	// MAX(id) subquery was quadratic in job history).
 	var totalSource int64
-	_ = a.srv.store.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(sz), 0) FROM (
-		    SELECT source_db_bytes AS sz FROM jobs j
-		    WHERE j.status = 'succeeded' AND j.source_db_bytes > 0
-		      AND j.id = (SELECT MAX(j2.id) FROM jobs j2
-		                  WHERE j2.database_id = j.database_id AND j2.status = 'succeeded'
-		                    AND j2.source_db_bytes > 0)
-		)`).Scan(&totalSource)
+	if err := a.srv.store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(j2.source_db_bytes), 0)
+		FROM (SELECT database_id, MAX(id) AS mid FROM jobs
+		      WHERE status = 'succeeded' AND source_db_bytes > 0
+		      GROUP BY database_id) m
+		JOIN jobs j2 ON j2.id = m.mid`).Scan(&totalSource); err != nil {
+		a.srv.log.Error("stats source-size query", "err", err)
+		return api.GetStats500JSONResponse{}, nil
+	}
 
 	avg := avgDur
 	last := lastSuccess
 	uptime := int64(time.Since(a.srv.started).Seconds())
-	return api.GetStats200JSONResponse{
+	out := api.GetStats200JSONResponse{
 		TotalJobs:          total,
 		Succeeded:          succeeded,
 		Failed:             failed,
@@ -445,10 +479,15 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 		SuccessRate:        successRate,
 		AvgDurationSecs:    &avg,
 		TotalArtifactBytes: totalArtifact,
+		TotalDumpBytes:     &totalDump,
 		TotalSourceBytes:   &totalSource,
 		LastSuccessAt:      &last,
 		Databases:          dbCount,
 		Destinations:       destCount,
 		UptimeSeconds:      &uptime,
-	}, nil
+	}
+	out.ExportSuccessRate = rate(exportOK, total)
+	out.RemoteSuccessRate = rate(remoteOK, remoteOK+remoteFailed)
+	out.VerifySuccessRate = rate(vOK, vOK+vFailed+vUnsupported)
+	return out, nil
 }

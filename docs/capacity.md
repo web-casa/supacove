@@ -9,36 +9,50 @@
 |---|---|
 | 测试机 | Apple Silicon (arm64) 宿主机，Docker Desktop VM |
 | 数据库 | postgres:18-alpine 容器（限容器单核附近吞吐） |
-| fixture | 2,000,000 行 × 180 字节**真随机** payload（`gen_random_bytes`，hex 编码）——**不可压** fixture，即 zlib 最坏情况 |
+| fixture | 2,000,000 行 × 360 字符**随机 hex 文本**（`encode(gen_random_bytes(180),'hex')`）。注意：hex 文本的 zlib 压缩比实测 ≈0.57，**不是** zlib 最坏情况（原始随机字节 ≈1.00）；要复现更接近不可压的行为请改用 bytea |
 | 源库物理体积 | 873 MB（`pg_database_size`） |
 | 客户端 | 宿主机 pg_dump 18.4，custom 格式（zlib） |
 | 加密 | age X25519（与产品一致） |
+| 测量方法边界 | 各阶段为独立 shell 步骤（非产品流式管道）；峰值 RSS 每 0.2s 采样 /proc VmHWM（短进程末段峰值可能被低估；postgres 服务端与子进程**不在**统计内）；计时含 ≤0.2s 轮询尾差 |
 
 ## 实测结果（2026-10-05）
 
-| 阶段 | 耗时 | 吞吐 | 峰值 RSS |
+| 阶段 | 耗时 | 产出 | 峰值 RSS（采样，见边界） |
 |---|---|---|---|
-| pg_dump → 405 MB archive | 17.0 s | ~24 MB/s（对源库 873 MB） | 11.4 MB |
-| age 加密 → 405 MB 密文 | 0.83 s | ~490 MB/s | 6.5 MB |
-| initdb（内嵌实例） | 0.41 s | — | 9.1 MB |
-| pg_restore（内嵌实例） | 6.2 s | ~65 MB/s（对 archive） | 5.7 MB |
-| **端到端（备份→可恢复验证）** | **~24 s** | — | 峰值 < 12 MB |
+| pg_dump（源库 873 MB） | 17.0 s | 405 MB archive（**archive 吞吐 ~24 MB/s；源库吞吐 ~51 MB/s**） | 11.4 MB（pg_dump 客户端进程） |
+| age 加密（对落盘 archive） | 0.83 s | 405 MB 密文 | 6.5 MB |
+| initdb（模拟内嵌实例） | 0.41 s | — | 9.1 MB（initdb 进程） |
+| pg_restore（模拟验证恢复） | 6.2 s | — | 5.7 MB（pg_restore 进程） |
+
+**上表不是产品的端到端结果**：各阶段独立测量后求和 ≈ 24 s，只给出量级参考。
+产品的真实管道是 pg_dump → age **流式**写出密文（不落盘 archive），验证在
+一次性实例中运行，两端之间还有对象存储上传与读回校验（本次未测量——需要
+真实桶凭据）。**
 
 要点：
 
-- **三体积指标关系**（不可压数据）：源库 873 MB → archive 405 MB（46%，zlib 对随机字节几乎无能为力，仅剩行头/页开销压缩）→ 密文 405 MB（age 流式加密不做压缩，尺寸≈archive）。
-- **内存占用极小**：所有阶段峰值 RSS < 12 MB。流式管道（pg_dump → age → 磁盘）不整体载入内存，**备份数据库的体积不决定进程内存**。
-- **磁盘需求**：备份窗口内暂存 = archive + 密文 ≈ 2×archive 大小（协议 A 的原子提交链，提交后可配保留策略清理）。上例约 810 MB。
-- age 加密吞吐远高于 dump 吞吐——加密**不是**瓶颈；瓶颈在 pg_dump 的服务端读取与压缩。
+- **三体积指标关系**（随机 hex fixture，压缩比 ≈0.57）：源库 873 MB →
+  archive 405 MB → 密文 405 MB（age 不压缩，尺寸≈archive）。
+- **客户端进程内存极小**：pg_dump/age/pg_restore 采样峰值 RSS 均 < 12 MB。
+  流式管道不整体载入内存，备份体积不决定进程内存；但 postgres 服务端
+  （源库与验证实例）的内存**未计入**，规划时按数据库自身的
+  shared_buffers/work_mem 另算。
+- **磁盘需求**：本脚本落盘 archive + 密文 ≈ 2×archive。产品实际暂存只有
+  密文（流式）；**验证**阶段另需明文临时文件 + 一次性实例数据目录
+  （≈ 明文 dump + 数据展开，由验证磁盘预算把关，见 ADR-004 实现注释）。
 
 ## 推算边界（用于调度规划）
 
-以本机数据为参照（线性外推，需自测验证）：
+以本机数据为参照（线性外推，需自测验证；hex fixture 的压缩比≈0.57，随机
+bytea 会更慢更接近 1:1）：
 
-- 每晚备份窗口内可支撑的总量 ≈ 窗口时长 × ~24 MB/s（dump 阶段主导）。
-  例：4 小时窗口 ≈ 340 GB 源库（不可压）；可压数据更快。
-- 恢复验证（异步，不占备份窗口）按 ~65 MB/s 追平积压：1 GB archive ≈ 15 s。
-- 调度周期必须 ≥ 单库最慢备份时长 × 并发队列深度；多库排队会推迟 RPO（见下）。
+- 每晚备份窗口内可支撑的总量 ≈ 窗口时长 × 源库吞吐（本测 ~51 MB/s；
+  bytea fixture 会低于此值）。例：4 小时窗口，hex fixture ≈ 700 GB 源库。
+- 恢复验证（异步，不占备份 worker 但共享 CPU/磁盘）按 pg_restore ~65 MB/s
+  追平积压：405 MB archive ≈ 6 s。
+- 多库稳定调度条件按利用率写：Σ(单库服务时长_i / 调度周期_i) ≪ 1（各库
+  周期不同）；同窗多库则比较总服务时长与窗口。调度到期的去重与游标推进
+  见 scheduler 实现；失败重试与恢复时间不计入此近似。
 
 ## RPO 语义（如实声明）
 
@@ -61,5 +75,6 @@ ROWS=2000000 PAYLOAD=180 PATH="$PATH:/path/to/docker-shim" \
   ./scripts/capacity-benchmark.sh
 ```
 
-前提：宿主机有 docker、pg_dump 18、age、age-keygen、/usr/lib/postgresql/18/bin（initdb/pg_ctl/pg_restore）。
+前提：**Linux** 宿主机（脚本依赖 /proc VmHWM、GNU date、/usr/lib/postgresql/18/bin
+的 Debian 布局——macOS 不能直接运行），加 docker、pg_dump 18、age、age-keygen。
 脚本输出各阶段毫秒数与 VmHWM 峰值内存，可直接与本文对照。

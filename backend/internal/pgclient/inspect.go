@@ -165,43 +165,131 @@ func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error
 	return d, nil
 }
 
-// SanitizeMessage is the shared credential scrubber for stored error text.
-// Beyond rewriting URI schemes, the VALUE after a `password=` keyword is
-// redacted too (phase-8 secret-canary finding: the old replacer kept the
-// actual secret body — `password=[REDACTED]hunter2` still leaked `hunter2`).
+// SanitizeMessage is the shared credential scrubber for stored error text:
+// URI schemes are rewritten, then every `password = value` occurrence has
+// its VALUE replaced — quoted values in full, bare values up to the next
+// delimiter (phase-8 canary: the old replacer kept the secret body).
+// Idempotent: an already-redacted value is left alone, so composing with
+// redact.Secrets in either order is safe (run SanitizeMessage AFTER
+// redact.Secrets to keep whole-secret matching intact; see the log path).
 func SanitizeMessage(msg string) string {
-	r := strings.NewReplacer(
-		"postgres://", "postgres-uri://[REDACTED]",
-		"postgresql://", "postgres-uri://[REDACTED]",
-	)
-	msg = r.Replace(msg)
+	msg = redactURIUserinfo(msg)
 	return redactKeywordValues(msg)
 }
 
-// redactKeywordValues replaces everything after each case-insensitive
-// occurrence of "password=" (up to the next delimiter) with [REDACTED].
-func redactKeywordValues(msg string) string {
-	const replacement = "[REDACTED]"
-	const needleLower = "password="
-	out := msg
-	searchFrom := 0
-	for {
-		i := strings.Index(strings.ToLower(out[searchFrom:]), needleLower)
-		if i < 0 {
-			return out
+// redactURIUserinfo rewrites postgres URIs, dropping the entire authority
+// userinfo: postgresql://user:secret@host/db → postgres-uri://[REDACTED]/db.
+// (The old scheme-prefix replacer kept user:secret — a round-1 review note.)
+func redactURIUserinfo(msg string) string {
+	lower := strings.ToLower(msg)
+	var out strings.Builder
+	i := 0
+	for i < len(msg) {
+		idx := strings.Index(lower[i:], "postgres")
+		if idx < 0 {
+			out.WriteString(msg[i:])
+			return out.String()
 		}
-		start := searchFrom + i + len(needleLower)
-		end := start
-		for end < len(out) {
-			c := out[end]
-			if c == ' ' || c == '\t' || c == '\'' || c == '"' || c == ',' || c == ')' || c == ']' {
-				break
+		abs := i + idx
+		rest := lower[abs:]
+		if strings.HasPrefix(rest, "postgresql://") || strings.HasPrefix(rest, "postgres://") {
+			schemeLen := len("postgres://")
+			if strings.HasPrefix(rest, "postgresql://") {
+				schemeLen = len("postgresql://")
 			}
-			end++
+			out.WriteString(msg[i:abs])
+			out.WriteString("postgres-uri://[REDACTED]")
+			// Skip the authority: through the next '/', or to the end.
+			authStart := abs + schemeLen
+			e := authStart
+			for e < len(msg) && msg[e] != '/' {
+				e++
+			}
+			i = e // keep the path (dbname)
+			continue
 		}
-		out = out[:start] + replacement + out[end:]
-		// Continue after the replacement (its text contains the prefix, so
-		// skip past it to avoid an infinite loop).
-		searchFrom = start + len(replacement)
+		out.WriteString(msg[i : abs+len("postgres")])
+		i = abs + len("postgres")
 	}
+	return out.String()
+}
+
+// redactKeywordValues single-pass scanner: finds each case-insensitive
+// `password` keyword followed by optional whitespace, '=', optional
+// whitespace, then redacts the value (quoted → through the closing quote
+// with escapes; bare → to the next delimiter).
+func redactKeywordValues(msg string) string {
+	const marker = "[REDACTED]"
+	lower := strings.ToLower(msg)
+	var out strings.Builder
+	i := 0
+	writeTailFrom := func(from int) { out.WriteString(msg[from:]) }
+	for i < len(msg) {
+		j := strings.Index(lower[i:], "password")
+		if j < 0 {
+			writeTailFrom(i)
+			return out.String()
+		}
+		abs := i + j
+		// Must be the whole keyword (not part of e.g. "spassword").
+		if abs > 0 && isKeywordChar(lower[abs-1]) {
+			out.WriteString(msg[i : abs+len("password")])
+			i = abs + len("password")
+			continue
+		}
+		k := abs + len("password")
+		m := k
+		for m < len(msg) && (msg[m] == ' ' || msg[m] == '\t') {
+			m++
+		}
+		if m >= len(msg) || msg[m] != '=' {
+			// Not an assignment; keep scanning after the keyword.
+			out.WriteString(msg[i:m])
+			i = m
+			continue
+		}
+		m++ // past '='
+		for m < len(msg) && (msg[m] == ' ' || msg[m] == '\t') {
+			m++
+		}
+		// Copy through the '=' and padding.
+		out.WriteString(msg[i:m])
+		if strings.HasPrefix(msg[m:], marker) {
+			out.WriteString(marker) // already redacted: idempotent
+			i = m + len(marker)
+			continue
+		}
+		if m < len(msg) && (msg[m] == '\'' || msg[m] == '"') {
+			q := msg[m]
+			e := m + 1
+			for e < len(msg) {
+				if msg[e] == '\\' {
+					e += 2
+					continue
+				}
+				if msg[e] == q {
+					break
+				}
+				e++
+			}
+			if e >= len(msg) {
+				out.WriteString(marker) // unterminated quote: redact the tail
+				return out.String()
+			}
+			out.WriteString(marker) // includes the quotes
+			i = e + 1
+			continue
+		}
+		e := m
+		for e < len(msg) && !strings.ContainsRune(" \t,'\")]", rune(msg[e])) {
+			e++
+		}
+		out.WriteString(marker)
+		i = e
+	}
+	return out.String()
+}
+
+func isKeywordChar(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
 }

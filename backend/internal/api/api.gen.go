@@ -438,22 +438,35 @@ type ScheduleUpdate struct {
 
 // StatsSummary defines model for StatsSummary.
 type StatsSummary struct {
-	AvgDurationSecs *float64 `json:"avgDurationSecs,omitempty"`
-	Canceled        int64    `json:"canceled"`
-	Databases       int      `json:"databases"`
-	Destinations    int      `json:"destinations"`
-	Failed          int64    `json:"failed"`
-	LastSuccessAt   *int64   `json:"lastSuccessAt,omitempty"`
-	Succeeded       int64    `json:"succeeded"`
-	SuccessRate     float64  `json:"successRate"`
+	// AvgDurationSecs Measured dump durations only (rows that never recorded one are excluded, not averaged as 0).
+	AvgDurationSecs   *float64 `json:"avgDurationSecs"`
+	Canceled          int64    `json:"canceled"`
+	Databases         int      `json:"databases"`
+	Destinations      int      `json:"destinations"`
+	ExportSuccessRate *float64 `json:"exportSuccessRate"`
+	Failed            int64    `json:"failed"`
+	LastSuccessAt     *int64   `json:"lastSuccessAt,omitempty"`
+
+	// RemoteSuccessRate Remote commits vs upload failures (null when no upload attempted).
+	RemoteSuccessRate *float64 `json:"remoteSuccessRate"`
+	Succeeded         int64    `json:"succeeded"`
+
+	// SuccessRate succeeded / terminal-state jobs; null when nothing has finished.
+	SuccessRate *float64 `json:"successRate"`
 
 	// TotalArtifactBytes Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
 	TotalArtifactBytes int64 `json:"totalArtifactBytes"`
-	TotalJobs          int64 `json:"totalJobs"`
 
-	// TotalSourceBytes Newest known source database physical size summed over registered databases (volume metric 1; unknown sizes count as 0).
+	// TotalDumpBytes Sum of compressed pg_dump archive sizes over succeeded backups (volume metric 2).
+	TotalDumpBytes *int64 `json:"totalDumpBytes,omitempty"`
+	TotalJobs      int64  `json:"totalJobs"`
+
+	// TotalSourceBytes Sum of the NEWEST known source database physical size per database (volume metric 1; unmeasured databases count as 0).
 	TotalSourceBytes *int64 `json:"totalSourceBytes,omitempty"`
 	UptimeSeconds    *int64 `json:"uptimeSeconds,omitempty"`
+
+	// VerifySuccessRate verified vs failed/unsupported among succeeded backups (null when none verified).
+	VerifySuccessRate *float64 `json:"verifySuccessRate"`
 }
 
 // Task defines model for Task.
