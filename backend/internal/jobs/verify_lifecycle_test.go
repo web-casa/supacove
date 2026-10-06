@@ -468,7 +468,7 @@ func TestManifestMissingIsHonestSkip(t *testing.T) {
 	if err := p.store.DB.QueryRow(`SELECT manifest_path FROM jobs WHERE id = ?`, jobID).Scan(&manifestPath); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.Remove(manifestPath) // cleanup on a path whose outcome cannot change the result (errcheck)
+	_ = os.Remove(manifestPath) // TEST PRECONDITION: manufactures the missing-manifest state this case asserts (errcheck tolerated)
 
 	engine := newFakeVerifyEngine(verifier.Result{Status: verifier.StatusVerified})
 	close(engine.release)

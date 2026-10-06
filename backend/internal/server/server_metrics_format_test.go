@@ -13,7 +13,6 @@ import (
 
 var (
 	metricNameRe = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
-	sampleRe     = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([^}]*)\})? (\S+)( \d+)?$`)
 	labelPairRe  = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"$`)
 )
 
@@ -49,6 +48,33 @@ func splitLabelPairs(s string) []string {
 		out = append(out, cur.String())
 	}
 	return out
+}
+
+// parseSample splits "name[{labels}] value" by hand: a label value may
+// legally contain braces, quotes, commas and spaces once escaped, so no
+// single regex is trustworthy here (review Q8).
+func parseSample(line string) (name, labels, value string, ok bool) {
+	// value is the final whitespace-separated token; our emitter never
+	// writes timestamps.
+	sp := strings.LastIndex(line, " ")
+	if sp <= 0 {
+		return "", "", "", false
+	}
+	value = line[sp+1:]
+	head := line[:sp]
+	if i := strings.IndexByte(head, '{'); i >= 0 {
+		if !strings.HasSuffix(head, "}") {
+			return "", "", "", false
+		}
+		name = head[:i]
+		labels = head[i+1 : len(head)-1]
+	} else {
+		name = head
+	}
+	if name == "" || !metricNameRe.MatchString(name) {
+		return "", "", "", false
+	}
+	return name, labels, value, true
 }
 
 func TestMetricsExpositionFormat(t *testing.T) {
@@ -132,12 +158,11 @@ func TestMetricsExpositionFormat(t *testing.T) {
 		case strings.HasPrefix(line, "#"):
 			t.Fatalf("%s: unknown comment kind", where)
 		default:
-			m := sampleRe.FindStringSubmatch(line)
-			if m == nil {
+			name, labels, value, ok := parseSample(line)
+			if !ok {
 				t.Fatalf("%s: unparsable sample line", where)
 			}
-			name, labels, value := m[1], m[3], m[4]
-			if _, err := strconv.ParseFloat(value, 64); err != nil {
+			if _, ferr := strconv.ParseFloat(value, 64); ferr != nil {
 				t.Fatalf("%s: value %q not a float", where, value)
 			}
 			if name != lastFamily {
@@ -172,6 +197,17 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	}
 	if len(seen) == 0 {
 		t.Fatal("no samples scraped")
+	}
+	// The odd database name MUST appear as a label value — without this the
+	// escaping assertions above would be vacuous (review Q8).
+	found := false
+	for key := range seen {
+		if strings.HasPrefix(key, "supabackup_last_success_timestamp{") && strings.Contains(key, `\"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the odd database-name label never reached the exposition text")
 	}
 	// Every family carries both HELP and TYPE.
 	for name := range families {

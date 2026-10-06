@@ -55,12 +55,15 @@ linters:
         # verifier; os.Remove cleanup sites are explicitly `_ =` annotated
         # where the outcome truly cannot change the result.
         - os.RemoveAll
-        # fmt.Fprintf targets here are HTTP/pipe writers whose failure is
-        # unrecoverable mid-response; persistent file writes are NOT exempt.
+        # fmt.Fprintf hits today are HTTP/pipe writers (metrics, static
+        # handler) whose failure is unrecoverable mid-response; persistent
+        # file writes are NOT exempt and must be checked explicitly.
         - fmt.Fprintf
-        # fmt.Sscanf parses regex-preselected filenames (job IDs); overflow
-        # is bounded by the ^backup-job(\d+)$ match, and parse failure is
-        # handled by the regexp gate before the scan.
+        # fmt.Sscanf sites parse regex-preselected filenames (job IDs from
+        # ^backup-job(\d+)\.dump\.age$ matches) plus test fixtures; the
+        # regexp gate bounds the digit run before the scan, and callers
+        # ignore the count deliberately. Production parse failures surface
+        # through the regexp, not the scan.
         - fmt.Sscanf
       # Deliberate fire-and-forget patterns are annotated at the call site;
       # a blanket exclusion would hide real leaks.
@@ -103,10 +106,9 @@ linters:
       - path: _test\.go
         linters: [gosec]
         text: "G30[126]"
-      # Test fixtures assemble commands from literals the test itself wrote
-      # (docker run/exec.Command with t.TempDir args); G702 taint analysis has
-      # no production hit (verified: 0 after re-enabling). Production command
-      # construction is NOT exempt.
+      # The single G702 hit is db/db_test.go self-executing the test binary
+      # via exec.Command(os.Args[0], "-test.run=…") — a fixture whose argv
+      # the test itself controls; no production code is exempt.
       - path: _test\.go
         linters: [gosec]
         text: "G702"

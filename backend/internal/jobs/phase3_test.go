@@ -33,7 +33,10 @@ type fakeBackend struct {
 	// failAnyPut makes EVERY Put fail before storing (multipart interrupted).
 	failAnyPut bool
 	// failPutMidStream stores PARTS (multipart in flight) and then fails —
-	// models an interrupted multipart upload whose parts must be aborted.
+	// models an interrupted multipart upload. NOTE: parts are tracked PER
+	// KEY, not per upload ID: this proves the completing upload consumed
+	// the interrupted session's parts in the MODEL; real-MinIO residual
+	// checks remain registered as an open verification gap (review Q5).
 	failPutMidStream bool
 	parts            map[string]int // key -> parts uploaded before failure
 	onFirstPut       func()         // hook fired inside the first Put

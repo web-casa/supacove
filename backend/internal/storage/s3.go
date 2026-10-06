@@ -78,6 +78,10 @@ func (s *Store) Prefix() string { return s.cfg.Prefix }
 // from manager.MultiUploadFailure for the error record — our previous
 // manual Create+Abort wrapper used a DIFFERENT upload ID than the Uploader,
 // leaking parts on both success and failure (round-1 review P1-04).
+// NOTE: on context cancellation the SDK's internal abort reuses the
+// canceled ctx and silently no-ops; abortMultipart below compensates on a
+// detached context. Without a bucket lifecycle rule for incomplete
+// uploads, any abort that still fails leaves parts until manual cleanup.
 func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64) error {
 	if size >= 0 && size < multipartThreshold {
 		_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
@@ -134,7 +138,8 @@ func (s *Store) abortMultipart(uploadID, key string) {
 		UploadId: aws.String(uploadID),
 	})
 	if err != nil {
-		s.logger.Warn("multipart abort failed; bucket lifecycle will reclaim",
+		s.logger.Warn("multipart abort failed; parts persist until an "+
+			"incomplete-upload lifecycle rule (if the bucket has one) reclaims them",
 			"key", key, "upload_id", uploadID, "err", err)
 	}
 }
@@ -145,13 +150,17 @@ func (s *Store) abortMultipart(uploadID, key string) {
 func (s *Store) AbortIncomplete(_ context.Context, key string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 30*time.Second)
 	defer cancel()
-	var token *string
+	// Pagination MUST carry both markers: with only a key marker S3 skips
+	// uploads of the SAME key on later pages (SDK ListMultipartUploads
+	// semantics), silently leaving sessions behind (review R2-1).
+	var keyMarker, uploadMarker *string
 	for {
 		out, err := s.client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
-			Bucket:     aws.String(s.cfg.Bucket),
-			Prefix:     aws.String(key),
-			KeyMarker:  token,
-			MaxUploads: aws.Int32(100),
+			Bucket:         aws.String(s.cfg.Bucket),
+			Prefix:         aws.String(key),
+			KeyMarker:      keyMarker,
+			UploadIdMarker: uploadMarker,
+			MaxUploads:     aws.Int32(100),
 		})
 		if err != nil {
 			s.logger.Warn("list multipart uploads failed", "key", key, "err", err)
@@ -166,14 +175,16 @@ func (s *Store) AbortIncomplete(_ context.Context, key string) {
 				Key:      u.Key,
 				UploadId: u.UploadId,
 			}); aerr != nil {
-				s.logger.Warn("multipart abort failed; bucket lifecycle will reclaim",
+				s.logger.Warn("multipart abort failed; parts persist until an "+
+					"incomplete-upload lifecycle rule (if the bucket has one) reclaims them",
 					"key", key, "upload_id", *u.UploadId, "err", aerr)
 			}
 		}
 		if out.IsTruncated == nil || !*out.IsTruncated {
 			return
 		}
-		token = out.NextKeyMarker
+		keyMarker = out.NextKeyMarker
+		uploadMarker = out.NextUploadIdMarker
 	}
 }
 
