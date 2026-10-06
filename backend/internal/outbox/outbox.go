@@ -27,6 +27,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/cloudfan/supabackup/backend/internal/netguard"
 )
 
 // Event types (also the webhook subscription keys in webhooks.events).
@@ -162,8 +164,8 @@ func DeliveryClient(timeout time.Duration) *http.Client {
 						return err
 					}
 					for _, ip := range ips {
-						if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-							return fmt.Errorf("link-local destination %s is not allowed for webhooks", ip)
+						if err := netguard.Check(ip); err != nil {
+							return fmt.Errorf("%s for webhooks", err)
 						}
 					}
 					return nil

@@ -291,7 +291,10 @@ const loginPath = "/api/auth/login"
 // decoding or password hashing.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if !strings.HasPrefix(req.URL.Path, "/api") {
+		// /metrics lives outside the /api prefix but carries database names,
+		// staging sizes and job outcomes: it must not bypass the session
+		// requirement the way static assets do (overall review, security P1).
+		if !strings.HasPrefix(req.URL.Path, "/api") && req.URL.Path != "/metrics" {
 			next.ServeHTTP(w, req)
 			return
 		}

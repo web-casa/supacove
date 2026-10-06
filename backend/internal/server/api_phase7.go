@@ -16,6 +16,7 @@ import (
 	"github.com/cloudfan/supabackup/backend/internal/api"
 	"github.com/cloudfan/supabackup/backend/internal/i18n"
 	"github.com/cloudfan/supabackup/backend/internal/jobs"
+	"github.com/cloudfan/supabackup/backend/internal/netguard"
 	"github.com/cloudfan/supabackup/backend/internal/outbox"
 	"github.com/cloudfan/supabackup/backend/internal/scheduler"
 )
@@ -40,8 +41,8 @@ func validateWebhookURL(raw string) error {
 	}
 	host := u.Hostname()
 	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return errors.New("link-local addresses are not allowed (cloud metadata protection)")
+		if err := netguard.Check(ip); err != nil {
+			return errors.New("link-local and cloud metadata addresses are not allowed")
 		}
 	}
 	if strings.EqualFold(host, "metadata.google.internal") {

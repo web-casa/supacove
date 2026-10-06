@@ -41,8 +41,8 @@ func webhookURLMsg(ctx context.Context, err error) string {
 		return i18n.T(ctx, msg, "URL 协议必须是 http 或 https")
 	case "URL must include a host":
 		return i18n.T(ctx, msg, "URL 必须包含主机名")
-	case "link-local addresses are not allowed (cloud metadata protection)":
-		return i18n.T(ctx, msg, "不允许链路本地地址（云元数据防护）")
+	case "link-local and cloud metadata addresses are not allowed":
+		return i18n.T(ctx, msg, "不允许链路本地地址与云元数据地址")
 	case "metadata endpoints are not allowed":
 		return i18n.T(ctx, msg, "不允许云元数据端点")
 	}
