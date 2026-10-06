@@ -70,7 +70,7 @@ func open(dataDir string, takeLock bool) (*Store, error) {
 	// Tighten an existing directory and pre-create the DB file owner-only:
 	// MkdirAll does not chmod, and the driver would otherwise create db/wal/shm
 	// under the process umask (review P1-05).
-	if err := os.Chmod(dataDir, 0o700); err != nil {
+	if err := os.Chmod(dataDir, 0o700); err != nil { //nolint:gosec // G302: 0700 on the data dir IS the required mode
 		return nil, fmt.Errorf("tighten data dir permissions: %w", err)
 	}
 	for _, name := range []string{"supabackup.db", "supabackup.db-wal", "supabackup.db-shm"} {
@@ -82,7 +82,7 @@ func open(dataDir string, takeLock bool) (*Store, error) {
 	dbPath := filepath.Join(dataDir, "supabackup.db")
 	if pf, err := os.OpenFile(dbPath, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 		_ = pf.Close()
-		_ = os.Chmod(dbPath, 0o600) // OpenFile already created it 0600; umask belt
+		_ = os.Chmod(dbPath, 0o600)
 	}
 
 	var f *os.File

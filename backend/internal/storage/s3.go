@@ -107,12 +107,74 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64) er
 	if err != nil {
 		var muf manager.MultiUploadFailure
 		if errors.As(err, &muf) {
+			// manager v1 aborts with the ALREADY-CANCELED ctx on shutdown,
+			// so its internal cleanup silently no-ops and parts leak until
+			// the bucket lifecycle runs. Abort again on a detached context
+			// (best effort; the upload ID came from the failure itself).
+			s.abortMultipart(muf.UploadID(), key)
 			return fmt.Errorf("multipart upload %s: %w", muf.UploadID(), err)
 		}
+		// No upload ID in the error: sweep anything left incomplete under
+		// this key (best effort).
+		s.AbortIncomplete(ctx, key)
 		return fmt.Errorf("multipart upload: %w", err)
 	}
 	_ = out // ETag not used; integrity comes from the C.1 read-back hash
 	return nil
+}
+
+// abortMultipart best-effort abort on a detached context with its own
+// deadline: the caller's context is usually the reason we are here.
+func (s *Store) abortMultipart(uploadID, key string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 15*time.Second)
+	defer cancel()
+	_, err := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(s.cfg.Bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	if err != nil {
+		s.logger.Warn("multipart abort failed; bucket lifecycle will reclaim",
+			"key", key, "upload_id", uploadID, "err", err)
+	}
+}
+
+// AbortIncomplete lists in-flight multipart uploads for key and aborts them
+// on a detached context. Best effort; used after upload failures whose error
+// carries no upload ID.
+func (s *Store) AbortIncomplete(_ context.Context, key string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 30*time.Second)
+	defer cancel()
+	var token *string
+	for {
+		out, err := s.client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
+			Bucket:     aws.String(s.cfg.Bucket),
+			Prefix:     aws.String(key),
+			KeyMarker:  token,
+			MaxUploads: aws.Int32(100),
+		})
+		if err != nil {
+			s.logger.Warn("list multipart uploads failed", "key", key, "err", err)
+			return
+		}
+		for _, u := range out.Uploads {
+			if u.Key == nil || *u.Key != key || u.UploadId == nil {
+				continue
+			}
+			if _, aerr := s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+				Bucket:   aws.String(s.cfg.Bucket),
+				Key:      u.Key,
+				UploadId: u.UploadId,
+			}); aerr != nil {
+				s.logger.Warn("multipart abort failed; bucket lifecycle will reclaim",
+					"key", key, "upload_id", *u.UploadId, "err", aerr)
+			}
+		}
+		if out.IsTruncated == nil || !*out.IsTruncated {
+			return
+		}
+		token = out.NextKeyMarker
+	}
 }
 
 var errNotFound = errors.New("object not found")

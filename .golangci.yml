@@ -48,7 +48,6 @@ linters:
         - (*os.File).Close
         - (io.ReadCloser).Close
         - (*github.com/cloudfan/supabackup/backend/internal/db.Store).Close
-        - os.Remove
         - os.RemoveAll
         - fmt.Fprintf
         - fmt.Sscanf
@@ -56,25 +55,25 @@ linters:
       # a blanket exclusion would hide real leaks.
     gosec:
       # G104 duplicates errcheck (governed by exclude-functions above).
-      # G304/G702/G703: file paths derive from operator-controlled
-      # SB_DATA_DIR/SB_SECRET_FILE only; the trust boundary is the data-dir
-      # owner, and symlink/permission hardening is enforced in config.Load.
-      # G124: the flagged cookies are the SB_INSECURE_COOKIE dev escape,
-      # production cookies carry Secure/HttpOnly/SameSite=Strict and are
-      # pinned by TestProductionCookieAttributes.
+      # G304/G703: every flagged path derives from operator-controlled
+      # SB_DATA_DIR/SB_SECRET_FILE/staging; the trust boundary is the
+      # data-dir owner, symlink/permission hardening lives in config.Load,
+      # and download reads go through os.Root (openUnderStaging).
+      # G124: the four hits are deliberate — the SB_INSECURE_COOKIE dev
+      # escape and the double-submit CSRF cookie whose HttpOnly=false IS
+      # the mechanism; production session cookies carry
+      # Secure/HttpOnly/SameSite=Strict, pinned by
+      # TestProductionCookieAttributes.
       excludes:
         - G104
         - G304
-        - G702
         - G703
         - G124
         # G204: subprocess execution is the product (pg_dump/pg_restore);
-        # each call site is reviewed for argv/credential/cancel handling.
+        # each call site uses a fixed binary path, constructed argv,
+        # PGPASSFILE credentials and a cancel-kill chain.
         - G204
-        # G301/G302/G306: 0700/0600 permission literals are the design.
-        - G301
-        - G302
-        - G306
+
     exhaustive:
       # Only switch statements over our own enums; default-case switches are
       # checked where the enum is closed (see default-signifies-exhaustive).
@@ -87,6 +86,13 @@ linters:
     generated: strict
     warn-unused: true
     rules:
+      # Permission literals in TESTS create throwaway fixtures; production
+      # permission choices are deliberate (0600/0700) and currently produce
+      # zero G301/G302/G306 hits.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G30[126]|G702"
+
       # Generated strict-server glue: errors are wrapped by the framework.
       - path: backend/internal/api/
         linters: [errcheck, errorlint]

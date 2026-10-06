@@ -32,6 +32,12 @@ type fakeBackend struct {
 	corrupt map[string]bool // keys whose Get returns different content
 	// failAnyPut makes EVERY Put fail before storing (multipart interrupted).
 	failAnyPut bool
+	// failPutMidStream stores PARTS (multipart in flight) and then fails —
+	// models an interrupted multipart upload whose parts must be aborted.
+	failPutMidStream bool
+	parts            map[string]int // key -> parts uploaded before failure
+	onFirstPut       func()         // hook fired inside the first Put
+	abortCount       int
 	// losePutResponse stores the object but reports a transport error —
 	// the "object committed, response lost" fault-matrix row.
 	losePutResponse bool
@@ -44,26 +50,55 @@ func newFakeBackend(prefix string) *fakeBackend {
 		objects: map[string][]byte{},
 		failPut: map[string]int{},
 		corrupt: map[string]bool{},
+		parts:   map[string]int{},
 	}
+}
+
+func (f *fakeBackend) AbortMultipart(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.parts, key)
+	f.abortCount++
 }
 
 func (f *fakeBackend) Put(ctx context.Context, key string, r io.Reader, size int64) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	if f.onFirstPut != nil {
+		hook := f.onFirstPut
+		f.onFirstPut = nil
+		f.mu.Unlock()
+		hook()
+		f.mu.Lock()
+	}
 	f.putCount++
 	if f.failAnyPut {
+		f.mu.Unlock()
 		return fmt.Errorf("injected transport failure (multipart interrupted)")
+	}
+	if f.failPutMidStream {
+		// One part lands, then the transport dies mid-upload: the real SDK
+		// aborts the multipart session; the fake records the part so the
+		// test can assert nothing leaked.
+		f.parts[key]++
+		f.mu.Unlock()
+		return fmt.Errorf("injected mid-stream transport failure")
 	}
 	if f.failPut[key] > 0 {
 		f.failPut[key]--
+		f.mu.Unlock()
 		return fmt.Errorf("injected put failure for %s", key)
 	}
 	data, err := io.ReadAll(r)
+	f.mu.Unlock()
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
 	f.objects[key] = data
-	if f.losePutResponse {
+	delete(f.parts, key) // a completing upload consumes its parts
+	lose := f.losePutResponse
+	f.mu.Unlock()
+	if lose {
 		// The object IS stored but the client sees a transport error —
 		// the "committed remotely, response lost" fault row.
 		return fmt.Errorf("injected lost response after store")

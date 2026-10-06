@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -133,12 +134,38 @@ func TestStandaloneRestoreWithoutApplicationState(t *testing.T) {
 	if err := os.WriteFile(script2Path, []byte(script2), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cmd = exec.Command("sh", script2Path, target, tampered)
+	// A FRESH empty database: any table appearing in it proves the tamper
+	// gate failed to stop before pg_restore.
+	tamperDB := fmt.Sprintf("tamper_%d", time.Now().UnixNano()%1e6)
+	if out2, cerr := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
+		"-c", "CREATE DATABASE "+tamperDB).CombinedOutput(); cerr != nil {
+		t.Fatalf("create tamper db: %v: %s", cerr, out2)
+	}
+	tamperTarget := fmt.Sprintf("postgresql://postgres@%s/%s?sslmode=disable", hostPort, tamperDB)
+	cmd = exec.Command("sh", script2Path, tamperTarget, tampered)
 	cmd.Dir = vault
 	cmd.Env = append(os.Environ(), "AGE_IDENTITY_FILE="+identityFile, "PGPASSWORD="+ci.Password)
-	if out, err := cmd.CombinedOutput(); err == nil {
+	out, err = cmd.CombinedOutput()
+	if err == nil {
 		t.Fatalf("tampered ciphertext restored successfully:\n%s", out)
-	} else if !strings.Contains(string(out), "HASH") && !strings.Contains(strings.ToUpper(string(out)), "MISMATCH") {
-		t.Logf("tampered restore rejected with: %s", out)
+	}
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("tampered restore failed unexpectedly: %v\n%s", err, out)
+	}
+	// The hash gate exits before ANY decryption or restore work: the kit's
+	// documented mismatch exit code is 1 and the message names the SHA-256
+	// comparison. A failure from age/pg_restore would mean the gate is gone.
+	if ee.ExitCode() != 1 || !strings.Contains(strings.ToUpper(string(out)), "SHA-256") {
+		t.Fatalf("expected the SHA-256 gate (exit 1), got exit %d:\n%s", ee.ExitCode(), out)
+	}
+	// No decrypt/restore may have run: the target database stays empty.
+	got, gerr := exec.Command("docker", "exec", pgContainer, "psql", "-U", "postgres",
+		"-d", tamperDB, "-At", "-c", "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'").CombinedOutput()
+	if gerr != nil {
+		t.Fatalf("count target tables: %v", gerr)
+	}
+	if strings.TrimSpace(string(got)) != "0" {
+		t.Errorf("tampered restore must stop before pg_restore; target has %s tables", strings.TrimSpace(string(got)))
 	}
 }

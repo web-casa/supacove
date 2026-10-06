@@ -243,7 +243,7 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 		return nil, err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once linked and removed below
+	defer func() { _ = os.Remove(tmpName) }() // no-op once linked and removed below
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return nil, err
@@ -266,7 +266,7 @@ func LoadOrCreateSecret(path string) ([]byte, error) {
 		}
 		return nil, err
 	}
-	os.Remove(tmpName)
+	_ = os.Remove(tmpName) // cleanup on a path whose outcome cannot change the result (errcheck)
 	if err := syncDir(dir); err != nil {
 		return nil, err
 	}

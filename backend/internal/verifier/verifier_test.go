@@ -136,7 +136,7 @@ func TestDecryptRoundTripAndHashGate(t *testing.T) {
 		t.Fatalf("round trip mismatch: %q", got)
 	}
 	// A wrong identity must fail and remove the partial plaintext.
-	os.Remove(plaintext)
+	_ = os.Remove(plaintext) // cleanup on a path whose outcome cannot change the result (errcheck)
 	if err := decryptToFile(context.Background(), "AGE-SECRET-KEY-1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ciphertext, plaintext); err == nil {
 		t.Fatal("decrypt with a wrong identity succeeded")
 	}
@@ -413,7 +413,7 @@ func TestFailedStopPreservesEvidence(t *testing.T) {
 		t.Fatal("workdir was deleted although the stop could not be confirmed")
 	}
 	// Cleanup for the test environment: allow stops and sweep.
-	os.Remove(s.keepPIDMark)
+	_ = os.Remove(s.keepPIDMark) // cleanup on a path whose outcome cannot change the result (errcheck)
 	if err := v.CleanupResidual(); err != nil {
 		t.Fatalf("CleanupResidual after unmarking: %v", err)
 	}

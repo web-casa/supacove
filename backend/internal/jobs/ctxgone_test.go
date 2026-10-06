@@ -295,10 +295,11 @@ func TestResumePhaseShutdownRestoresInterruptedSilently(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The resume runs on a signal context that is already dead (SIGTERM
-	// before the pass finished).
+	// SIGTERM lands MID-UPLOAD (Q6): the first Put fires the hook that
+	// cancels the signal context, so the repair path — restore to
+	// interrupted, context-free state writes — is actually exercised.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	p.backend.onFirstPut = cancel
 	p.SetBackendFactory(func(ctx context.Context, dest *Destination) (storage.Backend, error) {
 		return ctxRefusingBackend{p.backend}, nil
 	})
@@ -315,10 +316,119 @@ func TestResumePhaseShutdownRestoresInterruptedSilently(t *testing.T) {
 	if remote != "uploading" {
 		t.Errorf("remote_state = %q, want uploading (intent intact)", remote)
 	}
+	if p.backend.putCount == 0 {
+		t.Fatal("the upload never started: the resume repair path was not exercised")
+	}
 	if n := p.outboxEvents(t, "backup_failed"); n != 0 {
 		t.Errorf("shutdown resume produced %d backup_failed notifications, want 0", n)
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Errorf("artifact must survive for the next resume: %v", err)
+	}
+}
+
+// Q2 regression: an unlink failure must keep the reference so the next sweep
+// retries — the bytes must never leak with a cleared row.
+func TestPruneKeepsReferenceWhenUnlinkFails(t *testing.T) {
+	p := newPhase3Runner(t)
+	destID := p.addDestination(t, 10)
+	dbID := p.addDatabase(t, destID, "unlink-fail-db")
+	staging := filepath.Join(p.dataDir, "staging")
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var jobID int64
+	fin := time.Now().Add(-(defaultFailedArtifactTTL + time.Hour)).Unix()
+	if err := p.store.DB.QueryRow(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at,
+		                  artifact_state, artifact_path, manifest_path)
+		VALUES (?, 'failed', 0, 0, ?, 'committed', 'PENDING', 'PENDING')
+		RETURNING id`, dbID, fin).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(staging, fmt.Sprintf("backup-job%d.dump.age", jobID))
+	if err := os.WriteFile(artifact, []byte("CIPHERTEXT"), 0o400); err != nil { // read-only file
+		t.Fatal(err)
+	}
+	manifest := artifact + ".manifest.json"
+	if err := os.WriteFile(manifest, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.store.DB.Exec(
+		`UPDATE jobs SET artifact_path = ?, manifest_path = ? WHERE id = ?`,
+		artifact, manifest, jobID); err != nil {
+		t.Fatal(err)
+	}
+	// Make the parent directory read-only so os.Remove fails.
+	if err := os.Chmod(staging, 0o500); err != nil {
+		t.Skipf("cannot restrict staging dir (running as root?): %v", err)
+	}
+	defer func() { _ = os.Chmod(staging, 0o700) }()
+
+	p.SetFailedArtifactTTL(defaultFailedArtifactTTL)
+	p.PruneExpiredArtifacts(context.Background())
+
+	var path, state string
+	if err := p.store.DB.QueryRow(
+		`SELECT artifact_path, artifact_state FROM jobs WHERE id = ?`, jobID).Scan(&path, &state); err != nil {
+		t.Fatal(err)
+	}
+	if path == "" || state == "" {
+		t.Fatalf("reference cleared although the file still exists (path=%q state=%q)", path, state)
+	}
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("artifact vanished unexpectedly: %v", err)
+	}
+
+	// Permission restored → the next sweep reclaims it.
+	if err := os.Chmod(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(artifact, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p.PruneExpiredArtifacts(context.Background())
+	if _, err := os.Stat(artifact); !os.IsNotExist(err) {
+		t.Errorf("artifact still present after permission restore: %v", err)
+	}
+	if err := p.store.DB.QueryRow(
+		`SELECT artifact_path FROM jobs WHERE id = ?`, jobID).Scan(&path); err != nil {
+		t.Fatal(err)
+	}
+	if path != "" {
+		t.Errorf("reference must clear after successful reclaim, got %q", path)
+	}
+}
+
+// Q3 regression: committed_no_manifest artifacts are reclaimable too.
+func TestPruneReclaimsCommittedNoManifest(t *testing.T) {
+	p := newPhase3Runner(t)
+	destID := p.addDestination(t, 10)
+	dbID := p.addDatabase(t, destID, "noman-db")
+	staging := filepath.Join(p.dataDir, "staging")
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var jobID int64
+	fin := time.Now().Add(-(defaultFailedArtifactTTL + time.Hour)).Unix()
+	if err := p.store.DB.QueryRow(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at,
+		                  artifact_state, artifact_path, manifest_path)
+		VALUES (?, 'failed', 0, 0, ?, 'committed_no_manifest', 'PENDING', '')
+		RETURNING id`, dbID, fin).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(staging, fmt.Sprintf("backup-job%d.dump.age", jobID))
+	if err := os.WriteFile(artifact, []byte("CIPHERTEXT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.store.DB.Exec(
+		`UPDATE jobs SET artifact_path = ? WHERE id = ?`, artifact, jobID); err != nil {
+		t.Fatal(err)
+	}
+	p.SetFailedArtifactTTL(defaultFailedArtifactTTL)
+	p.PruneExpiredArtifacts(context.Background())
+	if _, err := os.Stat(artifact); !os.IsNotExist(err) {
+		t.Errorf("committed_no_manifest artifact must be reclaimed, stat err = %v", err)
 	}
 }

@@ -343,7 +343,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 			}
 		}
 	}()
-	if err := os.Chmod(passDir, 0o700); err != nil {
+	if err := os.Chmod(passDir, 0o700); err != nil { //nolint:gosec // G302: 0700 on the PGPASSFILE dir IS the required mode
 		return nil, &Classified{Class: pgclient.ClassDisk, Err: err}
 	}
 	passFile := filepath.Join(passDir, "pgpass")
@@ -365,7 +365,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	defer func() {
 		if !committed {
 			tmp.Close()
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath) // cleanup on a path whose outcome cannot change the result (errcheck)
 		}
 	}()
 

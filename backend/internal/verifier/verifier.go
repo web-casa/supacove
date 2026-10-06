@@ -236,7 +236,7 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 				return // keep the workdir as evidence
 			}
 		}
-		os.Remove(plainPath) // most sensitive residue first
+		_ = os.Remove(plainPath) // most sensitive residue first // cleanup on a path whose outcome cannot change the result (errcheck)
 		if preserveWorkDir {
 			return // keep the evidence (start failure or unconfirmed stop)
 		}
@@ -569,7 +569,7 @@ func decryptToFile(ctx context.Context, identity, ciphertextPath, plainPath stri
 	}
 	src.Close()
 	if decErr != nil {
-		os.Remove(plainPath)
+		_ = os.Remove(plainPath) // cleanup on a path whose outcome cannot change the result (errcheck)
 		if ctx.Err() != nil {
 			return fmt.Errorf("decryption canceled: %w", ctx.Err())
 		}

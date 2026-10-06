@@ -378,7 +378,7 @@ func (r *Runner) PruneExpiredArtifacts(ctx context.Context) {
 	cutoff := time.Now().Add(-r.failedArtifactTTL).Unix()
 	rows, err := r.authDB.QueryContext(ctx, `
 		SELECT id, artifact_path, manifest_path FROM jobs
-		WHERE artifact_state = 'committed' AND artifact_path != ''
+		WHERE artifact_state IN ('committed','committed_no_manifest') AND artifact_path != ''
 		  AND status IN ('failed','canceled','interrupted')
 		  AND finished_at IS NOT NULL AND finished_at < ?`, cutoff)
 	if err != nil {
@@ -405,14 +405,27 @@ func (r *Runner) PruneExpiredArtifacts(ctx context.Context) {
 		return
 	}
 	rows.Close()
+	reclaimed := 0
 	for _, rc := range list {
+		// Only clear the reference for files that are ACTUALLY gone: a
+		// transient unlink failure (permissions, NFS hiccup) must stay
+		// retryable on the next sweep instead of leaking the bytes forever
+		// (quality review Q2).
+		allGone := true
 		for _, path := range []string{rc.artifact, rc.manifest} {
 			if path == "" {
 				continue
 			}
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			if err := os.Remove(path); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				allGone = false
 				r.log.Error("expired-artifact remove", "job", rc.id, "path", path, "err", err)
 			}
+		}
+		if !allGone {
+			continue // keep the reference; the next sweep retries
 		}
 		if _, err := r.authDB.ExecContext(ctx, `
 			UPDATE jobs SET artifact_path = '', artifact_sha256 = '', artifact_size = 0,
@@ -420,11 +433,12 @@ func (r *Runner) PruneExpiredArtifacts(ctx context.Context) {
 			WHERE id = ? AND status IN ('failed','canceled','interrupted')`, rc.id); err != nil {
 			r.log.Error("expired-artifact clear", "job", rc.id, "err", err)
 		} else {
+			reclaimed++
 			r.log.Info("expired artifact reclaimed", "job", rc.id)
 		}
 	}
-	if len(list) > 0 {
-		r.log.Info("expired artifacts reclaimed", "count", len(list))
+	if reclaimed > 0 {
+		r.log.Info("expired artifacts reclaimed", "count", reclaimed)
 	}
 }
 

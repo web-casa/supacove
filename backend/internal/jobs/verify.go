@@ -231,11 +231,11 @@ func (r *Runner) fetchRemoteArtifact(ctx context.Context, jobID int64) (string, 
 	}
 	if _, err := io.Copy(f, rc); err != nil {
 		f.Close()
-		os.Remove(local)
+		_ = os.Remove(local) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", fmt.Errorf("remote download: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(local)
+		_ = os.Remove(local) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", err
 	}
 	return local, nil
@@ -271,11 +271,11 @@ func (r *Runner) fetchRemoteManifest(ctx context.Context, jobID int64) (string, 
 	}
 	if _, err := io.Copy(f, rc); err != nil {
 		f.Close()
-		os.Remove(local)
+		_ = os.Remove(local) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(local)
+		_ = os.Remove(local) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", err
 	}
 	return local, nil
@@ -346,7 +346,7 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 	}
 	defer func() {
 		if fetched {
-			os.Remove(ciphertextPath)
+			_ = os.Remove(ciphertextPath) // cleanup on a path whose outcome cannot change the result (errcheck)
 		}
 		r.releaseVerifyLease(jobID)
 	}()
@@ -362,7 +362,7 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 			if mb2, rerr := os.ReadFile(local); rerr == nil {
 				mb = mb2
 				merr = nil
-				defer os.Remove(local)
+				defer func() { _ = os.Remove(local) }()
 			}
 		}
 	}

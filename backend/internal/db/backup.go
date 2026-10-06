@@ -32,20 +32,20 @@ func (s *Store) BackupNow(ctx context.Context, name string) (string, error) {
 	// failed VACUUM (context canceled, disk full) must never leave a partial
 	// file under the official snapshot name (review round 4, P1-08).
 	tmp := dest + ".inprogress"
-	os.Remove(tmp)
+	_ = os.Remove(tmp) // cleanup on a path whose outcome cannot change the result (errcheck)
 	// VACUUM INTO fails if the target exists and cannot run inside a
 	// transaction; the target path is passed as a bound parameter so path
 	// characters cannot alter the statement (review P1-07).
 	if _, err := s.DB.ExecContext(ctx, "VACUUM INTO ?", tmp); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", fmt.Errorf("vacuum into backup snapshot: %w", err)
 	}
 	if err := os.Chmod(tmp, 0o600); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", err
 	}
 	if err := os.Rename(tmp, dest); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // cleanup on a path whose outcome cannot change the result (errcheck)
 		return "", err
 	}
 	return dest, nil

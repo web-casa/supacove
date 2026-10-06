@@ -112,16 +112,22 @@ func TestUploadInterruptLeavesNoPartialAndResumesIdempotently(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// (a) Put fails BEFORE storing: nothing may appear remotely.
+	// (a) Put dies mid-stream AFTER a part landed (multipart interrupted):
+	// nothing may be promoted to a complete object, and the interrupted
+	// session's part must be observable so "no leaked parts" is a real
+	// assertion rather than a fake that never models parts.
 	jobID := p.seedCommittedJob(t, dbID, destID, "running", "")
-	p.backend.failPut = map[string]int{"ANY": 1}
-	p.backend.failAnyPut = true
+	p.backend.failPutMidStream = true
 	upload := uploadFromSeed(t, p, jobID)
 	if uerr := p.uploadAndCommitRemote(context.Background(), jobID, dbID, upload, dest); uerr == nil {
-		t.Fatal("injected put failure must surface")
+		t.Fatal("injected mid-stream failure must surface")
 	}
 	if len(p.backend.objects) != 0 {
-		t.Errorf("failed Put left %d remote objects, want none", len(p.backend.objects))
+		t.Errorf("interrupted multipart left %d complete objects, want none", len(p.backend.objects))
+	}
+	objKey := dest.StorageConfig().BackupKey(backupUUIDOf(t, p, jobID))
+	if p.backend.parts[objKey] == 0 {
+		t.Fatal("mid-stream fault must leave an in-flight part to assert cleanup against")
 	}
 	var remote string
 	_ = p.store.DB.QueryRow(`SELECT remote_state FROM jobs WHERE id = ?`, jobID).Scan(&remote)
@@ -129,7 +135,19 @@ func TestUploadInterruptLeavesNoPartialAndResumesIdempotently(t *testing.T) {
 		t.Error("failed upload must not mark committed")
 	}
 
-	// (b) Response lost: object stored, error returned. The job stays
+	// (b) Resume over the interrupted session: the completing upload
+	// consumes the parts (complete) — no part may survive, no duplicate
+	// object may appear.
+	p.backend.failPutMidStream = false
+	uploadR := uploadFromSeed(t, p, jobID)
+	if uerr := p.uploadAndCommitRemote(context.Background(), jobID, dbID, uploadR, dest); uerr != nil {
+		t.Fatalf("resume after interrupted multipart: %v", uerr)
+	}
+	if p.backend.parts[objKey] != 0 {
+		t.Errorf("parts leaked after completing resume: %v", p.backend.parts)
+	}
+
+	// (c) Response lost: object stored, error returned. The job stays
 	// resumable; the next resume must re-commit over the SAME objects.
 	p.backend.failAnyPut = false
 	job2 := p.seedCommittedJob(t, dbID, destID, "interrupted", "uploading")
@@ -138,18 +156,19 @@ func TestUploadInterruptLeavesNoPartialAndResumesIdempotently(t *testing.T) {
 	if uerr := p.uploadAndCommitRemote(context.Background(), job2, dbID, upload2, dest); uerr == nil {
 		t.Fatal("lost response must surface as an error")
 	}
-	// The lost response happened on the FIRST Put (ciphertext): exactly one
-	// object exists, and the job must still look resumable.
-	if storedKeys := len(p.backend.objects); storedKeys != 1 {
-		t.Fatalf("objects stored = %d, want 1 (ciphertext, manifest not reached)", storedKeys)
+	// The lost response happened on job2's FIRST Put (ciphertext): jobID's
+	// completed resume holds 2 objects, job2 exactly 1 — and job2 must still
+	// look resumable.
+	if storedKeys := len(p.backend.objects); storedKeys != 3 {
+		t.Fatalf("objects stored = %d, want 3 (resume committed 2 + lost-response 1)", storedKeys)
 	}
 	p.backend.losePutResponse = false
 	upload3 := uploadFromSeed(t, p, job2)
 	if uerr := p.uploadAndCommitRemote(context.Background(), job2, dbID, upload3, dest); uerr != nil {
 		t.Fatalf("resume over existing objects must succeed: %v", uerr)
 	}
-	if len(p.backend.objects) != 2 {
-		t.Errorf("resume duplicated objects: %d, want 2", len(p.backend.objects))
+	if n := len(p.backend.objects); n != 4 {
+		t.Errorf("objects after both resumes = %d, want 4 (no duplicates)", n)
 	}
 	var remote2 string
 	_ = p.store.DB.QueryRow(`SELECT remote_state FROM jobs WHERE id = ?`, job2).Scan(&remote2)

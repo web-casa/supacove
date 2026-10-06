@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -20,6 +21,36 @@ var (
 // every line — a malformed scrape silently drops families in real
 // deployments (quality plan: /metrics goes through a real parser; this is
 // the in-repo parser gate, the docker promtool target is the external one).
+// splitLabelPairs splits a label set on commas that are OUTSIDE quoted
+// values (a label value may legally contain an escaped comma).
+func splitLabelPairs(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inQuotes, escaped := false, false
+	for _, r := range s {
+		switch {
+		case escaped:
+			cur.WriteRune(r)
+			escaped = false
+		case r == '\\' && inQuotes:
+			cur.WriteRune(r)
+			escaped = true
+		case r == '"':
+			inQuotes = !inQuotes
+			cur.WriteRune(r)
+		case r == ',' && !inQuotes:
+			out = append(out, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
 func TestMetricsExpositionFormat(t *testing.T) {
 	env := newTestEnv(t)
 	env.bootstrapAdmin(t)
@@ -27,9 +58,17 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	// A database name with quote/backslash/newline chars locks label-value
 	// escaping: raw values here would break the exposition grammar AND leak
 	// unescaped admin input into every scraper.
-	if _, err := env.store.DB.Exec(
+	var oddDB int64
+	if err := env.store.DB.QueryRow(
 		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
-		 VALUES ('we"ird\name' || char(10) || 'x', 'generic', '', 'x', 0, 0)`); err != nil {
+		 VALUES ('we"ird\name' || char(10) || 'x', 'generic', '', 'x', 0, 0) RETURNING id`).Scan(&oddDB); err != nil {
+		t.Fatal(err)
+	}
+	// The database label only appears once a SUCCESSFUL job exists for it:
+	// without one the fixture never reaches the exposition text.
+	if _, err := env.store.DB.Exec(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at)
+		VALUES (?, 'succeeded', 0, 0, 1, 2)`, oddDB); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,9 +80,11 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("metrics status = %d", resp.StatusCode)
 	}
-	buf := make([]byte, 1<<20)
-	n, _ := resp.Body.Read(buf)
-	body := string(buf[:n])
+	bodyBytes, rerr := io.ReadAll(resp.Body)
+	if rerr != nil {
+		t.Fatalf("read scrape: %v", rerr)
+	}
+	body := string(bodyBytes)
 
 	// Optional capture for the external promtool target.
 	if path := os.Getenv("SB_METRICS_DUMP"); path != "" {
@@ -103,7 +144,7 @@ func TestMetricsExpositionFormat(t *testing.T) {
 				t.Fatalf("%s: sample outside its HELP/TYPE family (want %s)", where, lastFamily)
 			}
 			if labels != "" {
-				for _, pair := range strings.Split(labels, ",") {
+				for _, pair := range splitLabelPairs(labels) {
 					lm := labelPairRe.FindStringSubmatch(pair)
 					if lm == nil {
 						t.Fatalf("%s: bad label pair %q", where, pair)
@@ -111,12 +152,12 @@ func TestMetricsExpositionFormat(t *testing.T) {
 					// Escaped value must round-trip: an unescaped raw quote
 					// or newline inside the value is a grammar violation.
 					v := lm[2]
-					if strings.ContainsAny(v, "\"\n") {
-						t.Fatalf("%s: label value contains unescaped %q", where, v)
-					}
+					// The capture grammar only admits escaped forms; verify
+					// they round-trip to a coherent value and that no escape
+					// sequence is malformed.
 					if strings.Contains(v, "\\") {
 						unescaped := strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\n`, "\n").Replace(v)
-						if !strings.Contains(unescaped, `"`) && !strings.Contains(unescaped, "\n") && !strings.Contains(unescaped, `\`) {
+						if unescaped == v {
 							t.Fatalf("%s: backslash without escape sequence", where)
 						}
 					}

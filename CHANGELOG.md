@@ -4,6 +4,21 @@ All notable changes to supabackup.
 
 ## [Unreleased]
 
+### Added
+- Quality gates (adopted lightweight-toolchain plan): golangci-lint v2 curated
+  config (lint-clean tree), stylelint, Vitest+RTL component layer, Playwright
+  e2e against the embedded binary (scripts/e2e-run.sh), oasdiff breaking gate
+  vs api/openapi-baseline.yaml, in-repo /metrics exposition-format gate plus
+  `make metrics-check` for promtool, CI: actionlint, Trivy image scan, pinned
+  tool versions, permissions: read, concurrency groups, image needs security,
+  race under CGO=1 plus a CGO=0 production-conditions pass
+- Fault-matrix tests: occupied-final-path commit, lost-artifact
+  reconciliation, multipart-interrupted and lost-response uploads,
+  concurrent enqueue admission, retention anchor across a new failure
+- Standalone restore E2E: ciphertext + offline age identity + kit script
+  restore without any application state; single-byte tamper rejected
+- SB_JOB_TIMEOUT (6h default) and SB_FAILED_ARTIFACT_TTL_HOURS (72h default)
+
 ### Fixed
 - Graceful shutdown (docker stop / upgrade) no longer lands a running backup
   as a false `failed` (with a false failure webhook and /fail heartbeat):

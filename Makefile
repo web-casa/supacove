@@ -14,7 +14,7 @@ GOBIN_DIR := $(GOBIN_DIR)
 endif
 OAPI := $(GOBIN_DIR)/oapi-codegen
 
-.PHONY: help build backend frontend api-gen api-check dev test lint check clean
+.PHONY: help build backend frontend api-gen api-check api-breaking metrics-check dev test lint check clean
 .NOTPARALLEL:
 
 help:
@@ -47,7 +47,10 @@ api-breaking:
 ## Needs a running instance; dumps the scrape and pipes it to promtool.
 metrics-check:
 	@command -v promtool >/dev/null 2>&1 || { echo "promtool not installed (or use docker: see below)"; exit 1; }
-	@curl -sf -b "$${SB_METRICS_COOKIE:?set SB_METRICS_COOKIE to a logged-in cookie jar}" 	  "$${SB_BASE_URL:-http://127.0.0.1:8080}/metrics" | promtool check metrics
+	@TMP=$$(mktemp) && trap 'rm -f "$$TMP"' EXIT; \
+	curl -sfS -b "$${SB_METRICS_COOKIE:?set SB_METRICS_COOKIE to a logged-in cookie jar}" \
+	  -o "$$TMP" "$${SB_BASE_URL:-http://127.0.0.1:8080}/metrics" && \
+	test -s "$$TMP" && promtool check metrics < "$$TMP"
 
 api-check: ## Fail if generated code drifted from the OpenAPI contract
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
@@ -63,18 +66,17 @@ dev: ## Start the full dev environment (app + PostgreSQL + MinIO)
 test: ## Run backend tests with the race detector
 	go test -race ./backend/...
 
-## Static analysis: golangci-lint (backend) + eslint/stylelint (frontend).
+## Static analysis: gofmt + vet + golangci-lint (backend),
+## eslint + stylelint (frontend).
 lint:
+	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
+	go vet ./backend/...
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"; exit 1; }
 	golangci-lint run ./...
 	cd frontend && npm run lint && npm run stylelint
 
-lint: ## gofmt + go vet
-	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
-	go vet ./backend/...
-
-check: lint frontend api-check test ## Everything CI runs; frontend sets up deps before api-check
-	cd frontend && npm run lint
+check: lint frontend api-check api-breaking test ## Everything CI runs; frontend sets up deps before api-check
+	cd frontend && npx vitest run
 	$(MAKE) build
 
 clean:
