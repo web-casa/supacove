@@ -37,6 +37,10 @@ jobs:
         run: $(go env GOPATH)/bin/oapi-codegen -config api/cfg.yaml api/openapi.yaml
       - name: Fail on drift
         run: git diff --exit-code -- backend/internal/api || { echo "::error::api.gen.go drifted from api/openapi.yaml"; exit 1; }
+      - name: Install oasdiff
+        run: go install github.com/oasdiff/oasdiff@v1.11.5
+      - name: No breaking contract changes vs baseline
+        run: $(go env GOPATH)/bin/oasdiff breaking --fail-on ERR api/openapi-baseline.yaml api/openapi.yaml
 
   security:
     name: Security audit

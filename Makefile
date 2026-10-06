@@ -36,6 +36,19 @@ api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
 	$(OAPI) -config api/cfg.yaml api/openapi.yaml
 	cd frontend && npm run gen:api
 
+## Contract compatibility gate: no BREAKING change vs the committed
+## baseline (api/openapi-baseline.yaml, refreshed at each release tag).
+api-breaking:
+	@command -v oasdiff >/dev/null 2>&1 || { echo "oasdiff not installed: go install github.com/oasdiff/oasdiff@v1.11.5"; exit 1; }
+	oasdiff breaking --fail-on ERR api/openapi-baseline.yaml api/openapi.yaml
+	@echo "contract: no breaking changes vs baseline"
+
+## External Prometheus format validation of the live /metrics exposition.
+## Needs a running instance; dumps the scrape and pipes it to promtool.
+metrics-check:
+	@command -v promtool >/dev/null 2>&1 || { echo "promtool not installed (or use docker: see below)"; exit 1; }
+	@curl -sf -b "$${SB_METRICS_COOKIE:?set SB_METRICS_COOKIE to a logged-in cookie jar}" 	  "$${SB_BASE_URL:-http://127.0.0.1:8080}/metrics" | promtool check metrics
+
 api-check: ## Fail if generated code drifted from the OpenAPI contract
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
 	@test -x frontend/node_modules/.bin/openapi-typescript || (cd frontend && npm ci --no-fund --no-audit)

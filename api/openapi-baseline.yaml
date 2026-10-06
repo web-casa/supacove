@@ -1,0 +1,1609 @@
+openapi: 3.0.3
+info:
+  title: supabackup API
+  version: 0.1.0
+  description: |
+    supabackup control-plane API (Phase 1 scope: health, bootstrap, auth).
+
+    Contract-first: this file is the single source of truth. Server types are
+    generated with oapi-codegen (strict server), frontend types with
+    openapi-typescript. CI fails if committed generated files drift from this
+    contract. Generated types do NOT replace server-side runtime validation.
+servers:
+  - url: /api
+    description: All routes are served under the /api base path by the server.
+security:
+  - cookieAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: getHealthz
+      summary: Liveness (process alive). Anonymous and information-free.
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /ready:
+    get:
+      operationId: getReady
+      summary: "Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data."
+      security: []
+      responses:
+        "200":
+          description: Ready to serve.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Not ready (starting up, migration pending, or DB error).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /health/details:
+    get:
+      operationId: getHealthDetails
+      summary: Detailed runtime diagnostics. Requires authentication.
+      responses:
+        "503":
+          description: Session storage temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "200":
+          description: Runtime details.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthDetails"
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /auth/bootstrap:
+    post:
+      operationId: postAuthBootstrap
+      summary: Create the initial admin using a one-time token from the local CLI.
+      description: |
+        Fails with 403 if the token is unknown, used or expired; 409 if any
+        admin user already exists. This endpoint can never be used by a
+        public first visitor without the locally printed token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BootstrapRequest"
+      responses:
+        "201":
+          description: Admin created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Invalid, used or expired bootstrap token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Already initialized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /auth/login:
+    post:
+      operationId: postAuthLogin
+      summary: Log in with username and password.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in; session and CSRF cookies are set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          description: Origin header present but not same-origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Bad credentials (indistinguishable unknown-user vs wrong-password).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          description: Rate limited (too many attempts or consecutive failures).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/Overloaded"
+  /auth/logout:
+    post:
+      operationId: postAuthLogout
+      summary: Revoke the current session.
+      parameters:
+        - name: X-CSRF-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Session-bound CSRF token (double-submit via the sb_csrf cookie).
+      responses:
+        "204":
+          description: Logged out.
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: CSRF token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          description: Session storage temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /age/status:
+    get:
+      operationId: getAgeStatus
+      summary: age encryption configuration (protocol B). Recipient is public.
+      responses:
+        "200":
+          description: Recipient configured or not.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgeStatus"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /age/recipient:
+    put:
+      operationId: putAgeRecipient
+      summary: Set the age recipient (public key) used to encrypt backups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgeRecipientRequest"
+      responses:
+        "200":
+          description: Recipient stored with its fingerprint.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgeStatus"
+        "400":
+          description: Invalid recipient.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases:
+    get:
+      operationId: listDatabases
+      summary: Registered backup targets (no secrets).
+      responses:
+        "200":
+          description: All databases.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatabaseList"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createDatabase
+      summary: Register a database after a live connection test.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatabaseCreate"
+      responses:
+        "201":
+          description: Created; the connection was tested live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Database"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A database with this name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Connection test failed (error class in body).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases/{id}:
+    get:
+      operationId: getDatabase
+      summary: One database with its latest job summary.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The database.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Database"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+    delete:
+      operationId: deleteDatabase
+      summary: Remove the registration. Committed artifacts are kept.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Removed.
+        "409":
+          description: A job is pending or running for this database.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases/{id}/backups:
+    post:
+      operationId: triggerBackup
+      summary: Enqueue a backup job for this database (returns immediately).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "202":
+          description: Job queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A job is already pending or running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: Recent jobs across all databases (newest first).
+      responses:
+        "200":
+          description: Job list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskList"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}:
+    get:
+      operationId: getTask
+      summary: One job with artifact and manifest details.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/cancel:
+    post:
+      operationId: cancelTask
+      summary: Request cancellation of a pending or running job.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "202":
+          description: Cancellation requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "409":
+          description: Job is not pending or running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations:
+    get:
+      operationId: listDestinations
+      summary: List storage destinations (no secrets).
+      responses:
+        "200":
+          description: Destinations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DestinationList"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createDestination
+      summary: Create a destination after a live diagnostic test.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationCreate"
+      responses:
+        "201":
+          description: Created (diagnostic test passed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Destination"
+        "400":
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Diagnostic test failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations/{id}:
+    delete:
+      operationId: deleteDestination
+      summary: Soft-delete a destination (refused while an upload is in flight).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Upload in flight.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations/{id}/test:
+    post:
+      operationId: testDestination
+      summary: Re-run the live diagnostic write/read/delete cycle.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Diagnostic passed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Diagnostic failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /destinations/{id}/reconcile:
+    post:
+      operationId: reconcileDestination
+      summary: Read-only comparison of remote objects against job references.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Reconciliation report.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileReport"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /databases/{id}/destination:
+    put:
+      operationId: assignDatabaseDestination
+      summary: Attach or clear the destination for a database.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationAssign"
+      responses:
+        "200":
+          description: Assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+        "409":
+          description: Database not found or a job is active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/download-url:
+    get:
+      operationId: getTaskDownloadURL
+      summary: Presigned GET URL for a remotely committed backup (15 min).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadURL"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Not remotely committed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/download:
+    get:
+      operationId: downloadTask
+      summary: Stream the local staged artifact (local-only backups).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The ciphertext bytes.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404":
+          description: Unknown id or artifact gone.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /tasks/{id}/recovery-kit:
+    get:
+      operationId: downloadRecoveryKit
+      summary: Stream the generated restore.sh recovery kit for this backup.
+      description: >
+        The kit is a self-contained POSIX sh script (restore.sh) embedding the
+        ciphertext checksum, the key id and platform-specific guidance. It is
+        generated for every successful backup and regenerated at startup if
+        missing. Run it with `sh restore.sh`, never by executing it directly.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The recovery kit script.
+          content:
+            text/x-shellscript:
+              schema: { type: string, format: binary }
+        "404":
+          description: Unknown id or kit not available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /auth/me:
+    get:
+      operationId: getAuthMe
+      summary: Current authenticated user.
+      responses:
+        "200":
+          description: The current user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          description: Session storage temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /databases/{id}/schedule:
+    get:
+      operationId: getDatabaseSchedule
+      summary: Schedule, freshness and heartbeat configuration for a database.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The current configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleConfig"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+    put:
+      operationId: putDatabaseSchedule
+      summary: Update schedule, freshness and heartbeat configuration.
+      description: >
+        Heartbeat URL accepts only http/https. The dead-man switch fires on
+        silence: the success ping is gated on remote commit AND snapshot age
+        (period+grace); failures ping url+"/fail".
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleUpdate"
+      responses:
+        "200":
+          description: The updated configuration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleConfig"
+        "400":
+          description: Invalid cron expression, timezone, or heartbeat URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /webhooks:
+    get:
+      operationId: listWebhooks
+      summary: List configured webhook targets.
+      responses:
+        "200":
+          description: The webhook list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookList"
+        "500":
+          $ref: "#/components/responses/Internal"
+    post:
+      operationId: createWebhook
+      summary: Register a webhook target.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+        "400":
+          description: Invalid name, URL scheme, or event list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A webhook with this name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /webhooks/{id}:
+    delete:
+      operationId: deleteWebhook
+      summary: Soft-delete a webhook target.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Deleted.
+        "404":
+          description: Unknown id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /webhooks/test:
+    post:
+      operationId: testWebhook
+      summary: Synchronously deliver a test event to a webhook URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookCreate"
+      responses:
+        "200":
+          description: Delivered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookTestResult"
+        "400":
+          description: Invalid request or URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Delivery failed (status/rejection).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookTestResult"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /notifications:
+    get:
+      operationId: listNotifications
+      summary: Recent notification-outbox entries (delivery state machine).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        "200":
+          description: Recent entries, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /stats:
+    get:
+      operationId: getStats
+      summary: Aggregate backup statistics (Phase 8 dashboard).
+      responses:
+        "200":
+          description: The statistics summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsSummary"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /overview:
+    get:
+      operationId: getOverview
+      summary: Per-database protection state (the homepage answer).
+      description: >
+        Answers "which databases lack a fresh, verified, successful backup":
+        state is never | expired | fresh; unverified and failing are
+        orthogonal flags (fresh-but-unverified and fresh-with-failed-retry
+        are distinct concerns and shown separately).
+      responses:
+        "200":
+          description: The per-database states.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Overview"
+        "500":
+          $ref: "#/components/responses/Internal"
+components:
+  schemas:
+    ScheduleConfig:
+      type: object
+      required: [databaseId, cronTz, maxAgeHours, paused, heartbeatPeriodHours, heartbeatGraceHours]
+      properties:
+        databaseId:
+          type: integer
+          format: int64
+        cronExpr:
+          type: string
+          description: Standard 5-field crontab; empty = no schedule.
+        cronTz:
+          type: string
+          description: IANA timezone for the cron evaluation.
+        maxAgeHours:
+          type: integer
+          description: Freshness threshold; 0 disables expiry checks.
+        paused:
+          type: boolean
+        heartbeatUrl:
+          type: string
+          description: >
+            Dead-man switch URL (http/https). Empty inherits the process
+            fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly
+            disables the heartbeat for this database.
+        heartbeatPeriodHours:
+          type: integer
+          description: >
+            Expected backup period for the dead-man switch. 0 means success
+            pings are NOT sent (without a period there are no silence
+            semantics to vouch for); fail pings still fire. A heartbeatUrl
+            (except the "-" disable marker) requires a positive period.
+        heartbeatGraceHours:
+          type: integer
+          description: Extra tolerance added to the period before silence alarms.
+        lastScheduledAt:
+          type: integer
+          format: int64
+          nullable: true
+        lastHeartbeatAt:
+          type: integer
+          format: int64
+          nullable: true
+    ScheduleUpdate:
+      type: object
+      properties:
+        cronExpr:
+          type: string
+          maxLength: 100
+        cronTz:
+          type: string
+          maxLength: 64
+        maxAgeHours:
+          type: integer
+          minimum: 0
+          maximum: 8760
+        paused:
+          type: boolean
+        heartbeatUrl:
+          type: string
+          maxLength: 500
+          description: >
+            http/https only; must not be a link-local address. Empty inherits
+            the process fallback; "-" explicitly disables. A heartbeat URL
+            requires heartbeatPeriodHours > 0 (silence semantics).
+        heartbeatPeriodHours:
+          type: integer
+          minimum: 0
+          maximum: 8760
+        heartbeatGraceHours:
+          type: integer
+          minimum: 0
+          maximum: 8760
+    Webhook:
+      type: object
+      required: [id, name, url, events, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        url:
+          type: string
+          description: Returned only to the authenticated admin; never logged by the server.
+        events:
+          type: array
+          items:
+            type: string
+            enum: [backup_failed, backup_expired, verification_failed]
+        createdAt:
+          type: integer
+          format: int64
+    WebhookCreate:
+      type: object
+      required: [name, url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        url:
+          type: string
+          minLength: 8
+          maxLength: 500
+          format: password
+        events:
+          type: array
+          items:
+            type: string
+            enum: [backup_failed, backup_expired, verification_failed]
+          default: [backup_failed, backup_expired]
+    WebhookList:
+      type: object
+      required: [webhooks]
+      properties:
+        webhooks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Webhook"
+    WebhookTestResult:
+      type: object
+      required: [delivered]
+      properties:
+        delivered:
+          type: boolean
+        detail:
+          type: string
+    Notification:
+      type: object
+      required: [id, eventId, eventType, databaseName, state, attempts, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        eventId:
+          type: string
+        eventType:
+          type: string
+          enum: [backup_failed, backup_expired, verification_failed]
+        databaseName:
+          type: string
+        state:
+          type: string
+          enum: [pending, delivering, delivered, dead]
+        attempts:
+          type: integer
+        lastError:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+        deliveredAt:
+          type: integer
+          format: int64
+          nullable: true
+    NotificationList:
+      type: object
+      required: [notifications]
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+    OverviewEntry:
+      type: object
+      required: [databaseId, name, platform, state]
+      properties:
+        databaseId:
+          type: integer
+          format: int64
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+        state:
+          type: string
+          enum: [fresh, expired, never]
+          description: >
+            fresh = a succeeded backup exists whose snapshot age is within
+            maxAgeHours (or no threshold set); expired = threshold exceeded;
+            never = no succeeded backup. A FAILED RETRY does not make a
+            database fresh — state derives from the last SUCCESS.
+        lastSuccessAt:
+          type: integer
+          format: int64
+          nullable: true
+        lastSuccessAgeHours:
+          type: number
+          format: double
+          nullable: true
+        lastSuccessVerifyStatus:
+          type: string
+          enum: ["", pending, running, verified, failed, unsupported, skipped]
+          description: Verification state of the newest succeeded backup (未验证 shown separately from freshness).
+        lastJobStatus:
+          type: string
+          enum: ["", pending, running, succeeded, failed, canceled, interrupted]
+          description: Newest job of any status; a failed retry is visible here without changing `state`.
+        schedulePaused:
+          type: boolean
+        scheduleDue:
+          type: boolean
+          description: A cron schedule exists and the next fire time has passed.
+        maxAgeHours:
+          type: integer
+    StatsSummary:
+      type: object
+      required: [totalJobs, succeeded, failed, canceled, successRate, totalArtifactBytes, databases, destinations]
+      properties:
+        totalJobs:
+          type: integer
+          format: int64
+        succeeded:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        canceled:
+          type: integer
+          format: int64
+        successRate:
+          type: number
+          format: double
+          nullable: true
+          description: succeeded / terminal-state jobs; null when nothing has finished.
+        exportSuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            Succeeded exports over jobs that began executing (started_at
+            set). Jobs canceled while queued never attempted a dump and are
+            excluded from both numerator and denominator; jobs canceled or
+            interrupted after starting count as not-exported
+            (conservative denominator).
+        remoteSuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: Remote commits vs upload failures (null when no upload attempted).
+        verifySuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: verified vs failed/unsupported among succeeded backups (null when none verified).
+        notifySuccessRate:
+          type: number
+          format: double
+          nullable: true
+          description: Delivered vs dead entries in the notification outbox (null when the outbox is empty).
+        avgDurationSecs:
+          type: number
+          format: double
+          nullable: true
+          description: >
+            Mean BACKUP EXECUTION duration (dump through remote commit — it
+            includes the upload, not only pg_dump) over succeeded jobs that
+            recorded one; null when no job has a measurement.
+        totalDumpBytes:
+          type: integer
+          format: int64
+          description: >
+            Sum of the compressed pg_dump archive sizes RECORDED in the
+            statistics table (volume metric 2). This is a subtotal over
+            recorded samples: successful backups whose stats row is missing
+            (older records, rare write failures) are NOT included — compare
+            with totalArtifactBytes (complete, from the jobs table) with
+            that coverage difference in mind. Records written by releases
+            that measured after encryption may reflect ciphertext size
+            (equal to totalArtifactBytes' per-job value) rather than the
+            smaller pre-encryption archive.
+        totalArtifactBytes:
+          type: integer
+          format: int64
+          description: Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
+        totalSourceBytes:
+          type: integer
+          format: int64
+          description: Sum of the NEWEST known source database physical size per database (volume metric 1; unmeasured databases count as 0).
+        lastSuccessAt:
+          type: integer
+          format: int64
+        databases:
+          type: integer
+        destinations:
+          type: integer
+        uptimeSeconds:
+          type: integer
+          format: int64
+    Overview:
+      type: object
+      required: [databases]
+      properties:
+        databases:
+          type: array
+          items:
+            $ref: "#/components/schemas/OverviewEntry"
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+    HealthDetails:
+      type: object
+      required: [version, commit, goVersion, uptimeSeconds]
+      properties:
+        version:
+          type: string
+        commit:
+          type: string
+        goVersion:
+          type: string
+        uptimeSeconds:
+          type: integer
+          format: int64
+        sqliteOpenConns:
+          type: integer
+    User:
+      type: object
+      required: [id, username, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        username:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+          description: Unix seconds.
+    BootstrapRequest:
+      type: object
+      required: [token, username, password]
+      properties:
+        token:
+          type: string
+          maxLength: 128
+          description: One-time token printed by `supabackup bootstrap`.
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: "^[A-Za-z0-9._-]+$"
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+          format: password
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+          format: password
+    Destination:
+      type: object
+      required: [id, name, platform, bucket, keepRemote, keepDays, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [s3, r2, b2]
+        endpoint:
+          type: string
+        region:
+          type: string
+        bucket:
+          type: string
+        prefix:
+          type: string
+        verifyReadback:
+          type: boolean
+        keepRemote:
+          type: integer
+        keepDays:
+          type: integer
+        createdAt:
+          type: integer
+          format: int64
+        updatedAt:
+          type: integer
+          format: int64
+    DestinationList:
+      type: object
+      required: [destinations]
+      properties:
+        destinations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Destination"
+    DestinationCreate:
+      type: object
+      required: [name, bucket, accessKey, secretKey]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        platform:
+          type: string
+          enum: [s3, r2, b2]
+          default: s3
+        endpoint:
+          type: string
+          description: Required for r2/b2.
+        region:
+          type: string
+        bucket:
+          type: string
+          minLength: 3
+          maxLength: 63
+        prefix:
+          type: string
+        accessKey:
+          type: string
+          minLength: 3
+        secretKey:
+          type: string
+          minLength: 8
+          format: password
+        verifyReadback:
+          type: boolean
+          default: true
+        keepRemote:
+          type: integer
+          default: 10
+          minimum: 1
+        keepDays:
+          type: integer
+          default: 0
+          minimum: 0
+    DestinationAssign:
+      type: object
+      properties:
+        destinationId:
+          type: integer
+          format: int64
+          nullable: true
+          description: 0/null clears the assignment.
+    ReconcileReport:
+      type: object
+      required: [destinationId, generatedAt, remoteObjects, matched]
+      properties:
+        destinationId:
+          type: integer
+          format: int64
+        generatedAt:
+          type: integer
+          format: int64
+        remoteObjects:
+          type: integer
+        matched:
+          type: integer
+        orphaned:
+          type: array
+          items: { type: string }
+        missing:
+          type: array
+          items: { type: string }
+        uncommitted:
+          type: array
+          items: { type: string }
+    DownloadURL:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type: integer
+          format: int64
+    AgeStatus:
+      type: object
+      required: [configured]
+      properties:
+        configured:
+          type: boolean
+        recipient:
+          type: string
+          description: Public age recipient (empty when not configured).
+        keyId:
+          type: string
+          description: Recipient fingerprint (protocol B).
+    AgeRecipientRequest:
+      type: object
+      required: [recipient]
+      properties:
+        recipient:
+          type: string
+          minLength: 20
+          maxLength: 200
+          description: age recipient string (age1…).
+    Database:
+      type: object
+      required: [id, name, platform, envTag, serverVersion, sslMode, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+        envTag:
+          type: string
+        serverVersion:
+          type: string
+        sslMode:
+          type: string
+          description: Persisted TLS mode for this target (round-1 review P1-09 —持续可见).
+        poolingWarning:
+          type: string
+          description: >
+            Registration-time warning when the endpoint looks like a pooled
+            connection that pg_dump cannot use (Supabase transaction pooler,
+            Neon '-pooler' endpoint). Present on the create response when
+            detected; absent otherwise.
+        lastTask:
+          $ref: "#/components/schemas/Task"
+        createdAt:
+          type: integer
+          format: int64
+        updatedAt:
+          type: integer
+          format: int64
+    DatabaseList:
+      type: object
+      required: [databases]
+      properties:
+        databases:
+          type: array
+          items:
+            $ref: "#/components/schemas/Database"
+    DatabaseCreate:
+      type: object
+      required: [name, connectionUri]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+          default: generic
+        envTag:
+          type: string
+          maxLength: 64
+        connectionUri:
+          type: string
+          minLength: 20
+          maxLength: 500
+          format: password
+          description: postgres:// URI; stored AES-GCM-encrypted, never returned.
+    Task:
+      type: object
+      required: [id, databaseId, status, attempt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        databaseId:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed, canceled, interrupted]
+        attempt:
+          type: integer
+        errorClass:
+          type: string
+          enum: ["", network, auth, permission, client_version, disk, storage_upload, verification, unknown]
+        remediation:
+          type: string
+          description: >
+            Operator-facing troubleshooting steps for the error class;
+            present on failed tasks only. Never embeds job-specific data.
+        errorMessage:
+          type: string
+        artifactSha256:
+          type: string
+        artifactSize:
+          type: integer
+          format: int64
+        hasManifest:
+          type: boolean
+        cancelRequested:
+          type: boolean
+        remoteState:
+          type: string
+          enum: ["", uploading, committed, deleted]
+          description: Protocol C remote-commit state (empty = local-only).
+        scheduledAt:
+          type: integer
+          format: int64
+        startedAt:
+          type: integer
+          format: int64
+          nullable: true
+        finishedAt:
+          type: integer
+          format: int64
+          nullable: true
+        platform:
+          type: string
+          enum: [supabase, neon, railway, generic]
+          description: Auto-detected source platform (drives the recovery kit).
+        verifyStatus:
+          type: string
+          enum: ["", pending, running, verified, failed, unsupported, skipped]
+          description: >
+            Restore-verification state machine. Empty only for jobs created
+            before this field existed; pending/running are transitional;
+            verified/failed/unsupported are verifier outcomes; skipped
+            carries the reason in verifyDetail.
+        verifyDetail:
+          type: string
+          description: Human-readable verification outcome or skip reason (redacted).
+        verifyTables:
+          type: integer
+          format: int64
+          description: User tables found in the restored throwaway instance.
+        verifyDurationSecs:
+          type: number
+          format: double
+        verifyProfile:
+          type: string
+          description: How verification was proven (e.g. embedded-local:18).
+        hasRecoveryKit:
+          type: boolean
+          description: A generated restore.sh kit is available for download.
+    TaskList:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable error class.
+        message:
+          type: string
+          description: Human-readable, credential-free.
+  responses:
+    PayloadTooLarge:
+      description: Request body exceeds the allowed size.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedMediaType:
+      description: Content-Type must be application/json.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: Rate limited; retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Internal:
+      description: Unexpected internal error (nothing persisted, no state change reported as success).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Overloaded:
+      description: Temporary overload (e.g. password-hashing budget exhausted); retry later.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sb_session
+      description: >-
+        Server-side session. The cookie name is `sb_session` in plain-HTTP dev
+        mode and `__Host-sb_session` when Secure cookies are enabled (production).
+        State-changing requests additionally require the `X-CSRF-Token` header
+        echoing the session-bound CSRF cookie.
