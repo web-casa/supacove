@@ -13,7 +13,11 @@ interface Common {
   block?: boolean;
 }
 
-function classes({ variant = "secondary", size = "md", block }: Common, iconOnly: boolean, extra?: string) {
+function classes(
+  { variant = "secondary", size = "md", block }: Common,
+  iconOnly: boolean,
+  extra?: string,
+) {
   return [
     "btn",
     `btn-${variant}`,
@@ -26,7 +30,8 @@ function classes({ variant = "secondary", size = "md", block }: Common, iconOnly
     .join(" ");
 }
 
-type ButtonProps = Common & ButtonHTMLAttributes<HTMLButtonElement> & {
+type ButtonProps = Common &
+  ButtonHTMLAttributes<HTMLButtonElement> & {
     loading?: boolean;
     ref?: Ref<HTMLButtonElement>;
   };
@@ -55,7 +60,11 @@ export function Button({
       data-tip={tip}
       {...rest}
     >
-      {loading ? <Spinner size={iconSize} /> : Icon && <Icon size={iconSize} aria-hidden />}
+      {loading ? (
+        <Spinner size={iconSize} />
+      ) : (
+        Icon && <Icon size={iconSize} aria-hidden />
+      )}
       {children}
     </button>
   );
@@ -64,9 +73,23 @@ export function Button({
 type LinkProps = Common & AnchorHTMLAttributes<HTMLAnchorElement>;
 
 /** Same visuals as Button for plain navigations (cookie-authenticated downloads). */
-export function LinkButton({ variant, size, icon: Icon, tip, block, className, children, ...rest }: LinkProps) {
+export function LinkButton({
+  variant,
+  size,
+  icon: Icon,
+  tip,
+  block,
+  className,
+  children,
+  ...rest
+}: LinkProps) {
   return (
-    <a className={classes({ variant, size, block }, !children, className)} aria-label={tip} data-tip={tip} {...rest}>
+    <a
+      className={classes({ variant, size, block }, !children, className)}
+      aria-label={tip}
+      data-tip={tip}
+      {...rest}
+    >
       {Icon && <Icon size={size === "sm" ? 13 : 15} aria-hidden />}
       {children}
     </a>

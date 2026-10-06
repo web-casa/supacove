@@ -8,7 +8,10 @@ export function control(id: string, error?: string | null) {
 }
 
 /** Show validation errors only once the user has tried to submit. */
-export function shown<T extends Record<string, string | null>>(errors: T, submitted: boolean): T {
+export function shown<T extends Record<string, string | null>>(
+  errors: T,
+  submitted: boolean,
+): T {
   if (submitted) return errors;
   return Object.fromEntries(Object.keys(errors).map((k) => [k, null])) as T;
 }

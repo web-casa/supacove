@@ -34,7 +34,6 @@ type Store struct {
 }
 
 // compile-time assertion that the manager Uploader handles our reader types.
-var _ = manager.NewUploader
 
 // New validates the config and builds the client.
 func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Store, error) {
@@ -92,11 +91,15 @@ func (s *Store) Put(ctx context.Context, key string, r io.Reader, size int64) er
 		}
 		return nil
 	}
+	//nolint:staticcheck // SA1019: feature/s3/manager is soft-deprecated in
+	// favour of feature/s3/transfermanager; migration is tracked as a
+	// follow-up — the uploader path is stable and fully exercised by the
+	// MinIO integration test.
 	uploader := manager.NewUploader(s.client, func(u *manager.Uploader) {
 		u.PartSize = partSize
 		u.Concurrency = uploadConcurrency
 	})
-	out, err := uploader.Upload(ctx, &s3.PutObjectInput{
+	out, err := uploader.Upload(ctx, &s3.PutObjectInput{ //nolint:staticcheck // SA1019: manager path, migration tracked as follow-up
 		Bucket: aws.String(s.cfg.Bucket),
 		Key:    aws.String(key),
 		Body:   r,
@@ -205,7 +208,7 @@ func (s *Store) DiagnosticTest(ctx context.Context) error {
 		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if derr := s.Delete(dctx, key); derr != nil && result == nil {
-			result = fmt.Errorf("%w; ALSO failed to clean up canary %s: %v", result, key, derr)
+			result = fmt.Errorf("%w; ALSO failed to clean up canary %s: %w", result, key, derr)
 		}
 	}()
 	rc, size, err := s.Get(ctx, key)

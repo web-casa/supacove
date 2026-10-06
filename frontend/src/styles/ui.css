@@ -262,7 +262,8 @@
 }
 
 .wave-sweep {
-  mask: linear-gradient(90deg, transparent, #000 75%, #000 94%, transparent) 0 0 / 34% 100% no-repeat;
+  mask: linear-gradient(90deg, transparent, #000 75%, #000 94%, transparent) 0
+    0 / 34% 100% no-repeat;
   animation: sweep 4.2s linear infinite;
 }
 
@@ -737,7 +738,13 @@ input[aria-invalid="true"]:focus {
   display: block;
   height: 12px;
   border-radius: 4px;
-  background: linear-gradient(90deg, var(--surface-3) 25%, #2c333d 50%, var(--surface-3) 75%) 0 0 / 200% 100%;
+  background: linear-gradient(
+      90deg,
+      var(--surface-3) 25%,
+      #2c333d 50%,
+      var(--surface-3) 75%
+    )
+    0 0 / 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
 

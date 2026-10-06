@@ -1,6 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef } from "react";
-import { Bell, History, LayoutDashboard, LogOut, type LucideIcon } from "lucide-react";
+import {
+  Bell,
+  History,
+  LayoutDashboard,
+  LogOut,
+  type LucideIcon,
+} from "lucide-react";
 import { api, type User } from "../api/client";
 import { useI18n } from "../i18n";
 import { useHashView, type View } from "../lib/useHashView";
@@ -74,7 +80,13 @@ export function Dashboard({ user }: { user: User }) {
           <div className="topbar-user">
             <LangSwitch />
             <span className="muted truncate">{user.username}</span>
-            <Button variant="ghost" size="sm" icon={LogOut} loading={logout.isPending} onClick={() => logout.mutate()}>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={LogOut}
+              loading={logout.isPending}
+              onClick={() => logout.mutate()}
+            >
               {t("nav.signOut")}
             </Button>
           </div>

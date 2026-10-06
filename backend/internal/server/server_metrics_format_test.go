@@ -1,0 +1,141 @@
+package server
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+var (
+	metricNameRe = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+	sampleRe     = regexp.MustCompile(`^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{([^}]*)\})? (\S+)( \d+)?$`)
+	labelPairRe  = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"$`)
+)
+
+// The hand-written exposition text must satisfy the Prometheus format on
+// every line — a malformed scrape silently drops families in real
+// deployments (quality plan: /metrics goes through a real parser; this is
+// the in-repo parser gate, the docker promtool target is the external one).
+func TestMetricsExpositionFormat(t *testing.T) {
+	env := newTestEnv(t)
+	env.bootstrapAdmin(t)
+
+	// A database name with quote/backslash/newline chars locks label-value
+	// escaping: raw values here would break the exposition grammar AND leak
+	// unescaped admin input into every scraper.
+	if _, err := env.store.DB.Exec(
+		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
+		 VALUES ('we"ird\name' || char(10) || 'x', 'generic', '', 'x', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := env.client.Get(env.base + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d", resp.StatusCode)
+	}
+	buf := make([]byte, 1<<20)
+	n, _ := resp.Body.Read(buf)
+	body := string(buf[:n])
+
+	// Optional capture for the external promtool target.
+	if path := os.Getenv("SB_METRICS_DUMP"); path != "" {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	families := map[string]string{} // metric -> TYPE
+	helps := map[string]bool{}      // HELP seen once per metric
+	seen := map[string]bool{}       // name{labels} samples, dup detection
+	var lastFamily string
+
+	for i, line := range strings.Split(body, "\n") {
+		if line == "" {
+			continue
+		}
+		where := fmt.Sprintf("line %d %q", i+1, line)
+		switch {
+		case strings.HasPrefix(line, "# HELP "):
+			fields := strings.SplitN(line, " ", 4)
+			if len(fields) < 3 || !metricNameRe.MatchString(fields[2]) {
+				t.Fatalf("%s: bad HELP", where)
+			}
+			if helps[fields[2]] {
+				t.Fatalf("%s: duplicate HELP", where)
+			}
+			helps[fields[2]] = true
+			lastFamily = fields[2]
+		case strings.HasPrefix(line, "# TYPE "):
+			fields := strings.SplitN(line, " ", 4)
+			if len(fields) != 4 {
+				t.Fatalf("%s: bad TYPE", where)
+			}
+			switch fields[3] {
+			case "gauge", "counter", "summary", "histogram", "untyped":
+			default:
+				t.Fatalf("%s: unknown type %q", where, fields[3])
+			}
+			if families[fields[2]] != "" {
+				t.Fatalf("%s: duplicate TYPE", where)
+			}
+			families[fields[2]] = fields[3]
+			lastFamily = fields[2]
+		case strings.HasPrefix(line, "#"):
+			t.Fatalf("%s: unknown comment kind", where)
+		default:
+			m := sampleRe.FindStringSubmatch(line)
+			if m == nil {
+				t.Fatalf("%s: unparsable sample line", where)
+			}
+			name, labels, value := m[1], m[3], m[4]
+			if _, err := strconv.ParseFloat(value, 64); err != nil {
+				t.Fatalf("%s: value %q not a float", where, value)
+			}
+			if name != lastFamily {
+				t.Fatalf("%s: sample outside its HELP/TYPE family (want %s)", where, lastFamily)
+			}
+			if labels != "" {
+				for _, pair := range strings.Split(labels, ",") {
+					lm := labelPairRe.FindStringSubmatch(pair)
+					if lm == nil {
+						t.Fatalf("%s: bad label pair %q", where, pair)
+					}
+					// Escaped value must round-trip: an unescaped raw quote
+					// or newline inside the value is a grammar violation.
+					v := lm[2]
+					if strings.ContainsAny(v, "\"\n") {
+						t.Fatalf("%s: label value contains unescaped %q", where, v)
+					}
+					if strings.Contains(v, "\\") {
+						unescaped := strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\n`, "\n").Replace(v)
+						if !strings.Contains(unescaped, `"`) && !strings.Contains(unescaped, "\n") && !strings.Contains(unescaped, `\`) {
+							t.Fatalf("%s: backslash without escape sequence", where)
+						}
+					}
+				}
+			}
+			key := name + "{" + labels + "}"
+			if seen[key] {
+				t.Fatalf("%s: duplicate sample %s", where, key)
+			}
+			seen[key] = true
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("no samples scraped")
+	}
+	// Every family carries both HELP and TYPE.
+	for name := range families {
+		if !helps[name] {
+			t.Errorf("family %s has TYPE but no HELP", name)
+		}
+	}
+}

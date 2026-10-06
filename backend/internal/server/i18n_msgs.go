@@ -124,6 +124,7 @@ func destinationMsg(ctx context.Context, err error, secrets []string) string {
 	return redact.Secrets(secrets, msg)
 }
 
+//nolint:gosec // G101: the map NAMES config keys in validation messages; no credentials live here
 var destinationFixed = map[string]string{
 	"name must be 1-100 characters":      "name 长度需为 1–100 个字符",
 	"platform must be one of s3, r2, b2": "platform 必须是 s3、r2、b2 之一",

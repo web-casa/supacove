@@ -165,7 +165,7 @@ func DeliveryClient(timeout time.Duration) *http.Client {
 					}
 					for _, ip := range ips {
 						if err := netguard.Check(ip); err != nil {
-							return fmt.Errorf("%s for webhooks", err)
+							return fmt.Errorf("%w for webhooks", err)
 						}
 					}
 					return nil

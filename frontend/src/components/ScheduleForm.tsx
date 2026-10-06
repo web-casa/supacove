@@ -12,7 +12,10 @@ import { RelativeTime } from "./ui/RelativeTime";
 import { Spinner } from "./ui/Spinner";
 
 const MAX_HOURS = 8760;
-const TIMEZONES: string[] = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+const TIMEZONES: string[] =
+  typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("timeZone")
+    : [];
 
 function validTimezone(tz: string): boolean {
   try {
@@ -55,11 +58,15 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
     maxAgeHours: form.maxAgeHours ?? cur?.maxAgeHours ?? 0,
     paused: form.paused ?? cur?.paused ?? false,
     heartbeatUrl: form.heartbeatUrl ?? cur?.heartbeatUrl ?? "",
-    heartbeatPeriodHours: form.heartbeatPeriodHours ?? cur?.heartbeatPeriodHours ?? 0,
-    heartbeatGraceHours: form.heartbeatGraceHours ?? cur?.heartbeatGraceHours ?? 0,
+    heartbeatPeriodHours:
+      form.heartbeatPeriodHours ?? cur?.heartbeatPeriodHours ?? 0,
+    heartbeatGraceHours:
+      form.heartbeatGraceHours ?? cur?.heartbeatGraceHours ?? 0,
   };
-  const set = <K extends keyof ScheduleConfig>(k: K, value: ScheduleConfig[K]) =>
-    setForm((f) => ({ ...f, [k]: value }));
+  const set = <K extends keyof ScheduleConfig>(
+    k: K,
+    value: ScheduleConfig[K],
+  ) => setForm((f) => ({ ...f, [k]: value }));
 
   const save = useMutation({
     mutationFn: () =>
@@ -87,10 +94,13 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
         : null,
     cronTz: validTimezone(v.cronTz.trim()) ? null : t("schedule.error.tz"),
     maxAgeHours: hoursError(v.maxAgeHours),
-    heartbeatUrl: hbActive && !isHttpUrl(hbUrl) ? t("schedule.error.hbUrl") : null,
+    heartbeatUrl:
+      hbActive && !isHttpUrl(hbUrl) ? t("schedule.error.hbUrl") : null,
     heartbeatPeriodHours:
       hoursError(v.heartbeatPeriodHours) ??
-      (hbActive && v.heartbeatPeriodHours <= 0 ? t("schedule.error.period") : null),
+      (hbActive && v.heartbeatPeriodHours <= 0
+        ? t("schedule.error.period")
+        : null),
     heartbeatGraceHours: hoursError(v.heartbeatGraceHours),
   };
   const visible = shown(errors, submitted);
@@ -116,7 +126,9 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
   if (existing.isError) {
     return (
       <div className="subpanel">
-        <InlineMessage>{t("schedule.unavailable", { msg: errorMessage(existing.error) })}</InlineMessage>
+        <InlineMessage>
+          {t("schedule.unavailable", { msg: errorMessage(existing.error) })}
+        </InlineMessage>
         <div className="form-actions">
           <Button size="sm" onClick={() => existing.refetch()}>
             {t("common.retry")}
@@ -130,17 +142,37 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
   }
 
   return (
-    <form className="subpanel form" onSubmit={onSubmit} noValidate aria-label={t("schedule.aria", { name })}>
+    <form
+      className="subpanel form"
+      onSubmit={onSubmit}
+      noValidate
+      aria-label={t("schedule.aria", { name })}
+    >
       <div className="subpanel-head">
         <h3>{t("schedule.title")}</h3>
         <p className="muted">
-          {t("schedule.lastScheduled")} {cur?.lastScheduledAt ? <RelativeTime at={cur.lastScheduledAt} /> : t("common.never")} ·{" "}
-          {t("schedule.lastHeartbeat")} {cur?.lastHeartbeatAt ? <RelativeTime at={cur.lastHeartbeatAt} /> : t("common.never")}
+          {t("schedule.lastScheduled")}{" "}
+          {cur?.lastScheduledAt ? (
+            <RelativeTime at={cur.lastScheduledAt} />
+          ) : (
+            t("common.never")
+          )}{" "}
+          · {t("schedule.lastHeartbeat")}{" "}
+          {cur?.lastHeartbeatAt ? (
+            <RelativeTime at={cur.lastHeartbeatAt} />
+          ) : (
+            t("common.never")
+          )}
         </p>
       </div>
 
       <div className="form-grid form-grid-3">
-        <Field label={t("schedule.field.cron")} htmlFor={id("cron")} error={visible.cronExpr} hint={t("schedule.hint.cron")}>
+        <Field
+          label={t("schedule.field.cron")}
+          htmlFor={id("cron")}
+          error={visible.cronExpr}
+          hint={t("schedule.hint.cron")}
+        >
           <input
             {...control(id("cron"), visible.cronExpr)}
             className="mono"
@@ -150,7 +182,11 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
             onChange={(e) => set("cronExpr", e.target.value)}
           />
         </Field>
-        <Field label={t("schedule.field.tz")} htmlFor={id("tz")} error={visible.cronTz}>
+        <Field
+          label={t("schedule.field.tz")}
+          htmlFor={id("tz")}
+          error={visible.cronTz}
+        >
           <input
             {...control(id("tz"), visible.cronTz)}
             list={id("tz-list")}
@@ -195,7 +231,11 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
             onChange={(e) => set("heartbeatUrl", e.target.value)}
           />
         </Field>
-        <Field label={t("schedule.field.period")} htmlFor={id("hbp")} error={visible.heartbeatPeriodHours}>
+        <Field
+          label={t("schedule.field.period")}
+          htmlFor={id("hbp")}
+          error={visible.heartbeatPeriodHours}
+        >
           <input
             {...control(id("hbp"), visible.heartbeatPeriodHours)}
             className="num"
@@ -203,10 +243,16 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
             min={0}
             max={MAX_HOURS}
             value={v.heartbeatPeriodHours}
-            onChange={(e) => set("heartbeatPeriodHours", Number(e.target.value))}
+            onChange={(e) =>
+              set("heartbeatPeriodHours", Number(e.target.value))
+            }
           />
         </Field>
-        <Field label={t("schedule.field.grace")} htmlFor={id("hbg")} error={visible.heartbeatGraceHours}>
+        <Field
+          label={t("schedule.field.grace")}
+          htmlFor={id("hbg")}
+          error={visible.heartbeatGraceHours}
+        >
           <input
             {...control(id("hbg"), visible.heartbeatGraceHours)}
             className="num"
@@ -220,7 +266,12 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
       </div>
 
       <label className="switch">
-        <input type="checkbox" role="switch" checked={v.paused} onChange={(e) => set("paused", e.target.checked)} />
+        <input
+          type="checkbox"
+          role="switch"
+          checked={v.paused}
+          onChange={(e) => set("paused", e.target.checked)}
+        />
         <span className="switch-track" aria-hidden />
         <span>
           {t("schedule.pause")}
@@ -228,7 +279,9 @@ export function ScheduleForm({ databaseId, name, onDone }: Props) {
         </span>
       </label>
 
-      {save.isError && <InlineMessage>{errorMessage(save.error)}</InlineMessage>}
+      {save.isError && (
+        <InlineMessage>{errorMessage(save.error)}</InlineMessage>
+      )}
       <div className="form-actions">
         <Button type="submit" variant="primary" loading={save.isPending}>
           {save.isPending ? t("common.saving") : t("common.save")}

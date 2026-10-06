@@ -38,8 +38,16 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: radial-gradient(50rem 26rem at 50% 42%, var(--signal-soft), transparent 70%);
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 46%, #000 30%, transparent);
+  background: radial-gradient(
+    50rem 26rem at 50% 42%,
+    var(--signal-soft),
+    transparent 70%
+  );
+  mask-image: radial-gradient(
+    ellipse 70% 60% at 50% 46%,
+    #000 30%,
+    transparent
+  );
   pointer-events: none;
 }
 
@@ -283,7 +291,8 @@
   padding: 7px 10px;
   border-radius: var(--radius-md);
   background:
-    linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px) 10px 0 / 24px 100%,
+    linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px) 10px
+      0 / 24px 100%,
     rgb(0 0 0 / 0.24);
   box-shadow: inset 0 0 0 1px var(--border);
 }
@@ -392,7 +401,10 @@
 }
 
 .table-tasks :is(.thead, .trow) {
-  grid-template-columns: minmax(0, 1.2fr) 112px minmax(0, 1.25fr) 80px 76px 284px;
+  grid-template-columns: minmax(0, 1.2fr) 112px minmax(
+      0,
+      1.25fr
+    ) 80px 76px 284px;
 }
 
 .table-hooks :is(.thead, .trow) {
@@ -494,14 +506,14 @@
 }
 
 @keyframes trace {
-  from {
+  0% {
     transform: scaleX(0);
   }
   70% {
     opacity: 1;
     transform: scaleX(1);
   }
-  to {
+  100% {
     opacity: 0;
     transform: scaleX(1);
   }
@@ -899,7 +911,11 @@
   content: "";
   position: absolute;
   inset: 0 -32px;
-  background: repeating-linear-gradient(90deg, var(--signal) 0 7px, transparent 7px 32px);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--signal) 0 7px,
+    transparent 7px 32px
+  );
   opacity: 0.4;
   animation: flow-x 2.2s linear infinite;
 }
@@ -1092,7 +1108,11 @@
 
   .pipe::before {
     inset: -32px 0;
-    background: repeating-linear-gradient(180deg, var(--signal) 0 7px, transparent 7px 32px);
+    background: repeating-linear-gradient(
+      180deg,
+      var(--signal) 0 7px,
+      transparent 7px 32px
+    );
     animation-name: flow-y;
   }
 

@@ -13,7 +13,9 @@ interface Props {
 export function Badge({ tone = "neutral", icon: Icon, spin, children }: Props) {
   return (
     <span className={`badge tone-${tone}`}>
-      {Icon && <Icon size={12} className={spin ? "spin" : undefined} aria-hidden />}
+      {Icon && (
+        <Icon size={12} className={spin ? "spin" : undefined} aria-hidden />
+      )}
       {children}
     </span>
   );

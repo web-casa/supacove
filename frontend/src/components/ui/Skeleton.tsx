@@ -4,7 +4,11 @@ import { useI18n } from "../../i18n";
 export function SkeletonRows({ rows = 3 }: { rows?: number }) {
   const { t } = useI18n();
   return (
-    <div className="skeleton-rows" aria-busy="true" aria-label={t("ui.loading")}>
+    <div
+      className="skeleton-rows"
+      aria-busy="true"
+      aria-label={t("ui.loading")}
+    >
       {Array.from({ length: rows }, (_, i) => (
         <div className="skeleton-row" key={i}>
           <span className="skeleton skeleton-wide" />
@@ -18,5 +22,9 @@ export function SkeletonRows({ rows = 3 }: { rows?: number }) {
 }
 
 export function SkeletonText({ short }: { short?: boolean }) {
-  return <span className={`skeleton skeleton-inline${short ? " skeleton-short" : ""}`} />;
+  return (
+    <span
+      className={`skeleton skeleton-inline${short ? " skeleton-short" : ""}`}
+    />
+  );
 }

@@ -90,7 +90,3 @@ func requestScheme(req *http.Request) string {
 	}
 	return "http"
 }
-
-func writeEmpty(w http.ResponseWriter, status int) {
-	w.WriteHeader(status)
-}

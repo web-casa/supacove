@@ -106,7 +106,7 @@ func (r *Runner) uploadAndCommitRemote(ctx context.Context, jobID, dbID int64, r
 		// mismatch (provably our content, wrong bytes) triggers cleanup.
 		if errors.Is(vErr, errVerifyMismatch) {
 			if dErr := backend.Delete(ctx, objKey); dErr != nil {
-				return fmt.Errorf("%w; ALSO failed to delete the corrupt remote object %s: %v", vErr, objKey, dErr)
+				return fmt.Errorf("%w; ALSO failed to delete the corrupt remote object %s: %w", vErr, objKey, dErr)
 			}
 		}
 		return vErr
@@ -237,13 +237,17 @@ func (r *Runner) runRemoteRetention(ctx context.Context, dest *Destination, back
 	for rows.Next() {
 		var c candidate
 		if err := rows.Scan(&c.id, &c.objKey, &c.manKey, &c.at, &c.verifyState); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			r.log.Error("retention scan failed", "database", dbID, "err", err)
 			return
 		}
 		committed = append(committed, c)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		r.log.Error("retention iteration", "database", dbID, "err", err)
+		return
+	}
 
 	// The ANCHOR (newest committed backup for this database+destination) is
 	// untouchable, even when keep_days says otherwise (protocol D: "保护最新
@@ -390,7 +394,7 @@ func (r *Runner) PruneExpiredArtifacts(ctx context.Context) {
 		var rc reclaim
 		if err := rows.Scan(&rc.id, &rc.artifact, &rc.manifest); err != nil {
 			r.log.Error("expired-artifact sweep scan", "err", err)
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			return
 		}
 		list = append(list, rc)
@@ -447,12 +451,16 @@ func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) 
 	for rows.Next() {
 		var j job
 		if err := rows.Scan(&j.id, &j.artifact, &j.manifest, &j.remoteState, &j.verifyState); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			return
 		}
 		succeeded = append(succeeded, j)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		r.log.Error("local artifact prune iteration", "err", err)
+		return
+	}
 
 	// The newest verified backup keeps its local artifact even when it is
 	// outside the keep window: until a newer backup passes verification it

@@ -315,6 +315,10 @@ func (s *Scheduler) loadSchedules(ctx context.Context) []ScheduleInfo {
 			LastScheduled: r.lastSchedAt,
 		})
 	}
+	if err := rows.Err(); err != nil {
+		s.log.Error("schedule iteration", "err", err)
+		return nil
+	}
 	return out
 }
 
@@ -353,7 +357,11 @@ func (s *Scheduler) reconcileNotifications(ctx context.Context) {
 		f.message = redactNotify(f.message)
 		failed = append(failed, f)
 	}
-	rows.Close()
+	rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
+	if err := rows.Err(); err != nil {
+		s.log.Error("failed-job sweep iteration", "err", err)
+		return
+	}
 	for _, f := range failed {
 		if err := outbox.EnqueueTx(ctx, s.store, outbox.Event{
 			EventID:      fmt.Sprintf("backup_failed:job:%d", f.id),
@@ -401,7 +409,11 @@ func (s *Scheduler) reconcileNotifications(ctx context.Context) {
 		v.detail = redactNotify(v.detail)
 		verifs = append(verifs, v)
 	}
-	vrows.Close()
+	vrows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
+	if err := vrows.Err(); err != nil {
+		s.log.Error("verification sweep iteration", "err", err)
+		return
+	}
 	for _, v := range verifs {
 		if err := outbox.EnqueueTx(ctx, s.store, outbox.Event{
 			EventID:      fmt.Sprintf("verification_failed:job:%d", v.id),

@@ -51,7 +51,7 @@ func TestExcerptOfReviewFixtures(t *testing.T) {
 // TestExcerptOfPercentEncodingMatrix: every percent-encoded representation
 // of the password is removed.
 func TestExcerptOfPercentEncodingMatrix(t *testing.T) {
-	pw := `p@ss/word~x-y_z`
+	pw := `p@ss/word~x-y_z` //nolint:gosec // G101: deliberate test credential for the excerpt sanitizer
 	encAll := make([]byte, 0, len(pw)*3)
 	for i := 0; i < len(pw); i++ {
 		encAll = append(encAll, fmt.Appendf(nil, "%%%02X", pw[i])...)

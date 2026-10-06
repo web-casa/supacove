@@ -81,8 +81,8 @@ func open(dataDir string, takeLock bool) (*Store, error) {
 	}
 	dbPath := filepath.Join(dataDir, "supabackup.db")
 	if pf, err := os.OpenFile(dbPath, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-		pf.Close()
-		os.Chmod(dbPath, 0o600)
+		_ = pf.Close()
+		_ = os.Chmod(dbPath, 0o600) // OpenFile already created it 0600; umask belt
 	}
 
 	var f *os.File

@@ -50,6 +50,9 @@ func (s *Staging) FreeBytes() (uint64, error) {
 	if err := syscall.Statfs(s.Dir, &st); err != nil {
 		return 0, err
 	}
+	if st.Bsize <= 0 {
+		return 0, fmt.Errorf("statfs reported non-positive block size %d", st.Bsize)
+	}
 	return st.Bavail * uint64(st.Bsize), nil
 }
 

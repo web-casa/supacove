@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -207,7 +208,7 @@ func TestSecretCanaryNeverEscapes(t *testing.T) {
 		if info.IsDir() {
 			return nil
 		}
-		data, rerr := os.ReadFile(path)
+		data, rerr := os.ReadFile(path) //nolint:gosec // G122: walks its own t.TempDir staging; no attacker-controlled symlinks
 		if rerr != nil {
 			return nil
 		}
@@ -256,16 +257,10 @@ func TestFindClientPrefersSameMajor(t *testing.T) {
 }
 
 func asClassified(err error, target **Classified) bool {
-	for err != nil {
-		if c, ok := err.(*Classified); ok {
-			*target = c
-			return true
-		}
-		u, ok := err.(interface{ Unwrap() error })
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
+	var c *Classified
+	if errors.As(err, &c) {
+		*target = c
+		return true
 	}
 	return false
 }

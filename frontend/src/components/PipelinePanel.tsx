@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { Bell, CloudUpload, Database, FileArchive, LockKeyhole, ShieldCheck, type LucideIcon } from "lucide-react";
+import {
+  Bell,
+  CloudUpload,
+  Database,
+  FileArchive,
+  LockKeyhole,
+  ShieldCheck,
+  type LucideIcon,
+} from "lucide-react";
 import { useI18n } from "../i18n";
 import { duration, errorMessage, humanBytes, pct } from "../lib/format";
 import { statsQuery, tasksQuery } from "../lib/queries";
@@ -33,7 +41,14 @@ interface StageProps {
 }
 
 /** One pipeline stage: a node whose ring fills with its success rate. */
-function Stage({ icon: Icon, name, hint, rate, loading, children }: StageProps) {
+function Stage({
+  icon: Icon,
+  name,
+  hint,
+  rate,
+  loading,
+  children,
+}: StageProps) {
   const hasRate = rate !== undefined;
   const tone = hasRate ? rateTone(rate) : "signal";
   const fill = hasRate ? Math.min(100, Math.max(0, rate ?? 0)) / 100 : 1;
@@ -59,10 +74,18 @@ function Stage({ icon: Icon, name, hint, rate, loading, children }: StageProps) 
         <span className="stage-name">{name}</span>
         {hasRate && (
           <span className="stage-rate num">
-            {loading ? <SkeletonText short /> : rate == null ? "—" : <CountUp value={rate} format={pct} />}
+            {loading ? (
+              <SkeletonText short />
+            ) : rate == null ? (
+              "—"
+            ) : (
+              <CountUp value={rate} format={pct} />
+            )}
           </span>
         )}
-        <span className="stage-sub">{loading ? <SkeletonText short /> : children}</span>
+        <span className="stage-sub">
+          {loading ? <SkeletonText short /> : children}
+        </span>
       </span>
     </li>
   );
@@ -70,10 +93,22 @@ function Stage({ icon: Icon, name, hint, rate, loading, children }: StageProps) 
 
 const Pipe = () => <li className="pipe" aria-hidden />;
 
-function Stat({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Stat({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="stat">
-      <span className="stat-label" data-tip={hint} tabIndex={hint ? 0 : undefined}>
+      <span
+        className="stat-label"
+        data-tip={hint}
+        tabIndex={hint ? 0 : undefined}
+      >
         {label}
       </span>
       <span className="stat-value num">{children}</span>
@@ -90,7 +125,9 @@ export function PipelinePanel() {
   const tasks = useQuery(tasksQuery);
   const d = stats.data;
   const loading = !d;
-  const inFlight = (tasks.data?.tasks ?? []).filter((t) => t.status === "running" || t.status === "pending").length;
+  const inFlight = (tasks.data?.tasks ?? []).filter(
+    (t) => t.status === "running" || t.status === "pending",
+  ).length;
   const count = (n: number) => <CountUp value={n} />;
 
   return (
@@ -99,18 +136,35 @@ export function PipelinePanel() {
       description={t("pipe.desc")}
       actions={
         <span className={`live-chip${inFlight > 0 ? " live-chip-active" : ""}`}>
-          <Beacon tone={inFlight > 0 ? "signal" : "neutral"} live={inFlight > 0} />
+          <Beacon
+            tone={inFlight > 0 ? "signal" : "neutral"}
+            live={inFlight > 0}
+          />
           {inFlight > 0 ? t("pipe.inFlight", { n: inFlight }) : t("pipe.idle")}
         </span>
       }
     >
       {stats.isError && !d ? (
-        <InlineMessage>{t("pipe.unavailable", { msg: errorMessage(stats.error) })}</InlineMessage>
+        <InlineMessage>
+          {t("pipe.unavailable", { msg: errorMessage(stats.error) })}
+        </InlineMessage>
       ) : (
         <>
-          <ol className={`pipeline stagger${inFlight > 0 ? " pipeline-active" : ""}`} aria-label={t("pipe.aria")}>
-            <Stage icon={Database} name={t("pipe.stage.source")} hint={t("pipe.stage.source.hint")} loading={loading}>
-              {d && t("pipe.stage.source.sub", { size: humanBytes(d.totalSourceBytes), count: d.databases })}
+          <ol
+            className={`pipeline stagger${inFlight > 0 ? " pipeline-active" : ""}`}
+            aria-label={t("pipe.aria")}
+          >
+            <Stage
+              icon={Database}
+              name={t("pipe.stage.source")}
+              hint={t("pipe.stage.source.hint")}
+              loading={loading}
+            >
+              {d &&
+                t("pipe.stage.source.sub", {
+                  size: humanBytes(d.totalSourceBytes),
+                  count: d.databases,
+                })}
             </Stage>
             <Pipe />
             <Stage
@@ -120,7 +174,9 @@ export function PipelinePanel() {
               rate={d ? (d.exportSuccessRate ?? null) : null}
               loading={loading}
             >
-              {t("pipe.stage.export.sub", { size: humanBytes(d?.totalDumpBytes) })}
+              {t("pipe.stage.export.sub", {
+                size: humanBytes(d?.totalDumpBytes),
+              })}
             </Stage>
             <Pipe />
             <Stage
@@ -129,7 +185,9 @@ export function PipelinePanel() {
               hint={t("pipe.stage.encrypt.hint")}
               loading={loading}
             >
-              {t("pipe.stage.encrypt.sub", { size: humanBytes(d?.totalArtifactBytes) })}
+              {t("pipe.stage.encrypt.sub", {
+                size: humanBytes(d?.totalArtifactBytes),
+              })}
             </Stage>
             <Pipe />
             <Stage
@@ -164,19 +222,48 @@ export function PipelinePanel() {
           </ol>
 
           <div className="stats">
-            <Stat label={t("pipe.stat.success")} hint={t("pipe.stat.success.hint")}>
-              {d ? d.successRate == null ? "—" : <CountUp value={d.successRate} format={pct} /> : <SkeletonText short />}
+            <Stat
+              label={t("pipe.stat.success")}
+              hint={t("pipe.stat.success.hint")}
+            >
+              {d ? (
+                d.successRate == null ? (
+                  "—"
+                ) : (
+                  <CountUp value={d.successRate} format={pct} />
+                )
+              ) : (
+                <SkeletonText short />
+              )}
             </Stat>
-            <Stat label={t("pipe.stat.jobs")}>{d ? count(d.totalJobs) : <SkeletonText short />}</Stat>
-            <Stat label={t("pipe.stat.succeeded")}>{d ? count(d.succeeded) : <SkeletonText short />}</Stat>
+            <Stat label={t("pipe.stat.jobs")}>
+              {d ? count(d.totalJobs) : <SkeletonText short />}
+            </Stat>
+            <Stat label={t("pipe.stat.succeeded")}>
+              {d ? count(d.succeeded) : <SkeletonText short />}
+            </Stat>
             <Stat label={t("pipe.stat.failed")}>
-              {d ? <span className={d.failed > 0 ? "text-danger" : undefined}>{count(d.failed)}</span> : <SkeletonText short />}
+              {d ? (
+                <span className={d.failed > 0 ? "text-danger" : undefined}>
+                  {count(d.failed)}
+                </span>
+              ) : (
+                <SkeletonText short />
+              )}
             </Stat>
             <Stat label={t("pipe.stat.avg")} hint={t("pipe.stat.avg.hint")}>
               {d ? duration(d.avgDurationSecs) : <SkeletonText short />}
             </Stat>
             <Stat label={t("pipe.stat.lastSuccess")}>
-              {d ? d.lastSuccessAt ? <RelativeTime at={d.lastSuccessAt} /> : t("common.never") : <SkeletonText short />}
+              {d ? (
+                d.lastSuccessAt ? (
+                  <RelativeTime at={d.lastSuccessAt} />
+                ) : (
+                  t("common.never")
+                )
+              ) : (
+                <SkeletonText short />
+              )}
             </Stat>
           </div>
         </>

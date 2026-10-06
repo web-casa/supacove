@@ -330,15 +330,6 @@ func schemaVersion(t *testing.T, s *Store) int64 {
 	return v
 }
 
-func migrationSource(t *testing.T, name string) []byte {
-	t.Helper()
-	f, err := embeddedMigrations.ReadFile("migrations/" + name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return f
-}
-
 // TestMigrateNoPendingDoesNotCreateOrPruneBackup (review P1-08): plain
 // restarts must not churn the backups directory at all.
 func TestMigrateNoPendingDoesNotCreateOrPruneBackup(t *testing.T) {

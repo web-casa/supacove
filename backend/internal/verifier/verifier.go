@@ -391,12 +391,19 @@ func checkDiskBudget(baseDir, ciphertextPath string) error {
 	if err := syscall.Statfs(baseDir, &st); err != nil {
 		return err
 	}
+	if st.Bsize <= 0 {
+		return fmt.Errorf("statfs reported non-positive block size %d", st.Bsize)
+	}
 	free := st.Bavail * uint64(st.Bsize)
 	info, err := os.Stat(ciphertextPath)
 	if err != nil {
 		return err
 	}
-	need := uint64(info.Size())*2 + 256<<20
+	size := info.Size()
+	if size < 0 {
+		return fmt.Errorf("artifact size %d is negative", size)
+	}
+	need := uint64(size)*2 + 256<<20
 	if free < need {
 		return fmt.Errorf("insufficient free space for verification: %d bytes available, need ~%d (plaintext + throwaway instance)", free, need)
 	}
@@ -436,7 +443,13 @@ func (v *Verifier) stopConfirmed(ctx context.Context, env []string, dataDir stri
 	err = v.run(escCtx, env, "pg_ctl", "-D", dataDir, "-m", "immediate", "-w", "stop")
 	escCancel()
 	if postmasterPresent(filepath.Dir(pidFile)) {
-		return "WARNING: embedded postgres could not be confirmed stopped (postmaster.pid still present)"
+		msg := "WARNING: embedded postgres could not be confirmed stopped (postmaster.pid still present)"
+		if err != nil {
+			// The escalation outcome rides along: the verdict is the
+			// postmaster check, but the stop error must not be dropped.
+			msg += fmt.Sprintf("; immediate stop failed: %v", err)
+		}
+		return msg
 	}
 	return ""
 }
@@ -698,7 +711,7 @@ func (v *Verifier) runOutput(ctx context.Context, env []string, name string, arg
 	cmd.Stdout = bb
 	cmd.Stderr = bb
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s: %v: %s", name, err, bb.String())
+		return "", fmt.Errorf("%s: %w: %s", name, err, bb.String())
 	}
 	return strings.TrimSpace(bb.String()), nil
 }

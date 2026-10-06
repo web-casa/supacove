@@ -14,7 +14,12 @@ export function RunPulse({ tasks }: { tasks: Task[] }) {
   const label =
     recent.length === 0
       ? t("pulse.noRuns")
-      : t("pulse.lastRuns", { n: recent.length, list: recent.map((task) => t(taskStatusMeta(task.status).label)).join(", ") });
+      : t("pulse.lastRuns", {
+          n: recent.length,
+          list: recent
+            .map((task) => t(taskStatusMeta(task.status).label))
+            .join(", "),
+        });
 
   return (
     <div className="pulse" role="img" aria-label={label}>

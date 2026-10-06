@@ -263,6 +263,9 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return n, err
+	}
 	for _, mm := range missingList {
 		if _, uerr := r.authDB.ExecContext(ctx, `
 			UPDATE jobs SET error_message = COALESCE(NULLIF(error_message,''),'') ||
@@ -340,7 +343,7 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 		var j job
 		var d sql.NullInt64
 		if err := rows.Scan(&j.id, &j.dbID, &j.artifactPath, &j.sha256, &j.size, &j.manifestPath, &d); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			r.log.Error("resume scan", "err", err)
 			return
 		}
@@ -348,6 +351,10 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 		jobsList = append(jobsList, j)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		r.log.Error("resume: cursor iteration", "err", err)
+		return
+	}
 
 	for _, j := range jobsList {
 		if !j.destID.Valid {
@@ -617,12 +624,16 @@ func (r *Runner) claimAndRun(ctx context.Context) bool {
 	for rows.Next() {
 		var c cand
 		if err := rows.Scan(&c.id, &c.dbID); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			return false
 		}
 		candidates = append(candidates, c)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		r.log.Error("claim: candidate iteration", "err", err)
+		return false
+	}
 	if len(candidates) == 0 {
 		// Nothing claimable — settle any cancel-requested pending jobs so
 		// `canceled` is actually reachable (round-1 review P1-04).

@@ -8,10 +8,13 @@ import { ApiError } from "../api/client";
 export function newSessionQueryClient(): QueryClient {
   const qc: QueryClient = new QueryClient({
     queryCache: new QueryCache({ onError: (e: unknown) => onAuthLost(qc, e) }),
-    mutationCache: new MutationCache({ onError: (e: unknown) => onAuthLost(qc, e) }),
+    mutationCache: new MutationCache({
+      onError: (e: unknown) => onAuthLost(qc, e),
+    }),
     defaultOptions: {
       queries: {
-        retry: (failures, error) => !(error instanceof ApiError && error.status === 401) && failures < 1,
+        retry: (failures, error) =>
+          !(error instanceof ApiError && error.status === 401) && failures < 1,
         refetchOnWindowFocus: false,
       },
     },

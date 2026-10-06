@@ -3,7 +3,13 @@ import { CalendarClock, Pause, Play, Trash2 } from "lucide-react";
 import { api, type OverviewEntry, type Task } from "../api/client";
 import { useI18n } from "../i18n";
 import { errorMessage } from "../lib/format";
-import { lastSuccessUnix, protectionMeta, rowTone, taskStatusMeta, verifyMeta } from "../lib/status";
+import {
+  lastSuccessUnix,
+  protectionMeta,
+  rowTone,
+  taskStatusMeta,
+  verifyMeta,
+} from "../lib/status";
 import { useToast } from "../lib/toast";
 import { RunPulse } from "./RunPulse";
 import { ScheduleForm } from "./ScheduleForm";
@@ -24,7 +30,13 @@ interface Props {
   onCloseSchedule: () => void;
 }
 
-export function DatabaseRow({ entry, tasks, scheduleOpen, onToggleSchedule, onCloseSchedule }: Props) {
+export function DatabaseRow({
+  entry,
+  tasks,
+  scheduleOpen,
+  onToggleSchedule,
+  onCloseSchedule,
+}: Props) {
   const qc = useQueryClient();
   const toast = useToast();
   const { t } = useI18n();
@@ -47,16 +59,23 @@ export function DatabaseRow({ entry, tasks, scheduleOpen, onToggleSchedule, onCl
 
   const state = protectionMeta(entry.state);
   const verify = verifyMeta(entry.lastSuccessVerifyStatus);
-  const inFlight = entry.lastJobStatus === "running" || entry.lastJobStatus === "pending";
+  const inFlight =
+    entry.lastJobStatus === "running" || entry.lastJobStatus === "pending";
   const stripe = rowTone(entry);
   const actionError = backup.error ?? del.error;
   const lastSuccessAt = lastSuccessUnix(entry);
 
   return (
-    <div className={`trow-group tone-${stripe}${scheduleOpen ? " trow-open" : ""}`} role="rowgroup">
+    <div
+      className={`trow-group tone-${stripe}${scheduleOpen ? " trow-open" : ""}`}
+      role="rowgroup"
+    >
       <div className="trow" role="row">
         <div className="cell cell-main" role="cell">
-          <Beacon tone={inFlight ? "signal" : stripe} live={inFlight || stripe === "ok" || stripe === "danger"} />
+          <Beacon
+            tone={inFlight ? "signal" : stripe}
+            live={inFlight || stripe === "ok" || stripe === "danger"}
+          />
           <span className="db-name truncate">{entry.name}</span>
           <span className="chip">{entry.platform}</span>
           {entry.schedulePaused && (
@@ -69,7 +88,11 @@ export function DatabaseRow({ entry, tasks, scheduleOpen, onToggleSchedule, onCl
           <StatusBadge meta={state} />
         </div>
         <div className="cell" role="cell">
-          {verify ? <StatusBadge meta={verify} /> : <span className="muted">—</span>}
+          {verify ? (
+            <StatusBadge meta={verify} />
+          ) : (
+            <span className="muted">—</span>
+          )}
         </div>
         <div className="cell" role="cell">
           <RunPulse tasks={tasks} />
@@ -81,21 +104,35 @@ export function DatabaseRow({ entry, tasks, scheduleOpen, onToggleSchedule, onCl
             <span>
               <RelativeTime at={lastSuccessAt} />
               {entry.maxAgeHours ? (
-                <span className="muted cell-limit">{t("dbrow.limit", { n: entry.maxAgeHours })}</span>
+                <span className="muted cell-limit">
+                  {t("dbrow.limit", { n: entry.maxAgeHours })}
+                </span>
               ) : null}
             </span>
           )}
           {entry.lastJobStatus === "failed" && (
-            <span className="text-danger cell-note">{t("dbrow.lastJobFailed")}</span>
+            <span className="text-danger cell-note">
+              {t("dbrow.lastJobFailed")}
+            </span>
           )}
           {inFlight && (
             <span className="muted cell-note">
-              <Spinner size={11} /> {t("dbrow.backupState", { state: entry.lastJobStatus ? t(taskStatusMeta(entry.lastJobStatus).label) : "" })}
+              <Spinner size={11} />{" "}
+              {t("dbrow.backupState", {
+                state: entry.lastJobStatus
+                  ? t(taskStatusMeta(entry.lastJobStatus).label)
+                  : "",
+              })}
             </span>
           )}
         </div>
         <div className="cell cell-actions tip-end" role="cell">
-          <Button size="sm" icon={Play} loading={backup.isPending} onClick={() => backup.mutate()}>
+          <Button
+            size="sm"
+            icon={Play}
+            loading={backup.isPending}
+            onClick={() => backup.mutate()}
+          >
             {backup.isPending ? t("dbrow.queueing") : t("dbrow.backupNow")}
           </Button>
           <Button
@@ -121,7 +158,13 @@ export function DatabaseRow({ entry, tasks, scheduleOpen, onToggleSchedule, onCl
           <InlineMessage>{errorMessage(actionError)}</InlineMessage>
         </div>
       )}
-      {scheduleOpen && <ScheduleForm databaseId={entry.databaseId} name={entry.name} onDone={onCloseSchedule} />}
+      {scheduleOpen && (
+        <ScheduleForm
+          databaseId={entry.databaseId}
+          name={entry.name}
+          onDone={onCloseSchedule}
+        />
+      )}
     </div>
   );
 }

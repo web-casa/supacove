@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -239,7 +240,12 @@ func (c *Config) spaceCheck() (used int64, err error) {
 	if err := syscall.Statfs(c.StagingDir, &st); err != nil {
 		return 0, err
 	}
-	avail := int64(st.Bavail) * int64(st.Bsize)
+	// statfs fields are uint64/int64 mixes; clamp on the (unrealistic)
+	// overflow instead of trusting the conversion (gosec G115).
+	var avail int64 = math.MaxInt64
+	if st.Bsize > 0 && st.Bavail <= uint64(math.MaxInt64)/uint64(st.Bsize) {
+		avail = int64(st.Bavail) * st.Bsize //nolint:gosec // G115: bounds-checked by the condition above
+	}
 	floor := c.FreeFloor
 	if floor <= 0 {
 		floor = 64 << 20
@@ -507,12 +513,12 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 				Err: fmt.Errorf("%w: ciphertext exceeded %d bytes mid-stream", ErrStagingFull, c.QuotaBytes)}
 		}
 		return nil, &Classified{Class: pgclient.ClassUnknown,
-			Err: fmt.Errorf("%w: %v", ErrEncrypt, encErr)}
+			Err: fmt.Errorf("%w: %w", ErrEncrypt, encErr)}
 	}
 	if waitErr != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		return nil, &Classified{Class: classifyDumpFailure(excerpt),
-			Err: fmt.Errorf("%w: %v", ErrDumpFailed, waitErr)}
+			Err: fmt.Errorf("%w: %w", ErrDumpFailed, waitErr)}
 	}
 
 	if err := tmp.Sync(); err != nil {

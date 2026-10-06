@@ -197,7 +197,7 @@ func TestPhase8SecretCanary(t *testing.T) {
 	for rows.Next() {
 		var p string
 		if err := rows.Scan(&p); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			t.Fatal(err)
 		}
 		payloads = append(payloads, p)

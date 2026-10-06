@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client";
 import { newSessionQueryClient } from "./session";
 
-async function failWith(qc: ReturnType<typeof newSessionQueryClient>, status: number) {
+async function failWith(
+  qc: ReturnType<typeof newSessionQueryClient>,
+  status: number,
+) {
   await qc
     .fetchQuery({
       queryKey: ["probe", status],
@@ -36,7 +39,11 @@ describe("session loss (401)", () => {
 
     await failWith(qc, 500);
 
-    expect(qc.getQueryData(["me"])).toEqual({ id: 1, username: "admin", createdAt: 0 });
+    expect(qc.getQueryData(["me"])).toEqual({
+      id: 1,
+      username: "admin",
+      createdAt: 0,
+    });
     expect(qc.getQueryData(["overview"])).toBeDefined();
   });
 

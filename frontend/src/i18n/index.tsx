@@ -2,8 +2,21 @@
 // language change and keeps <html lang> in sync via an effect (never during
 // render). Only components are exported here — constants and helpers stay in
 // core.ts so fast-refresh tooling sees one component module.
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { getLang, setLang as persistLang, translate, type Lang, type Vars } from "./core";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  getLang,
+  setLang as persistLang,
+  translate,
+  type Lang,
+  type Vars,
+} from "./core";
 
 interface I18n {
   lang: Lang;

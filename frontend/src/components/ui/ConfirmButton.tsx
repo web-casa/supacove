@@ -16,7 +16,15 @@ interface Props {
 }
 
 /** Two-step destructive action: the first click only arms it. */
-export function ConfirmButton({ label, tip, icon, prompt, confirmLabel, pending, onConfirm }: Props) {
+export function ConfirmButton({
+  label,
+  tip,
+  icon,
+  prompt,
+  confirmLabel,
+  pending,
+  onConfirm,
+}: Props) {
   const { t } = useI18n();
   const [armed, setArmed] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -27,7 +35,14 @@ export function ConfirmButton({ label, tip, icon, prompt, confirmLabel, pending,
 
   if (!armed && !pending) {
     return (
-      <Button variant="ghost" size="sm" icon={icon} tip={label ? undefined : tip} className="btn-danger-hover" onClick={() => setArmed(true)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        icon={icon}
+        tip={label ? undefined : tip}
+        className="btn-danger-hover"
+        onClick={() => setArmed(true)}
+      >
         {label}
       </Button>
     );
@@ -53,7 +68,13 @@ export function ConfirmButton({ label, tip, icon, prompt, confirmLabel, pending,
       >
         {confirmLabel}
       </Button>
-      <Button ref={cancelRef} variant="ghost" size="sm" disabled={pending} onClick={() => setArmed(false)}>
+      <Button
+        ref={cancelRef}
+        variant="ghost"
+        size="sm"
+        disabled={pending}
+        onClick={() => setArmed(false)}
+      >
         {t("common.cancel")}
       </Button>
     </span>

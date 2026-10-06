@@ -2,7 +2,7 @@ package jobs
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // G501: md5 is the fixture content-checksum format, not a security primitive
 	"errors"
 	"fmt"
 	"io"
@@ -67,14 +67,14 @@ func startTestPostgres(t *testing.T) string {
 		out, err := cmd.Output()
 		if err != nil {
 			pgAddr = ""
-			pgErr = fmt.Errorf("docker run postgres: %v: %s", err, out)
+			pgErr = fmt.Errorf("docker run postgres: %w: %s", err, out)
 			return
 		}
 		pgContainer = name
 		// Discover the mapped port.
 		portOut, err := exec.Command("docker", "port", name, "5432").Output()
 		if err != nil {
-			pgErr = fmt.Errorf("docker port: %v", err)
+			pgErr = fmt.Errorf("docker port: %w", err)
 			return
 		}
 		parts := strings.Split(strings.TrimSpace(string(portOut)), ":")
@@ -168,7 +168,7 @@ func verifyRestoredContent(t *testing.T, verifyURI string) error {
 		}
 		var id int
 		fmt.Sscanf(parts[0], "%d", &id)
-		want := fmt.Sprintf("%x", md5.Sum(fmt.Appendf(nil, "%d", id)))
+		want := fmt.Sprintf("%x", md5.Sum(fmt.Appendf(nil, "%d", id))) //nolint:gosec // G401: matches the fixture checksum format
 		if parts[1] != want {
 			return fmt.Errorf("content mismatch at id %d: got %q want %q", id, parts[1], want)
 		}

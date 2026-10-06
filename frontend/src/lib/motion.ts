@@ -1,7 +1,8 @@
 import type { PointerEvent } from "react";
 
 export const prefersReducedMotion = () =>
-  typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Pointer handler for `.spotlight` surfaces: feeds the cursor position to CSS. */
 export function spotlight(e: PointerEvent<HTMLElement>) {

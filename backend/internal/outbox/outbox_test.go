@@ -210,7 +210,8 @@ func TestLinkLocalDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Do(req); err == nil {
+	if resp, err := client.Do(req); err == nil {
+		resp.Body.Close()
 		t.Fatal("link-local metadata destination must be refused")
 	}
 }

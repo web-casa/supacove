@@ -7,7 +7,13 @@ import { ConfirmButton } from "./ConfirmButton";
 function renderWithI18n(onConfirm: () => void) {
   return render(
     <I18nProvider>
-      <ConfirmButton icon={Trash2} tip="Remove" prompt={'Remove "prod"?'} confirmLabel="Remove" onConfirm={onConfirm} />
+      <ConfirmButton
+        icon={Trash2}
+        tip="Remove"
+        prompt={'Remove "prod"?'}
+        confirmLabel="Remove"
+        onConfirm={onConfirm}
+      />
     </I18nProvider>,
   );
 }
@@ -34,7 +40,9 @@ describe("ConfirmButton two-step destructive action", () => {
     const onConfirm = vi.fn();
     const { container } = renderWithI18n(onConfirm);
     fireEvent.click(screen.getByRole("button"));
-    fireEvent.keyDown(container.querySelector('[role="group"]')!, { key: "Escape" });
+    fireEvent.keyDown(container.querySelector('[role="group"]')!, {
+      key: "Escape",
+    });
     expect(onConfirm).not.toHaveBeenCalled();
     expect(screen.queryByText('Remove "prod"?')).not.toBeInTheDocument();
   });

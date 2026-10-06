@@ -199,7 +199,7 @@ func openUnderStaging(stagingDir, path string) (*os.File, os.FileInfo, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	f, err := root.Open(rel)
 	if err != nil {
 		return nil, nil, err

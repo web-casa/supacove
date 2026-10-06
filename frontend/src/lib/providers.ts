@@ -29,41 +29,66 @@ export const PROVIDERS: ProviderInfo[] = [
     label: "Supabase",
     taglineKey: "providers.supabase.tagline",
     icon: Zap,
-    example: "postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres",
+    example:
+      "postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres",
     defaultSsl: "require",
     defaultMode: "uri",
-    stepKeys: ["providers.supabase.s1", "providers.supabase.s2", "providers.supabase.s3", "providers.supabase.s4"],
+    stepKeys: [
+      "providers.supabase.s1",
+      "providers.supabase.s2",
+      "providers.supabase.s3",
+      "providers.supabase.s4",
+    ],
   },
   {
     id: "neon",
     label: "Neon",
     taglineKey: "providers.neon.tagline",
     icon: Leaf,
-    example: "postgresql://<user>:<password>@ep-<name>.<region>.aws.neon.tech/<db>?sslmode=require",
+    example:
+      "postgresql://<user>:<password>@ep-<name>.<region>.aws.neon.tech/<db>?sslmode=require",
     defaultSsl: "require",
     defaultMode: "uri",
-    stepKeys: ["providers.neon.s1", "providers.neon.s2", "providers.neon.s3", "providers.neon.s4"],
+    stepKeys: [
+      "providers.neon.s1",
+      "providers.neon.s2",
+      "providers.neon.s3",
+      "providers.neon.s4",
+    ],
   },
   {
     id: "railway",
     label: "Railway",
     taglineKey: "providers.railway.tagline",
     icon: TrainFront,
-    example: "postgresql://postgres:<password>@<name>.proxy.rlwy.net:<port>/railway",
+    example:
+      "postgresql://postgres:<password>@<name>.proxy.rlwy.net:<port>/railway",
     defaultSsl: "require",
     defaultMode: "uri",
-    stepKeys: ["providers.railway.s1", "providers.railway.s2", "providers.railway.s3", "providers.railway.s4"],
+    stepKeys: [
+      "providers.railway.s1",
+      "providers.railway.s2",
+      "providers.railway.s3",
+      "providers.railway.s4",
+    ],
   },
   {
     id: "generic",
     labelKey: "providers.generic.label",
     taglineKey: "providers.generic.tagline",
     icon: Server,
-    example: "postgresql://backup:<password>@db.internal:5432/app?sslmode=verify-full",
+    example:
+      "postgresql://backup:<password>@db.internal:5432/app?sslmode=verify-full",
     defaultSsl: "require",
     defaultMode: "fields",
-    stepKeys: ["providers.generic.s1", "providers.generic.s2", "providers.generic.s3", "providers.generic.s4"],
+    stepKeys: [
+      "providers.generic.s1",
+      "providers.generic.s2",
+      "providers.generic.s3",
+      "providers.generic.s4",
+    ],
   },
 ];
 
-export const providerInfo = (id: Provider): ProviderInfo => PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[3];
+export const providerInfo = (id: Provider): ProviderInfo =>
+  PROVIDERS.find((p) => p.id === id) ?? PROVIDERS[3];

@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -24,13 +25,17 @@ import (
 // can fail selectively, and can serve corrupted content on Get (verifying
 // that verification catches it).
 type fakeBackend struct {
-	mu       sync.Mutex
-	prefix   string
-	objects  map[string][]byte
-	failPut  map[string]int  // key -> remaining failures
-	corrupt  map[string]bool // keys whose Get returns different content
-	aborted  int
-	putCount int
+	mu      sync.Mutex
+	prefix  string
+	objects map[string][]byte
+	failPut map[string]int  // key -> remaining failures
+	corrupt map[string]bool // keys whose Get returns different content
+	// failAnyPut makes EVERY Put fail before storing (multipart interrupted).
+	failAnyPut bool
+	// losePutResponse stores the object but reports a transport error —
+	// the "object committed, response lost" fault-matrix row.
+	losePutResponse bool
+	putCount        int
 }
 
 func newFakeBackend(prefix string) *fakeBackend {
@@ -46,6 +51,9 @@ func (f *fakeBackend) Put(ctx context.Context, key string, r io.Reader, size int
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.putCount++
+	if f.failAnyPut {
+		return fmt.Errorf("injected transport failure (multipart interrupted)")
+	}
 	if f.failPut[key] > 0 {
 		f.failPut[key]--
 		return fmt.Errorf("injected put failure for %s", key)
@@ -55,6 +63,11 @@ func (f *fakeBackend) Put(ctx context.Context, key string, r io.Reader, size int
 		return err
 	}
 	f.objects[key] = data
+	if f.losePutResponse {
+		// The object IS stored but the client sees a transport error —
+		// the "committed remotely, response lost" fault row.
+		return fmt.Errorf("injected lost response after store")
+	}
 	return nil
 }
 
@@ -285,7 +298,7 @@ func TestCreateDestinationEncryptedAndValidated(t *testing.T) {
 	// Duplicate live name rejected.
 	if _, err := p.CreateDestination(context.Background(), Destination{
 		Name: "good", Platform: "s3", Bucket: "bucket2", AccessKey: "A", SecretKey: "S",
-	}, false); err != ErrDestinationNameExists {
+	}, false); !errors.Is(err, ErrDestinationNameExists) {
 		t.Fatalf("duplicate name: want ErrDestinationNameExists, got %v", err)
 	}
 
@@ -504,9 +517,13 @@ func TestReconcileClassification(t *testing.T) {
 
 	// an uploading job whose partial object exists remotely
 	uploading := p.seedCommittedJob(t, dbID, destID, "failed", "")
-	p.store.DB.Exec(`UPDATE jobs SET remote_state='uploading' WHERE id = ?`, uploading)
+	if _, err := p.store.DB.Exec(`UPDATE jobs SET remote_state='uploading' WHERE id = ?`, uploading); err != nil {
+		t.Fatal(err)
+	}
 	var uploadUUID string
-	p.store.DB.QueryRow(`SELECT backup_uuid FROM jobs WHERE id = ?`, uploading).Scan(&uploadUUID)
+	if err := p.store.DB.QueryRow(`SELECT backup_uuid FROM jobs WHERE id = ?`, uploading).Scan(&uploadUUID); err != nil {
+		t.Fatal(err)
+	}
 	uploadKey := fmt.Sprintf("dest/backups/%s.dump.age", uploadUUID)
 	p.backend.objects[uploadKey] = []byte("partial")
 

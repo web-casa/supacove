@@ -74,12 +74,15 @@ func (r *Runner) Reconcile(ctx context.Context, destID int64) (*ReconcileReport,
 		var id int64
 		var rf ref
 		if err := rows.Scan(&id, &rf.state, &rf.objKey, &rf.manKey); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			return nil, err
 		}
 		byJob[id] = rf
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	expected := map[string]bool{}
 	for id, rf := range byJob {

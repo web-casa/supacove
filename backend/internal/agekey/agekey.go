@@ -70,7 +70,7 @@ func EncryptStream(recipient string, r io.Reader, w io.Writer) error {
 		return fmt.Errorf("start age encryption: %w", err)
 	}
 	if _, err := io.Copy(aw, r); err != nil {
-		aw.Close()
+		_ = aw.Close() // cleanup on the failure path; the copy error wins
 		return fmt.Errorf("copy into age writer: %w", err)
 	}
 	if err := aw.Close(); err != nil {

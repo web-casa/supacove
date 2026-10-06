@@ -1,4 +1,10 @@
-import { CircleAlert, CircleCheck, Info, TriangleAlert, Wand2 } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheck,
+  Info,
+  TriangleAlert,
+  Wand2,
+} from "lucide-react";
 import { useI18n } from "../i18n";
 import type { Analysis, Finding, HostPatch } from "../lib/connection";
 import { Button } from "./ui/Button";
@@ -34,7 +40,11 @@ export function ConnectionPreflight({ analysis, onFix }: Props) {
               <Icon size={14} aria-hidden />
               <span>{t(f.key, f.vars)}</span>
               {f.fix && (
-                <Button size="sm" icon={Wand2} onClick={() => onFix(f.fix!.patch)}>
+                <Button
+                  size="sm"
+                  icon={Wand2}
+                  onClick={() => onFix(f.fix!.patch)}
+                >
                   {t(f.fix.labelKey)}
                 </Button>
               )}

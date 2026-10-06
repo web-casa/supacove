@@ -8,11 +8,23 @@ const MAX_LABELLED = 8;
 /** One trace per database: protected ones beat, expired ones flatline. */
 export function VitalsStrip({ dbs }: { dbs: OverviewEntry[] }) {
   const { t } = useI18n();
-  const summary = dbs.map((d) => `${d.name}: ${t(protectionMeta(d.state).label)}`).join(", ");
+  const summary = dbs
+    .map((d) => `${d.name}: ${t(protectionMeta(d.state).label)}`)
+    .join(", ");
   return (
-    <div className="vitals" role="img" aria-label={t("vitals.aria", { summary })}>
+    <div
+      className="vitals"
+      role="img"
+      aria-label={t("vitals.aria", { summary })}
+    >
       <div className="vitals-screen">
-        <Waveform segments={dbs.map((d) => ({ key: d.databaseId, tone: rowTone(d), kind: waveKind(d) }))} />
+        <Waveform
+          segments={dbs.map((d) => ({
+            key: d.databaseId,
+            tone: rowTone(d),
+            kind: waveKind(d),
+          }))}
+        />
         <div className="vitals-cells">
           {dbs.map((d) => (
             <span

@@ -2,7 +2,13 @@ import type { ReactNode } from "react";
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-react";
 import type { Tone } from "../../lib/status";
 
-const icons = { danger: CircleAlert, warn: TriangleAlert, ok: CircleCheck, neutral: Info, info: Info };
+const icons = {
+  danger: CircleAlert,
+  warn: TriangleAlert,
+  ok: CircleCheck,
+  neutral: Info,
+  info: Info,
+};
 
 interface Props {
   tone?: Tone;

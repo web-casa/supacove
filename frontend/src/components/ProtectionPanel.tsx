@@ -29,7 +29,12 @@ export function ProtectionPanel() {
       actions={
         !adding &&
         dbs.length > 0 && (
-          <Button variant="primary" size="sm" icon={Plus} onClick={() => setAdding(true)}>
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Plus}
+            onClick={() => setAdding(true)}
+          >
             {t("panel.protection.add")}
           </Button>
         )
@@ -39,7 +44,9 @@ export function ProtectionPanel() {
 
       {overview.isPending && <SkeletonRows />}
       {overview.isError && !overview.data && (
-        <InlineMessage>{t("health.unavailable", { msg: errorMessage(overview.error) })}</InlineMessage>
+        <InlineMessage>
+          {t("health.unavailable", { msg: errorMessage(overview.error) })}
+        </InlineMessage>
       )}
 
       {overview.data && dbs.length === 0 && !adding && (
@@ -47,7 +54,11 @@ export function ProtectionPanel() {
           icon={DatabaseZap}
           title={t("panel.protection.empty.title")}
           action={
-            <Button variant="primary" icon={Plus} onClick={() => setAdding(true)}>
+            <Button
+              variant="primary"
+              icon={Plus}
+              onClick={() => setAdding(true)}
+            >
               {t("panel.protection.empty.cta")}
             </Button>
           }
@@ -57,7 +68,11 @@ export function ProtectionPanel() {
       )}
 
       {dbs.length > 0 && (
-        <div className="table table-dbs stagger" role="table" aria-label={t("table.aria.databases")}>
+        <div
+          className="table table-dbs stagger"
+          role="table"
+          aria-label={t("table.aria.databases")}
+        >
           <div className="thead" role="row">
             <span role="columnheader">{t("table.col.database")}</span>
             <span role="columnheader">{t("table.col.protection")}</span>
@@ -72,9 +87,15 @@ export function ProtectionPanel() {
             <DatabaseRow
               key={d.databaseId}
               entry={d}
-              tasks={(tasks.data?.tasks ?? []).filter((t) => t.databaseId === d.databaseId)}
+              tasks={(tasks.data?.tasks ?? []).filter(
+                (t) => t.databaseId === d.databaseId,
+              )}
               scheduleOpen={scheduleFor === d.databaseId}
-              onToggleSchedule={() => setScheduleFor(scheduleFor === d.databaseId ? null : d.databaseId)}
+              onToggleSchedule={() =>
+                setScheduleFor(
+                  scheduleFor === d.databaseId ? null : d.databaseId,
+                )
+              }
               onCloseSchedule={() => setScheduleFor(null)}
             />
           ))}

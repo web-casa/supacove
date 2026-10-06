@@ -4,2198 +4,2234 @@
  */
 
 export interface paths {
-    "/healthz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Liveness (process alive). Anonymous and information-free. */
-        get: operations["getHealthz"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+  "/healthz": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/ready": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data. */
-        get: operations["getReady"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Liveness (process alive). Anonymous and information-free. */
+    get: operations["getHealthz"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/ready": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/health/details": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Detailed runtime diagnostics. Requires authentication. */
-        get: operations["getHealthDetails"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Readiness (local state: DB reachable, schema migrated). Anonymous, no sensitive data. */
+    get: operations["getReady"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/health/details": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/auth/bootstrap": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create the initial admin using a one-time token from the local CLI.
-         * @description Fails with 403 if the token is unknown, used or expired; 409 if any
-         *     admin user already exists. This endpoint can never be used by a
-         *     public first visitor without the locally printed token.
-         */
-        post: operations["postAuthBootstrap"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Detailed runtime diagnostics. Requires authentication. */
+    get: operations["getHealthDetails"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/bootstrap": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Log in with username and password. */
-        post: operations["postAuthLogin"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /**
+     * Create the initial admin using a one-time token from the local CLI.
+     * @description Fails with 403 if the token is unknown, used or expired; 409 if any
+     *     admin user already exists. This endpoint can never be used by a
+     *     public first visitor without the locally printed token.
+     */
+    post: operations["postAuthBootstrap"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/login": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/auth/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Revoke the current session. */
-        post: operations["postAuthLogout"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Log in with username and password. */
+    post: operations["postAuthLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/logout": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/age/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** age encryption configuration (protocol B). Recipient is public. */
-        get: operations["getAgeStatus"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Revoke the current session. */
+    post: operations["postAuthLogout"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/age/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/age/recipient": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Set the age recipient (public key) used to encrypt backups. */
-        put: operations["putAgeRecipient"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** age encryption configuration (protocol B). Recipient is public. */
+    get: operations["getAgeStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/age/recipient": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/databases": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Registered backup targets (no secrets). */
-        get: operations["listDatabases"];
-        put?: never;
-        /** Register a database after a live connection test. */
-        post: operations["createDatabase"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    /** Set the age recipient (public key) used to encrypt backups. */
+    put: operations["putAgeRecipient"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/databases": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/databases/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** One database with its latest job summary. */
-        get: operations["getDatabase"];
-        put?: never;
-        post?: never;
-        /** Remove the registration. Committed artifacts are kept. */
-        delete: operations["deleteDatabase"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Registered backup targets (no secrets). */
+    get: operations["listDatabases"];
+    put?: never;
+    /** Register a database after a live connection test. */
+    post: operations["createDatabase"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/databases/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/databases/{id}/backups": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Enqueue a backup job for this database (returns immediately). */
-        post: operations["triggerBackup"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** One database with its latest job summary. */
+    get: operations["getDatabase"];
+    put?: never;
+    post?: never;
+    /** Remove the registration. Committed artifacts are kept. */
+    delete: operations["deleteDatabase"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/databases/{id}/backups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Recent jobs across all databases (newest first). */
-        get: operations["listTasks"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Enqueue a backup job for this database (returns immediately). */
+    post: operations["triggerBackup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tasks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/tasks/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** One job with artifact and manifest details. */
-        get: operations["getTask"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Recent jobs across all databases (newest first). */
+    get: operations["listTasks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tasks/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/tasks/{id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Request cancellation of a pending or running job. */
-        post: operations["cancelTask"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** One job with artifact and manifest details. */
+    get: operations["getTask"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tasks/{id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/destinations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List storage destinations (no secrets). */
-        get: operations["listDestinations"];
-        put?: never;
-        /** Create a destination after a live diagnostic test. */
-        post: operations["createDestination"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Request cancellation of a pending or running job. */
+    post: operations["cancelTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/destinations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/destinations/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Soft-delete a destination (refused while an upload is in flight). */
-        delete: operations["deleteDestination"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** List storage destinations (no secrets). */
+    get: operations["listDestinations"];
+    put?: never;
+    /** Create a destination after a live diagnostic test. */
+    post: operations["createDestination"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/destinations/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/destinations/{id}/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Re-run the live diagnostic write/read/delete cycle. */
-        post: operations["testDestination"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Soft-delete a destination (refused while an upload is in flight). */
+    delete: operations["deleteDestination"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/destinations/{id}/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/destinations/{id}/reconcile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Read-only comparison of remote objects against job references. */
-        post: operations["reconcileDestination"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Re-run the live diagnostic write/read/delete cycle. */
+    post: operations["testDestination"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/destinations/{id}/reconcile": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/databases/{id}/destination": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Attach or clear the destination for a database. */
-        put: operations["assignDatabaseDestination"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Read-only comparison of remote objects against job references. */
+    post: operations["reconcileDestination"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/databases/{id}/destination": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/tasks/{id}/download-url": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Presigned GET URL for a remotely committed backup (15 min). */
-        get: operations["getTaskDownloadURL"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    /** Attach or clear the destination for a database. */
+    put: operations["assignDatabaseDestination"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tasks/{id}/download-url": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/tasks/{id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Stream the local staged artifact (local-only backups). */
-        get: operations["downloadTask"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Presigned GET URL for a remotely committed backup (15 min). */
+    get: operations["getTaskDownloadURL"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tasks/{id}/download": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/tasks/{id}/recovery-kit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Stream the generated restore.sh recovery kit for this backup.
-         * @description The kit is a self-contained POSIX sh script (restore.sh) embedding the ciphertext checksum, the key id and platform-specific guidance. It is generated for every successful backup and regenerated at startup if missing. Run it with `sh restore.sh`, never by executing it directly.
-         */
-        get: operations["downloadRecoveryKit"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Stream the local staged artifact (local-only backups). */
+    get: operations["downloadTask"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/tasks/{id}/recovery-kit": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/auth/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Current authenticated user. */
-        get: operations["getAuthMe"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /**
+     * Stream the generated restore.sh recovery kit for this backup.
+     * @description The kit is a self-contained POSIX sh script (restore.sh) embedding the ciphertext checksum, the key id and platform-specific guidance. It is generated for every successful backup and regenerated at startup if missing. Run it with `sh restore.sh`, never by executing it directly.
+     */
+    get: operations["downloadRecoveryKit"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/auth/me": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/databases/{id}/schedule": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Schedule, freshness and heartbeat configuration for a database. */
-        get: operations["getDatabaseSchedule"];
-        /**
-         * Update schedule, freshness and heartbeat configuration.
-         * @description Heartbeat URL accepts only http/https. The dead-man switch fires on silence: the success ping is gated on remote commit AND snapshot age (period+grace); failures ping url+"/fail".
-         */
-        put: operations["putDatabaseSchedule"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Current authenticated user. */
+    get: operations["getAuthMe"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/databases/{id}/schedule": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/webhooks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List configured webhook targets. */
-        get: operations["listWebhooks"];
-        put?: never;
-        /** Register a webhook target. */
-        post: operations["createWebhook"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Schedule, freshness and heartbeat configuration for a database. */
+    get: operations["getDatabaseSchedule"];
+    /**
+     * Update schedule, freshness and heartbeat configuration.
+     * @description Heartbeat URL accepts only http/https. The dead-man switch fires on silence: the success ping is gated on remote commit AND snapshot age (period+grace); failures ping url+"/fail".
+     */
+    put: operations["putDatabaseSchedule"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/webhooks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/webhooks/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Soft-delete a webhook target. */
-        delete: operations["deleteWebhook"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** List configured webhook targets. */
+    get: operations["listWebhooks"];
+    put?: never;
+    /** Register a webhook target. */
+    post: operations["createWebhook"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/webhooks/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/webhooks/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Synchronously deliver a test event to a webhook URL. */
-        post: operations["testWebhook"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Soft-delete a webhook target. */
+    delete: operations["deleteWebhook"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/webhooks/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/notifications": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Recent notification-outbox entries (delivery state machine). */
-        get: operations["listNotifications"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Synchronously deliver a test event to a webhook URL. */
+    post: operations["testWebhook"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/notifications": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Aggregate backup statistics (Phase 8 dashboard). */
-        get: operations["getStats"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Recent notification-outbox entries (delivery state machine). */
+    get: operations["listNotifications"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/stats": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/overview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Per-database protection state (the homepage answer).
-         * @description Answers "which databases lack a fresh, verified, successful backup": state is never | expired | fresh; unverified and failing are orthogonal flags (fresh-but-unverified and fresh-with-failed-retry are distinct concerns and shown separately).
-         */
-        get: operations["getOverview"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Aggregate backup statistics (Phase 8 dashboard). */
+    get: operations["getStats"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/overview": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
+    /**
+     * Per-database protection state (the homepage answer).
+     * @description Answers "which databases lack a fresh, verified, successful backup": state is never | expired | fresh; unverified and failing are orthogonal flags (fresh-but-unverified and fresh-with-failed-retry are distinct concerns and shown separately).
+     */
+    get: operations["getOverview"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        ScheduleConfig: {
-            /** Format: int64 */
-            databaseId: number;
-            /** @description Standard 5-field crontab; empty = no schedule. */
-            cronExpr?: string;
-            /** @description IANA timezone for the cron evaluation. */
-            cronTz: string;
-            /** @description Freshness threshold; 0 disables expiry checks. */
-            maxAgeHours: number;
-            paused: boolean;
-            /** @description Dead-man switch URL (http/https). Empty inherits the process fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly disables the heartbeat for this database. */
-            heartbeatUrl?: string;
-            /** @description Expected backup period for the dead-man switch. 0 means success pings are NOT sent (without a period there are no silence semantics to vouch for); fail pings still fire. A heartbeatUrl (except the "-" disable marker) requires a positive period. */
-            heartbeatPeriodHours: number;
-            /** @description Extra tolerance added to the period before silence alarms. */
-            heartbeatGraceHours: number;
-            /** Format: int64 */
-            lastScheduledAt?: number | null;
-            /** Format: int64 */
-            lastHeartbeatAt?: number | null;
-        };
-        ScheduleUpdate: {
-            cronExpr?: string;
-            cronTz?: string;
-            maxAgeHours?: number;
-            paused?: boolean;
-            /** @description http/https only; must not be a link-local address. Empty inherits the process fallback; "-" explicitly disables. A heartbeat URL requires heartbeatPeriodHours > 0 (silence semantics). */
-            heartbeatUrl?: string;
-            heartbeatPeriodHours?: number;
-            heartbeatGraceHours?: number;
-        };
-        Webhook: {
-            /** Format: int64 */
-            id: number;
-            name: string;
-            /** @description Returned only to the authenticated admin; never logged by the server. */
-            url: string;
-            events: ("backup_failed" | "backup_expired" | "verification_failed")[];
-            /** Format: int64 */
-            createdAt: number;
-        };
-        WebhookCreate: {
-            name: string;
-            /** Format: password */
-            url: string;
-            /**
-             * @default [
-             *       "backup_failed",
-             *       "backup_expired"
-             *     ]
-             */
-            events: ("backup_failed" | "backup_expired" | "verification_failed")[];
-        };
-        WebhookList: {
-            webhooks: components["schemas"]["Webhook"][];
-        };
-        WebhookTestResult: {
-            delivered: boolean;
-            detail?: string;
-        };
-        Notification: {
-            /** Format: int64 */
-            id: number;
-            eventId: string;
-            /** @enum {string} */
-            eventType: "backup_failed" | "backup_expired" | "verification_failed";
-            databaseName: string;
-            /** @enum {string} */
-            state: "pending" | "delivering" | "delivered" | "dead";
-            attempts: number;
-            lastError?: string;
-            /** Format: int64 */
-            createdAt: number;
-            /** Format: int64 */
-            deliveredAt?: number | null;
-        };
-        NotificationList: {
-            notifications: components["schemas"]["Notification"][];
-        };
-        OverviewEntry: {
-            /** Format: int64 */
-            databaseId: number;
-            name: string;
-            /** @enum {string} */
-            platform: "supabase" | "neon" | "railway" | "generic";
-            /**
-             * @description fresh = a succeeded backup exists whose snapshot age is within maxAgeHours (or no threshold set); expired = threshold exceeded; never = no succeeded backup. A FAILED RETRY does not make a database fresh — state derives from the last SUCCESS.
-             * @enum {string}
-             */
-            state: "fresh" | "expired" | "never";
-            /** Format: int64 */
-            lastSuccessAt?: number | null;
-            /** Format: double */
-            lastSuccessAgeHours?: number | null;
-            /**
-             * @description Verification state of the newest succeeded backup (未验证 shown separately from freshness).
-             * @enum {string}
-             */
-            lastSuccessVerifyStatus?: "" | "pending" | "running" | "verified" | "failed" | "unsupported" | "skipped";
-            /**
-             * @description Newest job of any status; a failed retry is visible here without changing `state`.
-             * @enum {string}
-             */
-            lastJobStatus?: "" | "pending" | "running" | "succeeded" | "failed" | "canceled" | "interrupted";
-            schedulePaused?: boolean;
-            /** @description A cron schedule exists and the next fire time has passed. */
-            scheduleDue?: boolean;
-            maxAgeHours?: number;
-        };
-        StatsSummary: {
-            /** Format: int64 */
-            totalJobs: number;
-            /** Format: int64 */
-            succeeded: number;
-            /** Format: int64 */
-            failed: number;
-            /** Format: int64 */
-            canceled: number;
-            /**
-             * Format: double
-             * @description succeeded / terminal-state jobs; null when nothing has finished.
-             */
-            successRate: number | null;
-            /**
-             * Format: double
-             * @description Succeeded exports over jobs that began executing (started_at set). Jobs canceled while queued never attempted a dump and are excluded from both numerator and denominator; jobs canceled or interrupted after starting count as not-exported (conservative denominator).
-             */
-            exportSuccessRate?: number | null;
-            /**
-             * Format: double
-             * @description Remote commits vs upload failures (null when no upload attempted).
-             */
-            remoteSuccessRate?: number | null;
-            /**
-             * Format: double
-             * @description verified vs failed/unsupported among succeeded backups (null when none verified).
-             */
-            verifySuccessRate?: number | null;
-            /**
-             * Format: double
-             * @description Delivered vs dead entries in the notification outbox (null when the outbox is empty).
-             */
-            notifySuccessRate?: number | null;
-            /**
-             * Format: double
-             * @description Mean BACKUP EXECUTION duration (dump through remote commit — it includes the upload, not only pg_dump) over succeeded jobs that recorded one; null when no job has a measurement.
-             */
-            avgDurationSecs?: number | null;
-            /**
-             * Format: int64
-             * @description Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind. Records written by releases that measured after encryption may reflect ciphertext size (equal to totalArtifactBytes' per-job value) rather than the smaller pre-encryption archive.
-             */
-            totalDumpBytes?: number;
-            /**
-             * Format: int64
-             * @description Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
-             */
-            totalArtifactBytes: number;
-            /**
-             * Format: int64
-             * @description Sum of the NEWEST known source database physical size per database (volume metric 1; unmeasured databases count as 0).
-             */
-            totalSourceBytes?: number;
-            /** Format: int64 */
-            lastSuccessAt?: number;
-            databases: number;
-            destinations: number;
-            /** Format: int64 */
-            uptimeSeconds?: number;
-        };
-        Overview: {
-            databases: components["schemas"]["OverviewEntry"][];
-        };
-        HealthStatus: {
-            /** @enum {string} */
-            status: "ok" | "unavailable";
-        };
-        HealthDetails: {
-            version: string;
-            commit: string;
-            goVersion: string;
-            /** Format: int64 */
-            uptimeSeconds: number;
-            sqliteOpenConns?: number;
-        };
-        User: {
-            /** Format: int64 */
-            id: number;
-            username: string;
-            /**
-             * Format: int64
-             * @description Unix seconds.
-             */
-            createdAt: number;
-        };
-        BootstrapRequest: {
-            /** @description One-time token printed by `supabackup bootstrap`. */
-            token: string;
-            username: string;
-            /** Format: password */
-            password: string;
-        };
-        LoginRequest: {
-            username: string;
-            /** Format: password */
-            password: string;
-        };
-        Destination: {
-            /** Format: int64 */
-            id: number;
-            name: string;
-            /** @enum {string} */
-            platform: "s3" | "r2" | "b2";
-            endpoint?: string;
-            region?: string;
-            bucket: string;
-            prefix?: string;
-            verifyReadback?: boolean;
-            keepRemote: number;
-            keepDays: number;
-            /** Format: int64 */
-            createdAt: number;
-            /** Format: int64 */
-            updatedAt: number;
-        };
-        DestinationList: {
-            destinations: components["schemas"]["Destination"][];
-        };
-        DestinationCreate: {
-            name: string;
-            /**
-             * @default s3
-             * @enum {string}
-             */
-            platform: "s3" | "r2" | "b2";
-            /** @description Required for r2/b2. */
-            endpoint?: string;
-            region?: string;
-            bucket: string;
-            prefix?: string;
-            accessKey: string;
-            /** Format: password */
-            secretKey: string;
-            /** @default true */
-            verifyReadback: boolean;
-            /** @default 10 */
-            keepRemote: number;
-            /** @default 0 */
-            keepDays: number;
-        };
-        DestinationAssign: {
-            /**
-             * Format: int64
-             * @description 0/null clears the assignment.
-             */
-            destinationId?: number | null;
-        };
-        ReconcileReport: {
-            /** Format: int64 */
-            destinationId: number;
-            /** Format: int64 */
-            generatedAt: number;
-            remoteObjects: number;
-            matched: number;
-            orphaned?: string[];
-            missing?: string[];
-            uncommitted?: string[];
-        };
-        DownloadURL: {
-            /** Format: uri */
-            url: string;
-            /** Format: int64 */
-            expiresAt: number;
-        };
-        AgeStatus: {
-            configured: boolean;
-            /** @description Public age recipient (empty when not configured). */
-            recipient?: string;
-            /** @description Recipient fingerprint (protocol B). */
-            keyId?: string;
-        };
-        AgeRecipientRequest: {
-            /** @description age recipient string (age1…). */
-            recipient: string;
-        };
-        Database: {
-            /** Format: int64 */
-            id: number;
-            name: string;
-            /** @enum {string} */
-            platform: "supabase" | "neon" | "railway" | "generic";
-            envTag: string;
-            serverVersion: string;
-            /** @description Persisted TLS mode for this target (round-1 review P1-09 —持续可见). */
-            sslMode: string;
-            /** @description Registration-time warning when the endpoint looks like a pooled connection that pg_dump cannot use (Supabase transaction pooler, Neon '-pooler' endpoint). Present on the create response when detected; absent otherwise. */
-            poolingWarning?: string;
-            lastTask?: components["schemas"]["Task"];
-            /** Format: int64 */
-            createdAt: number;
-            /** Format: int64 */
-            updatedAt: number;
-        };
-        DatabaseList: {
-            databases: components["schemas"]["Database"][];
-        };
-        DatabaseCreate: {
-            name: string;
-            /**
-             * @default generic
-             * @enum {string}
-             */
-            platform: "supabase" | "neon" | "railway" | "generic";
-            envTag?: string;
-            /**
-             * Format: password
-             * @description postgres:// URI; stored AES-GCM-encrypted, never returned.
-             */
-            connectionUri: string;
-        };
-        Task: {
-            /** Format: int64 */
-            id: number;
-            /** Format: int64 */
-            databaseId: number;
-            /** @enum {string} */
-            status: "pending" | "running" | "succeeded" | "failed" | "canceled" | "interrupted";
-            attempt: number;
-            /** @enum {string} */
-            errorClass?: "" | "network" | "auth" | "permission" | "client_version" | "disk" | "storage_upload" | "verification" | "unknown";
-            /** @description Operator-facing troubleshooting steps for the error class; present on failed tasks only. Never embeds job-specific data. */
-            remediation?: string;
-            errorMessage?: string;
-            artifactSha256?: string;
-            /** Format: int64 */
-            artifactSize?: number;
-            hasManifest?: boolean;
-            cancelRequested?: boolean;
-            /**
-             * @description Protocol C remote-commit state (empty = local-only).
-             * @enum {string}
-             */
-            remoteState?: "" | "uploading" | "committed" | "deleted";
-            /** Format: int64 */
-            scheduledAt?: number;
-            /** Format: int64 */
-            startedAt?: number | null;
-            /** Format: int64 */
-            finishedAt?: number | null;
-            /**
-             * @description Auto-detected source platform (drives the recovery kit).
-             * @enum {string}
-             */
-            platform?: "supabase" | "neon" | "railway" | "generic";
-            /**
-             * @description Restore-verification state machine. Empty only for jobs created before this field existed; pending/running are transitional; verified/failed/unsupported are verifier outcomes; skipped carries the reason in verifyDetail.
-             * @enum {string}
-             */
-            verifyStatus?: "" | "pending" | "running" | "verified" | "failed" | "unsupported" | "skipped";
-            /** @description Human-readable verification outcome or skip reason (redacted). */
-            verifyDetail?: string;
-            /**
-             * Format: int64
-             * @description User tables found in the restored throwaway instance.
-             */
-            verifyTables?: number;
-            /** Format: double */
-            verifyDurationSecs?: number;
-            /** @description How verification was proven (e.g. embedded-local:18). */
-            verifyProfile?: string;
-            /** @description A generated restore.sh kit is available for download. */
-            hasRecoveryKit?: boolean;
-        };
-        TaskList: {
-            tasks: components["schemas"]["Task"][];
-        };
-        Error: {
-            /** @description Stable machine-readable error class. */
-            code: string;
-            /** @description Human-readable, credential-free. */
-            message: string;
-        };
+  schemas: {
+    ScheduleConfig: {
+      /** Format: int64 */
+      databaseId: number;
+      /** @description Standard 5-field crontab; empty = no schedule. */
+      cronExpr?: string;
+      /** @description IANA timezone for the cron evaluation. */
+      cronTz: string;
+      /** @description Freshness threshold; 0 disables expiry checks. */
+      maxAgeHours: number;
+      paused: boolean;
+      /** @description Dead-man switch URL (http/https). Empty inherits the process fallback (SB_HEARTBEAT_URL); the reserved value "-" explicitly disables the heartbeat for this database. */
+      heartbeatUrl?: string;
+      /** @description Expected backup period for the dead-man switch. 0 means success pings are NOT sent (without a period there are no silence semantics to vouch for); fail pings still fire. A heartbeatUrl (except the "-" disable marker) requires a positive period. */
+      heartbeatPeriodHours: number;
+      /** @description Extra tolerance added to the period before silence alarms. */
+      heartbeatGraceHours: number;
+      /** Format: int64 */
+      lastScheduledAt?: number | null;
+      /** Format: int64 */
+      lastHeartbeatAt?: number | null;
     };
-    responses: {
-        /** @description Request body exceeds the allowed size. */
-        PayloadTooLarge: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description Content-Type must be application/json. */
-        UnsupportedMediaType: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description Rate limited; retry later. */
-        RateLimited: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description Unexpected internal error (nothing persisted, no state change reported as success). */
-        Internal: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description Temporary overload (e.g. password-hashing budget exhausted); retry later. */
-        Overloaded: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                "application/json": components["schemas"]["Error"];
-            };
-        };
+    ScheduleUpdate: {
+      cronExpr?: string;
+      cronTz?: string;
+      maxAgeHours?: number;
+      paused?: boolean;
+      /** @description http/https only; must not be a link-local address. Empty inherits the process fallback; "-" explicitly disables. A heartbeat URL requires heartbeatPeriodHours > 0 (silence semantics). */
+      heartbeatUrl?: string;
+      heartbeatPeriodHours?: number;
+      heartbeatGraceHours?: number;
     };
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    Webhook: {
+      /** Format: int64 */
+      id: number;
+      name: string;
+      /** @description Returned only to the authenticated admin; never logged by the server. */
+      url: string;
+      events: ("backup_failed" | "backup_expired" | "verification_failed")[];
+      /** Format: int64 */
+      createdAt: number;
+    };
+    WebhookCreate: {
+      name: string;
+      /** Format: password */
+      url: string;
+      /**
+       * @default [
+       *       "backup_failed",
+       *       "backup_expired"
+       *     ]
+       */
+      events: ("backup_failed" | "backup_expired" | "verification_failed")[];
+    };
+    WebhookList: {
+      webhooks: components["schemas"]["Webhook"][];
+    };
+    WebhookTestResult: {
+      delivered: boolean;
+      detail?: string;
+    };
+    Notification: {
+      /** Format: int64 */
+      id: number;
+      eventId: string;
+      /** @enum {string} */
+      eventType: "backup_failed" | "backup_expired" | "verification_failed";
+      databaseName: string;
+      /** @enum {string} */
+      state: "pending" | "delivering" | "delivered" | "dead";
+      attempts: number;
+      lastError?: string;
+      /** Format: int64 */
+      createdAt: number;
+      /** Format: int64 */
+      deliveredAt?: number | null;
+    };
+    NotificationList: {
+      notifications: components["schemas"]["Notification"][];
+    };
+    OverviewEntry: {
+      /** Format: int64 */
+      databaseId: number;
+      name: string;
+      /** @enum {string} */
+      platform: "supabase" | "neon" | "railway" | "generic";
+      /**
+       * @description fresh = a succeeded backup exists whose snapshot age is within maxAgeHours (or no threshold set); expired = threshold exceeded; never = no succeeded backup. A FAILED RETRY does not make a database fresh — state derives from the last SUCCESS.
+       * @enum {string}
+       */
+      state: "fresh" | "expired" | "never";
+      /** Format: int64 */
+      lastSuccessAt?: number | null;
+      /** Format: double */
+      lastSuccessAgeHours?: number | null;
+      /**
+       * @description Verification state of the newest succeeded backup (未验证 shown separately from freshness).
+       * @enum {string}
+       */
+      lastSuccessVerifyStatus?:
+        | ""
+        | "pending"
+        | "running"
+        | "verified"
+        | "failed"
+        | "unsupported"
+        | "skipped";
+      /**
+       * @description Newest job of any status; a failed retry is visible here without changing `state`.
+       * @enum {string}
+       */
+      lastJobStatus?:
+        | ""
+        | "pending"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "canceled"
+        | "interrupted";
+      schedulePaused?: boolean;
+      /** @description A cron schedule exists and the next fire time has passed. */
+      scheduleDue?: boolean;
+      maxAgeHours?: number;
+    };
+    StatsSummary: {
+      /** Format: int64 */
+      totalJobs: number;
+      /** Format: int64 */
+      succeeded: number;
+      /** Format: int64 */
+      failed: number;
+      /** Format: int64 */
+      canceled: number;
+      /**
+       * Format: double
+       * @description succeeded / terminal-state jobs; null when nothing has finished.
+       */
+      successRate: number | null;
+      /**
+       * Format: double
+       * @description Succeeded exports over jobs that began executing (started_at set). Jobs canceled while queued never attempted a dump and are excluded from both numerator and denominator; jobs canceled or interrupted after starting count as not-exported (conservative denominator).
+       */
+      exportSuccessRate?: number | null;
+      /**
+       * Format: double
+       * @description Remote commits vs upload failures (null when no upload attempted).
+       */
+      remoteSuccessRate?: number | null;
+      /**
+       * Format: double
+       * @description verified vs failed/unsupported among succeeded backups (null when none verified).
+       */
+      verifySuccessRate?: number | null;
+      /**
+       * Format: double
+       * @description Delivered vs dead entries in the notification outbox (null when the outbox is empty).
+       */
+      notifySuccessRate?: number | null;
+      /**
+       * Format: double
+       * @description Mean BACKUP EXECUTION duration (dump through remote commit — it includes the upload, not only pg_dump) over succeeded jobs that recorded one; null when no job has a measurement.
+       */
+      avgDurationSecs?: number | null;
+      /**
+       * Format: int64
+       * @description Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind. Records written by releases that measured after encryption may reflect ciphertext size (equal to totalArtifactBytes' per-job value) rather than the smaller pre-encryption archive.
+       */
+      totalDumpBytes?: number;
+      /**
+       * Format: int64
+       * @description Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
+       */
+      totalArtifactBytes: number;
+      /**
+       * Format: int64
+       * @description Sum of the NEWEST known source database physical size per database (volume metric 1; unmeasured databases count as 0).
+       */
+      totalSourceBytes?: number;
+      /** Format: int64 */
+      lastSuccessAt?: number;
+      databases: number;
+      destinations: number;
+      /** Format: int64 */
+      uptimeSeconds?: number;
+    };
+    Overview: {
+      databases: components["schemas"]["OverviewEntry"][];
+    };
+    HealthStatus: {
+      /** @enum {string} */
+      status: "ok" | "unavailable";
+    };
+    HealthDetails: {
+      version: string;
+      commit: string;
+      goVersion: string;
+      /** Format: int64 */
+      uptimeSeconds: number;
+      sqliteOpenConns?: number;
+    };
+    User: {
+      /** Format: int64 */
+      id: number;
+      username: string;
+      /**
+       * Format: int64
+       * @description Unix seconds.
+       */
+      createdAt: number;
+    };
+    BootstrapRequest: {
+      /** @description One-time token printed by `supabackup bootstrap`. */
+      token: string;
+      username: string;
+      /** Format: password */
+      password: string;
+    };
+    LoginRequest: {
+      username: string;
+      /** Format: password */
+      password: string;
+    };
+    Destination: {
+      /** Format: int64 */
+      id: number;
+      name: string;
+      /** @enum {string} */
+      platform: "s3" | "r2" | "b2";
+      endpoint?: string;
+      region?: string;
+      bucket: string;
+      prefix?: string;
+      verifyReadback?: boolean;
+      keepRemote: number;
+      keepDays: number;
+      /** Format: int64 */
+      createdAt: number;
+      /** Format: int64 */
+      updatedAt: number;
+    };
+    DestinationList: {
+      destinations: components["schemas"]["Destination"][];
+    };
+    DestinationCreate: {
+      name: string;
+      /**
+       * @default s3
+       * @enum {string}
+       */
+      platform: "s3" | "r2" | "b2";
+      /** @description Required for r2/b2. */
+      endpoint?: string;
+      region?: string;
+      bucket: string;
+      prefix?: string;
+      accessKey: string;
+      /** Format: password */
+      secretKey: string;
+      /** @default true */
+      verifyReadback: boolean;
+      /** @default 10 */
+      keepRemote: number;
+      /** @default 0 */
+      keepDays: number;
+    };
+    DestinationAssign: {
+      /**
+       * Format: int64
+       * @description 0/null clears the assignment.
+       */
+      destinationId?: number | null;
+    };
+    ReconcileReport: {
+      /** Format: int64 */
+      destinationId: number;
+      /** Format: int64 */
+      generatedAt: number;
+      remoteObjects: number;
+      matched: number;
+      orphaned?: string[];
+      missing?: string[];
+      uncommitted?: string[];
+    };
+    DownloadURL: {
+      /** Format: uri */
+      url: string;
+      /** Format: int64 */
+      expiresAt: number;
+    };
+    AgeStatus: {
+      configured: boolean;
+      /** @description Public age recipient (empty when not configured). */
+      recipient?: string;
+      /** @description Recipient fingerprint (protocol B). */
+      keyId?: string;
+    };
+    AgeRecipientRequest: {
+      /** @description age recipient string (age1…). */
+      recipient: string;
+    };
+    Database: {
+      /** Format: int64 */
+      id: number;
+      name: string;
+      /** @enum {string} */
+      platform: "supabase" | "neon" | "railway" | "generic";
+      envTag: string;
+      serverVersion: string;
+      /** @description Persisted TLS mode for this target (round-1 review P1-09 —持续可见). */
+      sslMode: string;
+      /** @description Registration-time warning when the endpoint looks like a pooled connection that pg_dump cannot use (Supabase transaction pooler, Neon '-pooler' endpoint). Present on the create response when detected; absent otherwise. */
+      poolingWarning?: string;
+      lastTask?: components["schemas"]["Task"];
+      /** Format: int64 */
+      createdAt: number;
+      /** Format: int64 */
+      updatedAt: number;
+    };
+    DatabaseList: {
+      databases: components["schemas"]["Database"][];
+    };
+    DatabaseCreate: {
+      name: string;
+      /**
+       * @default generic
+       * @enum {string}
+       */
+      platform: "supabase" | "neon" | "railway" | "generic";
+      envTag?: string;
+      /**
+       * Format: password
+       * @description postgres:// URI; stored AES-GCM-encrypted, never returned.
+       */
+      connectionUri: string;
+    };
+    Task: {
+      /** Format: int64 */
+      id: number;
+      /** Format: int64 */
+      databaseId: number;
+      /** @enum {string} */
+      status:
+        | "pending"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "canceled"
+        | "interrupted";
+      attempt: number;
+      /** @enum {string} */
+      errorClass?:
+        | ""
+        | "network"
+        | "auth"
+        | "permission"
+        | "client_version"
+        | "disk"
+        | "storage_upload"
+        | "verification"
+        | "unknown";
+      /** @description Operator-facing troubleshooting steps for the error class; present on failed tasks only. Never embeds job-specific data. */
+      remediation?: string;
+      errorMessage?: string;
+      artifactSha256?: string;
+      /** Format: int64 */
+      artifactSize?: number;
+      hasManifest?: boolean;
+      cancelRequested?: boolean;
+      /**
+       * @description Protocol C remote-commit state (empty = local-only).
+       * @enum {string}
+       */
+      remoteState?: "" | "uploading" | "committed" | "deleted";
+      /** Format: int64 */
+      scheduledAt?: number;
+      /** Format: int64 */
+      startedAt?: number | null;
+      /** Format: int64 */
+      finishedAt?: number | null;
+      /**
+       * @description Auto-detected source platform (drives the recovery kit).
+       * @enum {string}
+       */
+      platform?: "supabase" | "neon" | "railway" | "generic";
+      /**
+       * @description Restore-verification state machine. Empty only for jobs created before this field existed; pending/running are transitional; verified/failed/unsupported are verifier outcomes; skipped carries the reason in verifyDetail.
+       * @enum {string}
+       */
+      verifyStatus?:
+        | ""
+        | "pending"
+        | "running"
+        | "verified"
+        | "failed"
+        | "unsupported"
+        | "skipped";
+      /** @description Human-readable verification outcome or skip reason (redacted). */
+      verifyDetail?: string;
+      /**
+       * Format: int64
+       * @description User tables found in the restored throwaway instance.
+       */
+      verifyTables?: number;
+      /** Format: double */
+      verifyDurationSecs?: number;
+      /** @description How verification was proven (e.g. embedded-local:18). */
+      verifyProfile?: string;
+      /** @description A generated restore.sh kit is available for download. */
+      hasRecoveryKit?: boolean;
+    };
+    TaskList: {
+      tasks: components["schemas"]["Task"][];
+    };
+    Error: {
+      /** @description Stable machine-readable error class. */
+      code: string;
+      /** @description Human-readable, credential-free. */
+      message: string;
+    };
+  };
+  responses: {
+    /** @description Request body exceeds the allowed size. */
+    PayloadTooLarge: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description Content-Type must be application/json. */
+    UnsupportedMediaType: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description Rate limited; retry later. */
+    RateLimited: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description Unexpected internal error (nothing persisted, no state change reported as success). */
+    Internal: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+    /** @description Temporary overload (e.g. password-hashing budget exhausted); retry later. */
+    Overloaded: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["Error"];
+      };
+    };
+  };
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    getHealthz: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Process is alive. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthStatus"];
-                };
-            };
-        };
+  getHealthz: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    getReady: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Process is alive. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Ready to serve. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthStatus"];
-                };
-            };
-            /** @description Not ready (starting up, migration pending, or DB error). */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthStatus"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["HealthStatus"];
         };
+      };
     };
-    getHealthDetails: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Runtime details. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthDetails"];
-                };
-            };
-            /** @description Not authenticated. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Session storage temporarily unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
+  };
+  getReady: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    postAuthBootstrap: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Ready to serve. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BootstrapRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["HealthStatus"];
         };
-        responses: {
-            /** @description Admin created. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["User"];
-                };
-            };
-            /** @description Validation error. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Invalid, used or expired bootstrap token. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Already initialized. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            429: components["responses"]["RateLimited"];
-            500: components["responses"]["Internal"];
+      };
+      /** @description Not ready (starting up, migration pending, or DB error). */
+      503: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["HealthStatus"];
+        };
+      };
     };
-    postAuthLogin: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Logged in; session and CSRF cookies are set. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["User"];
-                };
-            };
-            /** @description Validation error. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Bad credentials (indistinguishable unknown-user vs wrong-password). */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Origin header present but not same-origin. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            /** @description Rate limited (too many attempts or consecutive failures). */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-            503: components["responses"]["Overloaded"];
-        };
+  };
+  getHealthDetails: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    postAuthLogout: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description Session-bound CSRF token (double-submit via the sb_csrf cookie). */
-                "X-CSRF-Token": string;
-            };
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Runtime details. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Logged out. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Not authenticated. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description CSRF token missing or invalid. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-            /** @description Session storage temporarily unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["HealthDetails"];
         };
+      };
+      /** @description Not authenticated. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Session storage temporarily unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
     };
-    getAgeStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Recipient configured or not. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgeStatus"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  postAuthBootstrap: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    putAgeRecipient: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AgeRecipientRequest"];
-            };
-        };
-        responses: {
-            /** @description Recipient stored with its fingerprint. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgeStatus"];
-                };
-            };
-            /** @description Invalid recipient. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BootstrapRequest"];
+      };
     };
-    listDatabases: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    responses: {
+      /** @description Admin created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description All databases. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DatabaseList"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["User"];
         };
+      };
+      /** @description Validation error. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Invalid, used or expired bootstrap token. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Already initialized. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      413: components["responses"]["PayloadTooLarge"];
+      415: components["responses"]["UnsupportedMediaType"];
+      429: components["responses"]["RateLimited"];
+      500: components["responses"]["Internal"];
     };
-    createDatabase: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DatabaseCreate"];
-            };
-        };
-        responses: {
-            /** @description Created; the connection was tested live. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Database"];
-                };
-            };
-            /** @description Validation error. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description A database with this name already exists. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Connection test failed (error class in body). */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  postAuthLogin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    getDatabase: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The database. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Database"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LoginRequest"];
+      };
     };
-    deleteDatabase: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Logged in; session and CSRF cookies are set. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Removed. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description A job is pending or running for this database. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["User"];
         };
+      };
+      /** @description Validation error. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Bad credentials (indistinguishable unknown-user vs wrong-password). */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Origin header present but not same-origin. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      413: components["responses"]["PayloadTooLarge"];
+      415: components["responses"]["UnsupportedMediaType"];
+      /** @description Rate limited (too many attempts or consecutive failures). */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+      503: components["responses"]["Overloaded"];
     };
-    triggerBackup: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Job queued. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description A job is already pending or running. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  postAuthLogout: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Session-bound CSRF token (double-submit via the sb_csrf cookie). */
+        "X-CSRF-Token": string;
+      };
+      path?: never;
+      cookie?: never;
     };
-    listTasks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Logged out. */
+      204: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Job list. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskList"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content?: never;
+      };
+      /** @description Not authenticated. */
+      401: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description CSRF token missing or invalid. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+      /** @description Session storage temporarily unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
     };
-    getTask: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The job. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  getAgeStatus: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    cancelTask: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Recipient configured or not. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Cancellation requested. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Task"];
-                };
-            };
-            /** @description Job is not pending or running. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["AgeStatus"];
         };
+      };
+      500: components["responses"]["Internal"];
     };
-    listDestinations: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Destinations. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DestinationList"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  putAgeRecipient: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    createDestination: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DestinationCreate"];
-            };
-        };
-        responses: {
-            /** @description Created (diagnostic test passed). */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Destination"];
-                };
-            };
-            /** @description Validation error. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Name already exists. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Diagnostic test failed. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgeRecipientRequest"];
+      };
     };
-    deleteDestination: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Recipient stored with its fingerprint. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Upload in flight. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["AgeStatus"];
         };
+      };
+      /** @description Invalid recipient. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
     };
-    testDestination: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Diagnostic passed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthStatus"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Diagnostic failed. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  listDatabases: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    reconcileDestination: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description All databases. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Reconciliation report. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReconcileReport"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["DatabaseList"];
         };
+      };
+      500: components["responses"]["Internal"];
     };
-    assignDatabaseDestination: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DestinationAssign"];
-            };
-        };
-        responses: {
-            /** @description Assigned. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthStatus"];
-                };
-            };
-            /** @description Database not found or a job is active. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  createDatabase: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    getTaskDownloadURL: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The URL. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DownloadURL"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not remotely committed. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DatabaseCreate"];
+      };
     };
-    downloadTask: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Created; the connection was tested live. */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description The ciphertext bytes. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            /** @description Unknown id or artifact gone. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["Database"];
         };
+      };
+      /** @description Validation error. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description A database with this name already exists. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Connection test failed (error class in body). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
     };
-    downloadRecoveryKit: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The recovery kit script. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/x-shellscript": string;
-                };
-            };
-            /** @description Unknown id or kit not available. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  getDatabase: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
     };
-    getAuthMe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description The database. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description The current user. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["User"];
-                };
-            };
-            /** @description Not authenticated. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-            /** @description Session storage temporarily unavailable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["Database"];
         };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
     };
-    getDatabaseSchedule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The current configuration. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleConfig"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  deleteDatabase: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
     };
-    putDatabaseSchedule: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Removed. */
+      204: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ScheduleUpdate"];
-            };
+        content?: never;
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
         };
-        responses: {
-            /** @description The updated configuration. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScheduleConfig"];
-                };
-            };
-            /** @description Invalid cron expression, timezone, or heartbeat URL. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["Error"];
         };
+      };
+      /** @description A job is pending or running for this database. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
     };
-    listWebhooks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The webhook list. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookList"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  triggerBackup: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
     };
-    createWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Job queued. */
+      202: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WebhookCreate"];
-            };
+        content: {
+          "application/json": components["schemas"]["Task"];
         };
-        responses: {
-            /** @description Created. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Webhook"];
-                };
-            };
-            /** @description Invalid name, URL scheme, or event list. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description A webhook with this name already exists. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
         };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description A job is already pending or running. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
     };
-    deleteWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deleted. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unknown id. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  listTasks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    testWebhook: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Job list. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WebhookCreate"];
-            };
+        content: {
+          "application/json": components["schemas"]["TaskList"];
         };
-        responses: {
-            /** @description Delivered. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookTestResult"];
-                };
-            };
-            /** @description Invalid request or URL. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Delivery failed (status/rejection). */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WebhookTestResult"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+      };
+      500: components["responses"]["Internal"];
     };
-    listNotifications: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Recent entries, newest first. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["NotificationList"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  getTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
     };
-    getStats: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description The job. */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description The statistics summary. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatsSummary"];
-                };
-            };
-            500: components["responses"]["Internal"];
+        content: {
+          "application/json": components["schemas"]["Task"];
         };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
     };
-    getOverview: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The per-database states. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Overview"];
-                };
-            };
-            500: components["responses"]["Internal"];
-        };
+  };
+  cancelTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
     };
+    requestBody?: never;
+    responses: {
+      /** @description Cancellation requested. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Task"];
+        };
+      };
+      /** @description Job is not pending or running. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  listDestinations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Destinations. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DestinationList"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  createDestination: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DestinationCreate"];
+      };
+    };
+    responses: {
+      /** @description Created (diagnostic test passed). */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Destination"];
+        };
+      };
+      /** @description Validation error. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Name already exists. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Diagnostic test failed. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  deleteDestination: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Upload in flight. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  testDestination: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Diagnostic passed. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthStatus"];
+        };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Diagnostic failed. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  reconcileDestination: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reconciliation report. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ReconcileReport"];
+        };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  assignDatabaseDestination: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DestinationAssign"];
+      };
+    };
+    responses: {
+      /** @description Assigned. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HealthStatus"];
+        };
+      };
+      /** @description Database not found or a job is active. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  getTaskDownloadURL: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The URL. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DownloadURL"];
+        };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Not remotely committed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  downloadTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The ciphertext bytes. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": string;
+        };
+      };
+      /** @description Unknown id or artifact gone. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  downloadRecoveryKit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The recovery kit script. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/x-shellscript": string;
+        };
+      };
+      /** @description Unknown id or kit not available. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  getAuthMe: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The current user. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["User"];
+        };
+      };
+      /** @description Not authenticated. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+      /** @description Session storage temporarily unavailable. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+    };
+  };
+  getDatabaseSchedule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The current configuration. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScheduleConfig"];
+        };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  putDatabaseSchedule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ScheduleUpdate"];
+      };
+    };
+    responses: {
+      /** @description The updated configuration. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScheduleConfig"];
+        };
+      };
+      /** @description Invalid cron expression, timezone, or heartbeat URL. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  listWebhooks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The webhook list. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookList"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  createWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WebhookCreate"];
+      };
+    };
+    responses: {
+      /** @description Created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Webhook"];
+        };
+      };
+      /** @description Invalid name, URL scheme, or event list. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description A webhook with this name already exists. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  deleteWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unknown id. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  testWebhook: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WebhookCreate"];
+      };
+    };
+    responses: {
+      /** @description Delivered. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookTestResult"];
+        };
+      };
+      /** @description Invalid request or URL. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Error"];
+        };
+      };
+      /** @description Delivery failed (status/rejection). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebhookTestResult"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  listNotifications: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Recent entries, newest first. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["NotificationList"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  getStats: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The statistics summary. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatsSummary"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
+  getOverview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The per-database states. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Overview"];
+        };
+      };
+      500: components["responses"]["Internal"];
+    };
+  };
 }

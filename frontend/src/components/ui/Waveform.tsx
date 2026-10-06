@@ -13,7 +13,10 @@ export function Waveform({ segments }: { segments: WaveSegment[] }) {
       {(["base", "sweep"] as const).map((layer) => (
         <div className={`wave-layer wave-${layer}`} key={layer}>
           {segments.map((s) => (
-            <span className={`wave-seg wave-${s.kind} tone-${s.tone}`} key={s.key} />
+            <span
+              className={`wave-seg wave-${s.kind} tone-${s.tone}`}
+              key={s.key}
+            />
           ))}
         </div>
       ))}

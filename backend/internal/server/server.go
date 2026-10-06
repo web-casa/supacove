@@ -283,7 +283,6 @@ var anonymousAPI = map[string]map[string]bool{
 }
 
 // loginPath is rate limited before request-body decoding (review P0-02).
-const loginPath = "/api/auth/login"
 
 // guard enforces, for /api/*: no-store, body cap, same-origin on state
 // changes, session requirement (default deny), and session-bound CSRF on

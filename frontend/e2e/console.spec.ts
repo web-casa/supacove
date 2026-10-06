@@ -9,7 +9,9 @@ test.describe("embedded console", () => {
   test("bootstrap or login lands on the overview", async ({ page }) => {
     await page.goto(base + "/");
     if (token) {
-      await page.getByText("Initialize a fresh instance with a CLI token").click();
+      await page
+        .getByText("Initialize a fresh instance with a CLI token")
+        .click();
       await page.fill("#token", token);
       await page.fill("#username", admin);
       await page.fill("#password", password);
@@ -37,7 +39,9 @@ test.describe("embedded console", () => {
     await expect(page.getByText("Delivery log")).toBeVisible();
   });
 
-  test("API error surfaces are not swallowed by the SPA fallback", async ({ page }) => {
+  test("API error surfaces are not swallowed by the SPA fallback", async ({
+    page,
+  }) => {
     // Anonymous API calls must return JSON 401, never the index.html shell.
     const resp = await page.request.get(base + "/api/tasks");
     expect(resp.status()).toBe(401);
@@ -59,7 +63,9 @@ test.describe("embedded console", () => {
     await expect(page.getByText("Protection status")).toBeVisible();
   });
 
-  test("failed registration shows a localized server message", async ({ page }) => {
+  test("failed registration shows a localized server message", async ({
+    page,
+  }) => {
     await page.goto(base + "/");
     await page.fill("#username", admin);
     await page.fill("#password", password);
@@ -68,7 +74,10 @@ test.describe("embedded console", () => {
     await page.getByText("Register your first database").click();
     await page.getByText("Paste connection string").click();
     await page.fill("#db-name", "e2e-bad-" + Date.now());
-    await page.fill("#db-uri", "postgresql://u:wrong@127.0.0.1:1/nodb?sslmode=disable");
+    await page.fill(
+      "#db-uri",
+      "postgresql://u:wrong@127.0.0.1:1/nodb?sslmode=disable",
+    );
     await page.getByText("Test & register").click();
     // server-side message, either language, must reach the user
     await expect(

@@ -1,6 +1,7 @@
 package pgclient
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -95,16 +96,10 @@ func (e testErrString) Error() string { return string(e) }
 func testErr(s string) error { return testErrString(s) }
 
 func asC(err error, target **Classified) bool {
-	for err != nil {
-		if c, ok := err.(*Classified); ok {
-			*target = c
-			return true
-		}
-		u, ok := err.(interface{ Unwrap() error })
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
+	var c *Classified
+	if errors.As(err, &c) {
+		*target = c
+		return true
 	}
 	return false
 }

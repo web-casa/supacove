@@ -38,13 +38,13 @@ func requireMinIO(t *testing.T) *Store {
 			"-e", "MINIO_ROOT_USER=minioadmin", "-e", "MINIO_ROOT_PASSWORD=minioadmin",
 			"-p", "127.0.0.1::9000", "minio/minio:latest", "server", "/data")
 		if out, err := cmd.Output(); err != nil {
-			minioErr = fmt.Errorf("docker run minio: %v: %s", err, out)
+			minioErr = fmt.Errorf("docker run minio: %w: %s", err, out)
 			return
 		}
 		minioContainer = name
 		portOut, err := exec.Command("docker", "port", name, "9000").Output()
 		if err != nil {
-			minioErr = fmt.Errorf("docker port: %v", err)
+			minioErr = fmt.Errorf("docker port: %w", err)
 			return
 		}
 		parts := strings.Split(strings.TrimSpace(string(portOut)), ":")
@@ -93,7 +93,6 @@ var (
 )
 
 //go:fix inline
-func awsString(v string) *string { return new(v) }
 
 func TestMinIOEndToEnd(t *testing.T) {
 	s := requireMinIO(t)
@@ -125,7 +124,7 @@ func TestMinIOEndToEnd(t *testing.T) {
 	if err := s.Put(ctx, "test/big.bin", bytes.NewReader(big), int64(len(big))); err != nil {
 		t.Fatalf("multipart put: %v", err)
 	}
-	rc, size, err = s.Get(ctx, "test/big.bin")
+	rc, _, err = s.Get(ctx, "test/big.bin")
 	if err != nil {
 		t.Fatalf("multipart get: %v", err)
 	}

@@ -12,7 +12,9 @@ interface Props {
 
 /** Rolls from the previously shown number to `value`. */
 export function CountUp({ value, format = round }: Props) {
-  const [shown, setShown] = useState(() => (prefersReducedMotion() ? value : 0));
+  const [shown, setShown] = useState(() =>
+    prefersReducedMotion() ? value : 0,
+  );
   const current = useRef(shown);
 
   useEffect(() => {

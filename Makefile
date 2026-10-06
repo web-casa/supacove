@@ -63,6 +63,12 @@ dev: ## Start the full dev environment (app + PostgreSQL + MinIO)
 test: ## Run backend tests with the race detector
 	go test -race ./backend/...
 
+## Static analysis: golangci-lint (backend) + eslint/stylelint (frontend).
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"; exit 1; }
+	golangci-lint run ./...
+	cd frontend && npm run lint && npm run stylelint
+
 lint: ## gofmt + go vet
 	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
 	go vet ./backend/...

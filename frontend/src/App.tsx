@@ -52,6 +52,8 @@ export default function App() {
     );
   }
   return (
-    <ToastProvider>{me.data ? <Dashboard user={me.data} /> : <AuthScreen />}</ToastProvider>
+    <ToastProvider>
+      {me.data ? <Dashboard user={me.data} /> : <AuthScreen />}
+    </ToastProvider>
   );
 }

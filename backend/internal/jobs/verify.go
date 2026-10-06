@@ -168,12 +168,16 @@ func (r *Runner) ResumePendingVerifications(ctx context.Context) {
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			return
 		}
 		ids = append(ids, id)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		r.log.Error("verification sweep iteration", "err", err)
+		return
+	}
 
 	if r.verifier == nil || r.verifyIdentity == "" {
 		reason := "restore verification is not enabled on this instance (SB_VERIFY_ENABLED; see ADR-004)"

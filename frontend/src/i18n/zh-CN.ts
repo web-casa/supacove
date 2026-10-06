@@ -11,7 +11,8 @@ export const zhCN: Dict = {
   "auth.signIn.title": "登录",
   "auth.signIn.sub": "登录到你的实例。",
   "auth.bootstrap.title": "初始化此实例",
-  "auth.bootstrap.sub": "使用一次性令牌创建管理员账号。没有它，第一个访问者永远无法接管实例。",
+  "auth.bootstrap.sub":
+    "使用一次性令牌创建管理员账号。没有它，第一个访问者永远无法接管实例。",
   "auth.bootstrap.runOnServer": "在服务器上运行以打印令牌：",
   "auth.bootstrap.validFor": "15 分钟内有效，仅可使用一次。",
   "auth.field.token": "引导令牌",
@@ -81,11 +82,13 @@ export const zhCN: Dict = {
 
   // ---- protection panel / database table ------------------------------------
   "panel.protection.title": "保护总览",
-  "panel.protection.desc": "保护状态取决于最近一次成功备份；失败后的重试永远不会算作新鲜备份。",
+  "panel.protection.desc":
+    "保护状态取决于最近一次成功备份；失败后的重试永远不会算作新鲜备份。",
   "panel.protection.add": "添加数据库",
   "panel.protection.empty.title": "还没有数据库",
   "panel.protection.empty.cta": "注册第一个数据库",
-  "panel.protection.empty.body": "用连接字符串接入 Supabase、Neon、Railway 或任意 PostgreSQL 数据库。备份在离开本服务器之前即完成 age 加密。",
+  "panel.protection.empty.body":
+    "用连接字符串接入 Supabase、Neon、Railway 或任意 PostgreSQL 数据库。备份在离开本服务器之前即完成 age 加密。",
   "table.aria.databases": "数据库列表",
   "table.col.database": "数据库",
   "table.col.protection": "保护状态",
@@ -133,7 +136,8 @@ export const zhCN: Dict = {
   "schedule.error.hoursMax": "最多 {n} 小时（一年）。",
   "schedule.error.cron": "需要 5 个字段：分 时 日 月 周。",
   "schedule.error.tz": "不是有效的 IANA 时区（例如 Europe/Berlin）。",
-  "schedule.error.hbUrl": "请输入 http:// 或 https:// URL，“-” 表示禁用，或留空。",
+  "schedule.error.hbUrl":
+    "请输入 http:// 或 https:// URL，“-” 表示禁用，或留空。",
   "schedule.error.period": "填写了心跳 URL 时，期望周期必须大于 0。",
   "schedule.toast.saved": "已保存“{name}”的计划。",
   "schedule.aria": "{name} 的计划与心跳",
@@ -171,52 +175,76 @@ export const zhCN: Dict = {
 
   // ---- provider guidance -----------------------------------------------------------
   "providers.supabase.tagline": "Session pooler 或直连",
-  "providers.supabase.s1": "在项目控制台打开 Connect，再进入 Connection string 标签（类型选 URI）。",
-  "providers.supabase.s2": "复制 Session pooler（端口 5432），它支持 IPv4。直连也可以，但除非项目购买了 IPv4 附加组件，否则只有 IPv6。",
-  "providers.supabase.s3": "不要使用 Transaction pooler（端口 6543）——pg_dump 无法通过它运行。",
+  "providers.supabase.s1":
+    "在项目控制台打开 Connect，再进入 Connection string 标签（类型选 URI）。",
+  "providers.supabase.s2":
+    "复制 Session pooler（端口 5432），它支持 IPv4。直连也可以，但除非项目购买了 IPv4 附加组件，否则只有 IPv6。",
+  "providers.supabase.s3":
+    "不要使用 Transaction pooler（端口 6543）——pg_dump 无法通过它运行。",
   "providers.supabase.s4": "把 [YOUR-PASSWORD] 替换为数据库密码。",
   "providers.neon.tagline": "直连端点，关闭池化",
   "providers.neon.s1": "在 Neon 控制台打开项目并点击 Connect。",
   "providers.neon.s2": "关闭 Connection pooling，使主机名中不含“-pooler”。",
-  "providers.neon.s3": "原样复制连接串。Neon 附加的 channel_binding 参数会被移除，因为 supabackup 不接受它。",
+  "providers.neon.s3":
+    "原样复制连接串。Neon 附加的 channel_binding 参数会被移除，因为 supabackup 不接受它。",
   "providers.neon.s4": "闲置的计算节点需要几秒唤醒，首次测试可能较慢。",
   "providers.railway.tagline": "公共 TCP 代理 URL",
   "providers.railway.s1": "打开 Postgres 服务，再进入 Variables 标签。",
-  "providers.railway.s2": "复制 DATABASE_PUBLIC_URL（主机以 .proxy.rlwy.net 结尾）。",
-  "providers.railway.s3": "不要使用 DATABASE_URL：其 *.railway.internal 主机只在 Railway 内部可解析。",
-  "providers.railway.s4": "Railway 的连接串不带 TLS 模式，会按下方选择器补上一个。",
+  "providers.railway.s2":
+    "复制 DATABASE_PUBLIC_URL（主机以 .proxy.rlwy.net 结尾）。",
+  "providers.railway.s3":
+    "不要使用 DATABASE_URL：其 *.railway.internal 主机只在 Railway 内部可解析。",
+  "providers.railway.s4":
+    "Railway 的连接串不带 TLS 模式，会按下方选择器补上一个。",
   "providers.generic.label": "自托管 / 其他",
   "providers.generic.tagline": "任意 PostgreSQL 服务器",
-  "providers.generic.s1": "主机必须能从 supabackup 容器访问。localhost 指容器自身；要访问 Docker 宿主机上的数据库，请用 host.docker.internal 或其局域网地址。",
-  "providers.generic.s2": "使用能读取 pg_dump 全部导出内容的角色：数据库属主，或 pg_read_all_data 的成员（PostgreSQL 14+）。",
-  "providers.generic.s3": "TLS：服务器持有 CA 签名证书时用 verify-full；只加密不校验用 require；disable 仅用于你信任的私有网络。",
-  "providers.generic.s4": "检查 pg_hba.conf 允许本服务器地址以该角色连接该数据库。",
+  "providers.generic.s1":
+    "主机必须能从 supabackup 容器访问。localhost 指容器自身；要访问 Docker 宿主机上的数据库，请用 host.docker.internal 或其局域网地址。",
+  "providers.generic.s2":
+    "使用能读取 pg_dump 全部导出内容的角色：数据库属主，或 pg_read_all_data 的成员（PostgreSQL 14+）。",
+  "providers.generic.s3":
+    "TLS：服务器持有 CA 签名证书时用 verify-full；只加密不校验用 require；disable 仅用于你信任的私有网络。",
+  "providers.generic.s4":
+    "检查 pg_hba.conf 允许本服务器地址以该角色连接该数据库。",
 
   // ---- connection pre-flight -----------------------------------------------------
   "preflight.aria": "连接预检",
   "preflight.willRegister": "将注册",
   "conn.err.empty": "请粘贴连接串。",
   "conn.err.mustStart": "必须以 postgres:// 或 postgresql:// 开头。",
-  "conn.err.hash": "包含“#”。如果它是密码的一部分，请写成 %23——或改用“填写明细”，会自动编码。",
+  "conn.err.hash":
+    "包含“#”。如果它是密码的一部分，请写成 %23——或改用“填写明细”，会自动编码。",
   "conn.err.missingUser": "缺少用户（应为 user:password@host）。",
   "conn.err.unclosedV6": "IPv6 主机的“[”未闭合。",
   "conn.err.multiHost": "不支持多主机列表——请只给一个主机。",
   "conn.err.missingHost": "缺少主机。",
-  "conn.err.badPort": "端口“{port}”无效。如果密码包含“:”、“/”或“@”，请改用“填写明细”。",
+  "conn.err.badPort":
+    "端口“{port}”无效。如果密码包含“:”、“/”或“@”，请改用“填写明细”。",
   "conn.err.missingDb": "缺少数据库名（…/postgres）。",
-  "conn.err.placeholderPassword": "密码仍是占位符 {ph}——请替换为真实数据库密码。",
+  "conn.err.placeholderPassword":
+    "密码仍是占位符 {ph}——请替换为真实数据库密码。",
   "conn.err.badSsl": "“{mode}”不是有效的 sslmode。",
   "conn.err.tooLong": "连接串不能超过 {n} 个字符。",
-  "conn.warn.noPassword": "连接串中没有密码。除非服务器允许，否则连接测试会失败。",
-  "conn.warn.sbTxPool": "端口 6543 是 Supabase 的 transaction pooler。pg_dump 无法通过它运行，备份会失败。",
-  "conn.warn.neonPooled": "这是 Neon 的池化端点（主机含“-pooler”）。任何端口上 pg_dump 都无法通过它运行。",
-  "conn.warn.neonPort": "端口 6543 是 Neon 的池化端口。pg_dump 无法通过它运行。",
-  "conn.warn.railwayInternal": "*.railway.internal 只在 Railway 私有网络内可解析。除非 supabackup 也运行在其中，否则请使用 DATABASE_PUBLIC_URL（*.proxy.rlwy.net TCP 代理）。",
-  "conn.warn.sslDisable": "sslmode=disable 会明文发送密码和全部导出数据。仅在你信任的私有网络中使用。",
-  "conn.info.sbDirect": "这是直连地址，除非项目购买了 IPv4 附加组件，否则只有 IPv6。如果测试无法连接，请改用 Session pooler 连接串。",
-  "conn.info.localhost": "localhost 指 supabackup 容器自身，而不是运行 Docker 的机器。要连接 Docker 宿主机上的数据库，请用 host.docker.internal 或宿主机局域网地址。",
-  "conn.info.droppedParams": "将移除 {params}——supabackup 只接受 sslmode、connect_timeout 和 application_name。",
-  "conn.info.addSsl": "连接串未设置 TLS 模式；将添加 sslmode={mode}（在下方选择）。",
+  "conn.warn.noPassword":
+    "连接串中没有密码。除非服务器允许，否则连接测试会失败。",
+  "conn.warn.sbTxPool":
+    "端口 6543 是 Supabase 的 transaction pooler。pg_dump 无法通过它运行，备份会失败。",
+  "conn.warn.neonPooled":
+    "这是 Neon 的池化端点（主机含“-pooler”）。任何端口上 pg_dump 都无法通过它运行。",
+  "conn.warn.neonPort":
+    "端口 6543 是 Neon 的池化端口。pg_dump 无法通过它运行。",
+  "conn.warn.railwayInternal":
+    "*.railway.internal 只在 Railway 私有网络内可解析。除非 supabackup 也运行在其中，否则请使用 DATABASE_PUBLIC_URL（*.proxy.rlwy.net TCP 代理）。",
+  "conn.warn.sslDisable":
+    "sslmode=disable 会明文发送密码和全部导出数据。仅在你信任的私有网络中使用。",
+  "conn.info.sbDirect":
+    "这是直连地址，除非项目购买了 IPv4 附加组件，否则只有 IPv6。如果测试无法连接，请改用 Session pooler 连接串。",
+  "conn.info.localhost":
+    "localhost 指 supabackup 容器自身，而不是运行 Docker 的机器。要连接 Docker 宿主机上的数据库，请用 host.docker.internal 或宿主机局域网地址。",
+  "conn.info.droppedParams":
+    "将移除 {params}——supabackup 只接受 sslmode、connect_timeout 和 application_name。",
+  "conn.info.addSsl":
+    "连接串未设置 TLS 模式；将添加 sslmode={mode}（在下方选择）。",
   "conn.ok.compatible": "与 pg_dump 兼容。注册时会测试连接。",
   "conn.fix.sbSessionPort": "改用 session 端口（5432）",
   "conn.fix.neonDirect": "改用直连端点",
@@ -264,7 +292,8 @@ export const zhCN: Dict = {
   "backups.aria": "备份任务",
   "backups.unavailable": "备份列表不可用：{msg}",
   "backups.empty.title": "还没有备份",
-  "backups.empty.body": "在总览中对数据库执行“立即备份”，或设置 cron 计划。每次运行都会显示在这里，附带验证结果和下载。",
+  "backups.empty.body":
+    "在总览中对数据库执行“立即备份”，或设置 cron 计划。每次运行都会显示在这里，附带验证结果和下载。",
   "backups.col.backup": "备份",
   "backups.col.status": "状态",
   "backups.col.checks": "检查",
@@ -283,13 +312,15 @@ export const zhCN: Dict = {
 
   // ---- webhooks ---------------------------------------------------------------------
   "wh.title": "通知",
-  "wh.desc": "Webhook 接收 backup_failed / backup_expired / verification_failed 事件，并自动重试。",
+  "wh.desc":
+    "Webhook 接收 backup_failed / backup_expired / verification_failed 事件，并自动重试。",
   "wh.aria": "Webhook 列表",
   "wh.unavailable": "Webhook 不可用：{msg}",
   "wh.add": "添加 webhook",
   "wh.empty.title": "还没有 webhook",
   "wh.empty.cta": "添加第一个 webhook",
-  "wh.empty.body": "没有 webhook 时，失败或过期的备份只显示在本页。可以指向 Slack、Discord 或你的报警器。",
+  "wh.empty.body":
+    "没有 webhook 时，失败或过期的备份只显示在本页。可以指向 Slack、Discord 或你的报警器。",
   "wh.col.name": "名称",
   "wh.col.events": "事件",
   "wh.col.url": "URL",

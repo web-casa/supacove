@@ -62,7 +62,10 @@ export function AuthScreen() {
         password === ""
           ? t("auth.error.password")
           : isBootstrap && password.length < MIN_PASSWORD
-            ? t("auth.error.passwordShort", { n: MIN_PASSWORD, len: password.length })
+            ? t("auth.error.passwordShort", {
+                n: MIN_PASSWORD,
+                len: password.length,
+              })
             : null,
     },
     submitted,
@@ -94,7 +97,9 @@ export function AuthScreen() {
               <Terminal size={14} aria-hidden />
               <div>
                 <p>{t("auth.bootstrap.runOnServer")}</p>
-                <code>docker exec &lt;container&gt; /app/supabackup bootstrap</code>
+                <code>
+                  docker exec &lt;container&gt; /app/supabackup bootstrap
+                </code>
                 <p className="muted">{t("auth.bootstrap.validFor")}</p>
               </div>
             </div>
@@ -108,7 +113,11 @@ export function AuthScreen() {
 
         <form className="form" onSubmit={onSubmit} noValidate>
           {isBootstrap && (
-            <Field label={t("auth.field.token")} htmlFor="token" error={errors.token}>
+            <Field
+              label={t("auth.field.token")}
+              htmlFor="token"
+              error={errors.token}
+            >
               <input
                 {...control("token", errors.token)}
                 className="mono"
@@ -120,7 +129,11 @@ export function AuthScreen() {
             </Field>
           )}
           <Field
-            label={isBootstrap ? t("auth.field.adminUsername") : t("auth.field.username")}
+            label={
+              isBootstrap
+                ? t("auth.field.adminUsername")
+                : t("auth.field.username")
+            }
             htmlFor="username"
             error={errors.username}
           >
@@ -135,7 +148,11 @@ export function AuthScreen() {
             label={t("auth.field.password")}
             htmlFor="password"
             error={errors.password}
-            hint={isBootstrap ? t("auth.field.passwordHint", { n: MIN_PASSWORD }) : undefined}
+            hint={
+              isBootstrap
+                ? t("auth.field.passwordHint", { n: MIN_PASSWORD })
+                : undefined
+            }
           >
             <input
               {...control("password", errors.password)}
@@ -146,8 +163,15 @@ export function AuthScreen() {
             />
           </Field>
           {notice && <InlineMessage tone="info">{notice}</InlineMessage>}
-          {active.isError && !hasErrors(errors) && <InlineMessage>{errorMessage(active.error)}</InlineMessage>}
-          <Button type="submit" variant="primary" block loading={active.isPending}>
+          {active.isError && !hasErrors(errors) && (
+            <InlineMessage>{errorMessage(active.error)}</InlineMessage>
+          )}
+          <Button
+            type="submit"
+            variant="primary"
+            block
+            loading={active.isPending}
+          >
             {isBootstrap
               ? bootstrap.isPending
                 ? t("auth.action.creatingAdmin")
@@ -160,11 +184,21 @@ export function AuthScreen() {
       </div>
       <div className="splash-foot">
         {isBootstrap ? (
-          <Button variant="ghost" size="sm" icon={ArrowLeft} onClick={() => switchTo("login")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ArrowLeft}
+            onClick={() => switchTo("login")}
+          >
             {t("auth.action.backToSignIn")}
           </Button>
         ) : (
-          <Button variant="ghost" size="sm" icon={KeyRound} onClick={() => switchTo("bootstrap")}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={KeyRound}
+            onClick={() => switchTo("bootstrap")}
+          >
             {t("auth.action.bootstrapEntry")}
           </Button>
         )}

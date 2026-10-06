@@ -1,7 +1,19 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Cloud, CloudUpload, Download, History, LifeBuoy, Wrench } from "lucide-react";
-import { artifactDownloadPath, kitDownloadPath, presignedUrl, type Task } from "../api/client";
+import {
+  Cloud,
+  CloudUpload,
+  Download,
+  History,
+  LifeBuoy,
+  Wrench,
+} from "lucide-react";
+import {
+  artifactDownloadPath,
+  kitDownloadPath,
+  presignedUrl,
+  type Task,
+} from "../api/client";
 import { useI18n } from "../i18n";
 import { errorMessage, humanBytes } from "../lib/format";
 import { overviewQuery, tasksQuery } from "../lib/queries";
@@ -16,7 +28,13 @@ import { SkeletonRows } from "./ui/Skeleton";
 
 const PAGE = 10;
 
-function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string }) {
+function TaskRow({
+  task: t,
+  databaseName,
+}: {
+  task: Task;
+  databaseName?: string;
+}) {
   const { t: tr } = useI18n();
   // The presigned URL is short-lived, so it is fetched on click, not up front.
   const bucket = useMutation({
@@ -31,12 +49,21 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
   const when = t.finishedAt ?? t.startedAt ?? t.scheduledAt;
 
   return (
-    <div className={`trow-group tone-${status.tone}${t.status === "running" ? " trow-running" : ""}`} role="rowgroup">
+    <div
+      className={`trow-group tone-${status.tone}${t.status === "running" ? " trow-running" : ""}`}
+      role="rowgroup"
+    >
       <div className="trow" role="row">
         <div className="cell cell-main" role="cell">
           <span className="num muted">#{t.id}</span>
-          <span className="db-name truncate">{databaseName ?? tr("backups.dbFallback", { id: t.databaseId })}</span>
-          {t.attempt > 1 && <span className="chip">{tr("backups.attempt", { n: t.attempt })}</span>}
+          <span className="db-name truncate">
+            {databaseName ?? tr("backups.dbFallback", { id: t.databaseId })}
+          </span>
+          {t.attempt > 1 && (
+            <span className="chip">
+              {tr("backups.attempt", { n: t.attempt })}
+            </span>
+          )}
         </div>
         <div className="cell" role="cell">
           <StatusBadge meta={status} />
@@ -62,17 +89,35 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
         </div>
         <div className="cell cell-actions" role="cell">
           {t.status === "succeeded" && t.hasRecoveryKit && (
-            <LinkButton variant="ghost" size="sm" icon={LifeBuoy} href={kitDownloadPath(t.id)} download={`restore-job${t.id}.sh`}>
+            <LinkButton
+              variant="ghost"
+              size="sm"
+              icon={LifeBuoy}
+              href={kitDownloadPath(t.id)}
+              download={`restore-job${t.id}.sh`}
+            >
               {tr("backups.kit")}
             </LinkButton>
           )}
           {t.status === "succeeded" && committed && (
-            <Button variant="ghost" size="sm" icon={Cloud} loading={bucket.isPending} onClick={() => bucket.mutate()}>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={Cloud}
+              loading={bucket.isPending}
+              onClick={() => bucket.mutate()}
+            >
               {tr("backups.bucketDl")}
             </Button>
           )}
           {t.status === "succeeded" && !committed && (
-            <LinkButton variant="ghost" size="sm" icon={Download} href={artifactDownloadPath(t.id)} download={`backup-job${t.id}.dump.age`}>
+            <LinkButton
+              variant="ghost"
+              size="sm"
+              icon={Download}
+              href={artifactDownloadPath(t.id)}
+              download={`backup-job${t.id}.dump.age`}
+            >
               {tr("backups.download")}
             </LinkButton>
           )}
@@ -84,16 +129,22 @@ function TaskRow({ task: t, databaseName }: { task: Task; databaseName?: string 
           <div>
             <span className="remediation-title">
               {tr("backups.howToFix")}
-              {t.errorClass ? <span className="chip">{t.errorClass}</span> : null}
+              {t.errorClass ? (
+                <span className="chip">{t.errorClass}</span>
+              ) : null}
             </span>
-            {t.errorMessage && <p className="mono text-danger">{t.errorMessage}</p>}
+            {t.errorMessage && (
+              <p className="mono text-danger">{t.errorMessage}</p>
+            )}
             {t.remediation && <p>{t.remediation}</p>}
           </div>
         </div>
       )}
       {bucket.isError && (
         <div className="trow-extra">
-          <InlineMessage>{tr("backups.linkError", { msg: errorMessage(bucket.error) })}</InlineMessage>
+          <InlineMessage>
+            {tr("backups.linkError", { msg: errorMessage(bucket.error) })}
+          </InlineMessage>
         </div>
       )}
     </div>
@@ -107,14 +158,18 @@ export function RecentBackups() {
   const overview = useQuery(overviewQuery);
   const [showAll, setShowAll] = useState(false);
   const list = tasks.data?.tasks ?? [];
-  const names = new Map(overview.data?.databases.map((d) => [d.databaseId, d.name]));
+  const names = new Map(
+    overview.data?.databases.map((d) => [d.databaseId, d.name]),
+  );
   const visible = showAll ? list : list.slice(0, PAGE);
 
   return (
     <Panel title={t("backups.title")} description={t("backups.desc")}>
       {tasks.isPending && <SkeletonRows rows={4} />}
       {tasks.isError && !tasks.data && (
-        <InlineMessage>{t("backups.unavailable", { msg: errorMessage(tasks.error) })}</InlineMessage>
+        <InlineMessage>
+          {t("backups.unavailable", { msg: errorMessage(tasks.error) })}
+        </InlineMessage>
       )}
       {tasks.data && list.length === 0 && (
         <EmptyState icon={History} title={t("backups.empty.title")}>
@@ -122,7 +177,11 @@ export function RecentBackups() {
         </EmptyState>
       )}
       {list.length > 0 && (
-        <div className="table table-tasks stagger" role="table" aria-label={t("backups.aria")}>
+        <div
+          className="table table-tasks stagger"
+          role="table"
+          aria-label={t("backups.aria")}
+        >
           <div className="thead" role="row">
             <span role="columnheader">{t("backups.col.backup")}</span>
             <span role="columnheader">{t("backups.col.status")}</span>
@@ -138,14 +197,24 @@ export function RecentBackups() {
             </span>
           </div>
           {visible.map((task) => (
-            <TaskRow key={task.id} task={task} databaseName={names.get(task.databaseId)} />
+            <TaskRow
+              key={task.id}
+              task={task}
+              databaseName={names.get(task.databaseId)}
+            />
           ))}
         </div>
       )}
       {list.length > PAGE && (
         <div className="panel-foot">
-          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)}>
-            {showAll ? t("common.showLatest", { n: PAGE }) : t("common.showAll", { n: list.length })}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAll(!showAll)}
+          >
+            {showAll
+              ? t("common.showLatest", { n: PAGE })
+              : t("common.showAll", { n: list.length })}
           </Button>
         </div>
       )}

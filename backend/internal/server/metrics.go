@@ -58,7 +58,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		if rows.Err() != nil {
 			failed("jobs")
 		}
-		rows.Close()
+		rows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
 		fmt.Fprintf(w, "# HELP supabackup_jobs_total Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).\n")
 		fmt.Fprintf(w, "# TYPE supabackup_jobs_total gauge\n")
 		var succeeded, failed int64
@@ -114,7 +114,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		if vrows.Err() != nil {
 			failed("verification")
 		}
-		vrows.Close()
+		vrows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
 		fmt.Fprintf(w, "# HELP supabackup_verification_total Restore-verification states of succeeded backups.\n")
 		fmt.Fprintf(w, "# TYPE supabackup_verification_total gauge\n")
 		for _, x := range kvs {
@@ -149,7 +149,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		if lrows.Err() != nil {
 			failed("last_success")
 		}
-		lrows.Close()
+		lrows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
 		fmt.Fprintf(w, "# HELP supabackup_last_success_timestamp Last successful backup snapshot per database (unix seconds).\n")
 		fmt.Fprintf(w, "# TYPE supabackup_last_success_timestamp gauge\n")
 		for _, x := range kvs {
@@ -205,7 +205,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		if orows.Err() != nil {
 			failed("protection")
 		}
-		orows.Close()
+		orows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
 		fmt.Fprintf(w, "# HELP supabackup_databases_protection Databases by protection state (fresh/expired/never).\n")
 		fmt.Fprintf(w, "# TYPE supabackup_databases_protection gauge\n")
 		for _, state := range []string{"fresh", "expired", "never"} {

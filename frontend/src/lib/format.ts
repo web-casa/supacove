@@ -4,7 +4,10 @@
 // components re-render through useI18n() when it changes.
 import { getLang, translate } from "../i18n/core";
 
-export function relativeTime(unixSecs: number, nowMs: number = Date.now()): string {
+export function relativeTime(
+  unixSecs: number,
+  nowMs: number = Date.now(),
+): string {
   const s = Math.max(0, Math.round(nowMs / 1000 - unixSecs));
   if (getLang() === "zh-CN") {
     if (s < 45) return "刚刚";
@@ -21,15 +24,18 @@ export function relativeTime(unixSecs: number, nowMs: number = Date.now()): stri
 }
 
 export function absoluteTime(unixSecs: number): string {
-  return new Date(unixSecs * 1000).toLocaleString(getLang() === "zh-CN" ? "zh-CN" : "en", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZoneName: "short",
-  });
+  return new Date(unixSecs * 1000).toLocaleString(
+    getLang() === "zh-CN" ? "zh-CN" : "en",
+    {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZoneName: "short",
+    },
+  );
 }
 
 export function humanBytes(b?: number | null): string {

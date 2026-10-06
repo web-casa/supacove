@@ -2,7 +2,9 @@ import type { ReactNode } from "react";
 import { Brand } from "./Brand";
 import { Waveform } from "./ui/Waveform";
 
-const SIGNAL = [{ key: "signal", tone: "signal" as const, kind: "beat" as const }];
+const SIGNAL = [
+  { key: "signal", tone: "signal" as const, kind: "beat" as const },
+];
 
 /** Full-screen frame for the pre-auth screens: brand, ambient signal, content. */
 export function SplashLayout({ children }: { children: ReactNode }) {

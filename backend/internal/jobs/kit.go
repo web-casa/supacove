@@ -39,13 +39,17 @@ func (r *Runner) BackfillRecoveryKits(ctx context.Context) {
 	for rows.Next() {
 		var j job
 		if err := rows.Scan(&j.id, &j.manifest, &j.platform, &j.kitPath); err != nil {
-			rows.Close()
+			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			r.log.Error("kit backfill scan failed", "err", err)
 			return
 		}
 		jobsList = append(jobsList, j)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		r.log.Error("kit backfill iteration", "err", err)
+		return
+	}
 
 	for _, j := range jobsList {
 		if j.kitPath != "" {

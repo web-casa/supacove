@@ -121,6 +121,7 @@ func TestPhase2DatabaseLifecycleAndBackupRun(t *testing.T) {
 	env.bootstrapAdmin(t)
 
 	// Connection test failure → 422 with credential-free message.
+	//nolint:gosec // G101: loopback test URIs; the assertions prove the password never leaves in any response
 	code, body := env.post("/api/databases", map[string]string{
 		"name": "broken", "connectionUri": "postgres://app:pw@127.0.0.1:1/appdb?sslmode=disable",
 	})
@@ -129,6 +130,7 @@ func TestPhase2DatabaseLifecycleAndBackupRun(t *testing.T) {
 	}
 
 	// Invalid URI (disallowed parameter) → 400.
+	//nolint:gosec // G101: loopback test URI for the disallowed-parameter case
 	code, _ = env.post("/api/databases", map[string]string{
 		"name": "bad", "connectionUri": "postgres://app:pw@h/db?passfile=/x",
 	})
@@ -138,6 +140,7 @@ func TestPhase2DatabaseLifecycleAndBackupRun(t *testing.T) {
 
 	// Unreachable target registers as 422 (live test failed) — the full
 	// success path is covered by the M1 integration test.
+	//nolint:gosec // G101: loopback test URI for the unreachable-target case
 	code, _ = env.post("/api/databases", map[string]string{
 		"name": "dup-db", "connectionUri": "postgres://appuser:whatever@localhost:1/appdb?sslmode=disable",
 	})

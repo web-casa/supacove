@@ -16,7 +16,7 @@ func TestRound7QuotedRedaction(t *testing.T) {
 	out := sanitize(in)
 	t.Logf("excerpt after sanitize: %q", out)
 
-	secret := `prefix'CANARY-SUFFIX`
+	secret := `prefix'CANARY-SUFFIX` //nolint:gosec // G101: deliberate canary secret for the sanitizer test
 	texts := []string{
 		`plain ` + secret + ` end`,
 		"escaped prefix\\'CANARY-SUFFIX end",

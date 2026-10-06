@@ -8,7 +8,14 @@
 
 export type Provider = "supabase" | "neon" | "railway" | "generic";
 
-export const SSL_MODES = ["require", "verify-full", "verify-ca", "prefer", "allow", "disable"] as const;
+export const SSL_MODES = [
+  "require",
+  "verify-full",
+  "verify-ca",
+  "prefer",
+  "allow",
+  "disable",
+] as const;
 export type SslMode = (typeof SSL_MODES)[number];
 
 /** The only query parameters the backend accepts. */
@@ -61,18 +68,23 @@ interface Parts {
   query: string;
 }
 
-const hostSuffix = (host: string, suffix: string) => host === suffix || host.endsWith(`.${suffix}`);
+const hostSuffix = (host: string, suffix: string) =>
+  host === suffix || host.endsWith(`.${suffix}`);
 
 export function detectProvider(host: string): Provider {
   const h = host.toLowerCase().replace(/\.$/, "");
-  if (hostSuffix(h, "supabase.co") || hostSuffix(h, "supabase.com")) return "supabase";
+  if (hostSuffix(h, "supabase.co") || hostSuffix(h, "supabase.com"))
+    return "supabase";
   if (hostSuffix(h, "neon.tech")) return "neon";
-  if (hostSuffix(h, "rlwy.net") || hostSuffix(h, "railway.internal")) return "railway";
+  if (hostSuffix(h, "rlwy.net") || hostSuffix(h, "railway.internal"))
+    return "railway";
   return "generic";
 }
 
 export function isLocalHost(host: string): boolean {
-  return host === "localhost" || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);
+  return (
+    host === "localhost" || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host)
+  );
 }
 
 const bracket = (host: string) => (host.includes(":") ? `[${host}]` : host);
@@ -120,7 +132,10 @@ function split(raw: string): Parts | Message {
     }
   }
   if (host === "") return { key: "conn.err.missingHost" };
-  if (port !== "" && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
+  if (
+    port !== "" &&
+    !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)
+  ) {
     return { key: "conn.err.badPort", vars: { port } };
   }
   if (path === "" || path === "/") return { key: "conn.err.missingDb" };
@@ -139,12 +154,18 @@ function join(p: Parts, query: string): string {
 export function applyPatch(raw: string, patch: HostPatch): string {
   const p = split(raw.trim());
   if (!isParts(p)) return raw;
-  return join({ ...p, host: patch.host ?? p.host, port: patch.port ?? p.port }, p.query);
+  return join(
+    { ...p, host: patch.host ?? p.host, port: patch.port ?? p.port },
+    p.query,
+  );
 }
 
 export function buildUri(f: ConnectionFields, sslMode: SslMode): string {
   const enc = encodeURIComponent;
-  const auth = f.password === "" ? enc(f.user.trim()) : `${enc(f.user.trim())}:${enc(f.password)}`;
+  const auth =
+    f.password === ""
+      ? enc(f.user.trim())
+      : `${enc(f.user.trim())}:${enc(f.password)}`;
   const port = f.port.trim() || "5432";
   return `postgresql://${auth}@${bracket(f.host.trim())}:${port}/${enc(f.database.trim())}?sslmode=${sslMode}`;
 }
@@ -178,7 +199,10 @@ function hostFindings(p: Parts): Finding[] {
         key: "conn.warn.neonPooled",
         fix: {
           labelKey: "conn.fix.neonDirect",
-          patch: { host: [label.slice(0, -"-pooler".length), ...restLabels].join("."), port: "5432" },
+          patch: {
+            host: [label.slice(0, -"-pooler".length), ...restLabels].join("."),
+            port: "5432",
+          },
         },
       });
     } else if (port === "6543") {
@@ -244,7 +268,8 @@ export function analyze(rawInput: string, sslMode: SslMode): Analysis {
       dropped.push(key);
       continue;
     }
-    if (key === "sslmode") explicitSsl = decodeSafe(pair.slice(pair.indexOf("=") + 1));
+    if (key === "sslmode")
+      explicitSsl = decodeSafe(pair.slice(pair.indexOf("=") + 1));
     kept.push(pair);
   }
   if (dropped.length > 0) {
@@ -256,9 +281,17 @@ export function analyze(rawInput: string, sslMode: SslMode): Analysis {
   }
   if (explicitSsl === null) {
     kept.push(`sslmode=${sslMode}`);
-    findings.push({ level: "info", key: "conn.info.addSsl", vars: { mode: sslMode } });
+    findings.push({
+      level: "info",
+      key: "conn.info.addSsl",
+      vars: { mode: sslMode },
+    });
   } else if (!(SSL_MODES as readonly string[]).includes(explicitSsl)) {
-    findings.push({ level: "error", key: "conn.err.badSsl", vars: { mode: explicitSsl } });
+    findings.push({
+      level: "error",
+      key: "conn.err.badSsl",
+      vars: { mode: explicitSsl },
+    });
   }
   const effectiveSsl = explicitSsl ?? sslMode;
   if (effectiveSsl === "disable" && !isLocalHost(p.host)) {
@@ -271,7 +304,11 @@ export function analyze(rawInput: string, sslMode: SslMode): Analysis {
   const query = kept.join("&");
   const normalized = join(p, query);
   if (normalized.length > MAX_URI_LENGTH) {
-    findings.push({ level: "error", key: "conn.err.tooLong", vars: { n: MAX_URI_LENGTH } });
+    findings.push({
+      level: "error",
+      key: "conn.err.tooLong",
+      vars: { n: MAX_URI_LENGTH },
+    });
   }
   if (!findings.some((f) => f.level === "error" || f.level === "warn")) {
     findings.unshift({ level: "ok", key: "conn.ok.compatible" });
@@ -281,7 +318,10 @@ export function analyze(rawInput: string, sslMode: SslMode): Analysis {
     platform: detectProvider(p.host),
     findings,
     normalized,
-    redacted: join({ ...p, password: p.password ? "••••••" : p.password }, query),
+    redacted: join(
+      { ...p, password: p.password ? "••••••" : p.password },
+      query,
+    ),
     blocked: findings.some((f) => f.level === "error"),
   };
 }

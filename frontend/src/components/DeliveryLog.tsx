@@ -27,7 +27,9 @@ export function DeliveryLog() {
     <Panel title={t("dl.title")} description={t("dl.desc")}>
       {notifications.isPending && <SkeletonRows rows={2} />}
       {notifications.isError && !notifications.data && (
-        <InlineMessage>{t("dl.unavailable", { msg: errorMessage(notifications.error) })}</InlineMessage>
+        <InlineMessage>
+          {t("dl.unavailable", { msg: errorMessage(notifications.error) })}
+        </InlineMessage>
       )}
       {notifications.data && list.length === 0 && (
         <EmptyState icon={Inbox} title={t("dl.empty.title")}>
@@ -35,7 +37,11 @@ export function DeliveryLog() {
         </EmptyState>
       )}
       {list.length > 0 && (
-        <div className="table table-log stagger" role="table" aria-label={t("dl.aria")}>
+        <div
+          className="table table-log stagger"
+          role="table"
+          aria-label={t("dl.aria")}
+        >
           <div className="thead" role="row">
             <span role="columnheader">{t("dl.col.state")}</span>
             <span role="columnheader">{t("dl.col.event")}</span>
@@ -50,7 +56,11 @@ export function DeliveryLog() {
           {visible.map((n) => {
             const meta = deliveryMeta(n.state);
             return (
-              <div className={`trow-group tone-${meta.tone}`} role="rowgroup" key={n.id}>
+              <div
+                className={`trow-group tone-${meta.tone}`}
+                role="rowgroup"
+                key={n.id}
+              >
                 <div className="trow" role="row">
                   <div className="cell" role="cell">
                     <StatusBadge meta={meta} />
@@ -80,8 +90,14 @@ export function DeliveryLog() {
       )}
       {list.length > PAGE && (
         <div className="panel-foot">
-          <Button variant="ghost" size="sm" onClick={() => setShowAll(!showAll)}>
-            {showAll ? t("common.showLatest", { n: PAGE }) : t("common.showAll", { n: list.length })}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAll(!showAll)}
+          >
+            {showAll
+              ? t("common.showLatest", { n: PAGE })
+              : t("common.showAll", { n: list.length })}
           </Button>
         </div>
       )}

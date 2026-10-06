@@ -17,7 +17,10 @@ export function useHashView(): [View, (v: View) => void] {
   useEffect(() => {
     const onHash = () => {
       // Cross-fade between views where the browser supports view transitions.
-      if (typeof document.startViewTransition === "function" && !prefersReducedMotion()) {
+      if (
+        typeof document.startViewTransition === "function" &&
+        !prefersReducedMotion()
+      ) {
         document.startViewTransition(() => flushSync(() => setView(read())));
       } else {
         setView(read());

@@ -1,6 +1,7 @@
 package recovery
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -251,7 +252,8 @@ func mustFail(t *testing.T, err error, why string) {
 	if err == nil {
 		t.Fatalf("script succeeded, want failure (%s)", why)
 	}
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 0 {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 0 {
 		t.Fatalf("failure (%s) exited 0", why)
 	}
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { analyze, applyPatch, buildUri, detectProvider, isLocalHost } from "./connection";
+import {
+  analyze,
+  applyPatch,
+  buildUri,
+  detectProvider,
+  isLocalHost,
+} from "./connection";
 
 describe("provider detection", () => {
   it("classifies hosts by suffix only", () => {
@@ -28,22 +34,36 @@ describe("analyze", () => {
     expect(a.normalized).toContain("s3cret");
   });
   it("placeholder passwords are an error", () => {
-    const a = analyze("postgresql://u:[YOUR-PASSWORD]@db.internal/app", "require");
+    const a = analyze(
+      "postgresql://u:[YOUR-PASSWORD]@db.internal/app",
+      "require",
+    );
     expect(a.blocked).toBe(true);
   });
   it("supabase transaction pooler port warns with a fix", () => {
-    const a = analyze("postgresql://u:p@pooler.ref.supabase.com:6543/postgres", "require");
+    const a = analyze(
+      "postgresql://u:p@pooler.ref.supabase.com:6543/postgres",
+      "require",
+    );
     const fix = a.findings.find((f) => f.fix);
     expect(fix?.fix?.patch.port).toBe("5432");
   });
   it("neon -pooler host warns on any port", () => {
-    const a = analyze("postgresql://u:p@ep-x-pooler.eu.aws.neon.tech/db", "require");
+    const a = analyze(
+      "postgresql://u:p@ep-x-pooler.eu.aws.neon.tech/db",
+      "require",
+    );
     expect(a.findings.some((f) => f.level === "warn")).toBe(true);
   });
   it("drops unsupported params and says so", () => {
-    const a = analyze("postgresql://u:p@h/db?channel_binding=require&sslmode=require", "require");
+    const a = analyze(
+      "postgresql://u:p@h/db?channel_binding=require&sslmode=require",
+      "require",
+    );
     expect(a.normalized).not.toContain("channel_binding");
-    expect(a.findings.some((f) => f.key === "conn.info.droppedParams")).toBe(true);
+    expect(a.findings.some((f) => f.key === "conn.info.droppedParams")).toBe(
+      true,
+    );
   });
   it("adds the chosen sslmode when absent", () => {
     const a = analyze("postgresql://u:p@h/db", "verify-full");
@@ -62,7 +82,13 @@ describe("analyze", () => {
 describe("buildUri encodes special characters", () => {
   it("password with : / @ # survives a round trip", () => {
     const uri = buildUri(
-      { host: "db.internal", port: "5432", database: "app db", user: "u s", password: "a:b/c@d#e" },
+      {
+        host: "db.internal",
+        port: "5432",
+        database: "app db",
+        user: "u s",
+        password: "a:b/c@d#e",
+      },
       "require",
     );
     expect(uri).toContain("sslmode=require");
@@ -74,7 +100,10 @@ describe("buildUri encodes special characters", () => {
 
 describe("applyPatch one-click fixes", () => {
   it("replaces the port without touching credentials", () => {
-    const fixed = applyPatch("postgresql://u:s3cret@pooler.ref.supabase.com:6543/postgres", { port: "5432" });
+    const fixed = applyPatch(
+      "postgresql://u:s3cret@pooler.ref.supabase.com:6543/postgres",
+      { port: "5432" },
+    );
     expect(fixed).toContain(":5432/");
     expect(fixed).toContain("s3cret");
   });

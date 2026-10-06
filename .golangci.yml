@@ -1,0 +1,103 @@
+# High-signal subset for a security-critical single-binary Go service:
+# correctness, error handling, resource lifecycles, cancellation, and the
+# few security patterns that static analysis reliably catches. Style and
+# naming linters stay off on purpose (quality plan: signal over volume).
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - errcheck
+    - errorlint
+    - bodyclose
+    - sqlclosecheck
+    - rowserrcheck
+    - gosec
+    - exhaustive
+    - nolintlint
+    # noctx/contextcheck are deliberately OFF (documented): database
+    # operations intentionally use the context-free pool handle so shutdown
+    # convergence can always write (round-2 P1-03), and every outbound HTTP
+    # client carries an explicit Timeout plus the netguard dial boundary.
+    # Enabling them would demand ~200 changes that contradict the design.
+  settings:
+    errcheck:
+      check-type-assertions: true
+      # The codebase convention is an EXPLICIT `_ =` for documented
+      # best-effort calls (Close on cleanup paths, RowsAffected on
+      # arbitration probes); check-blank would drown real misses in 300+
+      # intentional sites. Genuinely unchecked calls stay flagged.
+      check-blank: false
+      exclude-functions:
+        # Best-effort cleanup and output writes: the error cannot change the
+        # outcome and every call site is a close/defer/write on a path that
+        # already reports its own failure (documented at the sites). Store
+        # Close is logged where the outcome matters (graceful shutdown).
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Tx).Rollback
+        - (*os.File).Close
+        - (io.ReadCloser).Close
+        - (*github.com/cloudfan/supabackup/backend/internal/db.Store).Close
+        - os.Remove
+        - os.RemoveAll
+        - fmt.Fprintf
+        - fmt.Sscanf
+      # Deliberate fire-and-forget patterns are annotated at the call site;
+      # a blanket exclusion would hide real leaks.
+    gosec:
+      # G104 duplicates errcheck (governed by exclude-functions above).
+      # G304/G702/G703: file paths derive from operator-controlled
+      # SB_DATA_DIR/SB_SECRET_FILE only; the trust boundary is the data-dir
+      # owner, and symlink/permission hardening is enforced in config.Load.
+      # G124: the flagged cookies are the SB_INSECURE_COOKIE dev escape,
+      # production cookies carry Secure/HttpOnly/SameSite=Strict and are
+      # pinned by TestProductionCookieAttributes.
+      excludes:
+        - G104
+        - G304
+        - G702
+        - G703
+        - G124
+        # G204: subprocess execution is the product (pg_dump/pg_restore);
+        # each call site is reviewed for argv/credential/cancel handling.
+        - G204
+        # G301/G302/G306: 0700/0600 permission literals are the design.
+        - G301
+        - G302
+        - G306
+    exhaustive:
+      # Only switch statements over our own enums; default-case switches are
+      # checked where the enum is closed (see default-signifies-exhaustive).
+      default-signifies-exhaustive: true
+    nolintlint:
+      require-specific: true
+      require-explanation: true
+      allow-unused: false
+  exclusions:
+    generated: strict
+    warn-unused: true
+    rules:
+      # Generated strict-server glue: errors are wrapped by the framework.
+      - path: backend/internal/api/
+        linters: [errcheck, errorlint]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: strict
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

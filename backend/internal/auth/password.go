@@ -94,6 +94,12 @@ func VerifyPassword(encoded, password string) bool {
 	if err != nil || len(want) != argonKeyLen {
 		return false
 	}
-	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(len(want)))
+	// len(want) is argonKeyLen (a small constant) — the conversion cannot
+	// overflow; keep gosec G115 satisfied with an explicit bound check.
+	keyLen := len(want)
+	if keyLen <= 0 || keyLen > 1<<20 {
+		return false
+	}
+	got := argon2.IDKey([]byte(password), salt, t, m, p, uint32(keyLen))
 	return subtle.ConstantTimeCompare(got, want) == 1
 }

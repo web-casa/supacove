@@ -26,7 +26,10 @@ function detect(): Lang {
   } catch {
     // private mode: fall through to the navigator
   }
-  return typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  return typeof navigator !== "undefined" &&
+    navigator.language?.toLowerCase().startsWith("zh")
+    ? "zh-CN"
+    : "en";
 }
 
 export function getLang(): Lang {
@@ -46,9 +49,14 @@ export function setLang(l: Lang): void {
 export function translate(lang: Lang, key: string, vars?: Vars): string {
   const dict = DICTS[lang] as Record<string, string>;
   let template: string | undefined = dict[key];
-  if (template === undefined && vars && "count" in vars && vars.count === 1) template = dict[`${key}.one`];
-  if (template === undefined) template = vars && "count" in vars ? dict[`${key}.other`] ?? dict[key] : undefined;
+  if (template === undefined && vars && "count" in vars && vars.count === 1)
+    template = dict[`${key}.one`];
+  if (template === undefined)
+    template =
+      vars && "count" in vars ? (dict[`${key}.other`] ?? dict[key]) : undefined;
   if (template === undefined) template = key; // unknown keys (raw API states) pass through
   if (!vars) return template;
-  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m));
+  return template.replace(/\{(\w+)\}/g, (m, k: string) =>
+    k in vars ? String(vars[k]) : m,
+  );
 }

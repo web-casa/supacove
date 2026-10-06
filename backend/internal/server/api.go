@@ -167,11 +167,6 @@ func (a *apiService) GetAuthMe(ctx context.Context, _ api.GetAuthMeRequestObject
 // context helpers for values the guard middleware resolves from the raw request
 // (strict handlers do not receive *http.Request).
 
-func clientIPFrom(ctx context.Context) string {
-	ip, _ := ctx.Value(ctxClientIP).(string)
-	return ip
-}
-
 func sessionRawFrom(ctx context.Context) string {
 	raw, _ := ctx.Value(ctxSessionRaw).(string)
 	return raw

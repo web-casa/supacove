@@ -31,11 +31,23 @@ export interface StatusMeta {
 export function protectionMeta(state: OverviewEntry["state"]): StatusMeta {
   switch (state) {
     case "fresh":
-      return { label: "status.protection.fresh", tone: "ok", icon: ShieldCheck };
+      return {
+        label: "status.protection.fresh",
+        tone: "ok",
+        icon: ShieldCheck,
+      };
     case "expired":
-      return { label: "status.protection.expired", tone: "danger", icon: ShieldAlert };
+      return {
+        label: "status.protection.expired",
+        tone: "danger",
+        icon: ShieldAlert,
+      };
     case "never":
-      return { label: "status.protection.never", tone: "warn", icon: ShieldOff };
+      return {
+        label: "status.protection.never",
+        tone: "warn",
+        icon: ShieldOff,
+      };
     default:
       return { label: state, tone: "neutral", icon: CircleHelp };
   }
@@ -48,13 +60,26 @@ export function verifyMeta(v?: string): StatusMeta | null {
     case "failed":
       return { label: "status.verify.failed", tone: "danger", icon: CircleX };
     case "unsupported":
-      return { label: "status.verify.unsupported", tone: "warn", icon: CircleHelp };
+      return {
+        label: "status.verify.unsupported",
+        tone: "warn",
+        icon: CircleHelp,
+      };
     case "pending":
       return { label: "status.verify.pending", tone: "neutral", icon: Clock };
     case "running":
-      return { label: "status.verify.running", tone: "info", icon: LoaderCircle, spin: true };
+      return {
+        label: "status.verify.running",
+        tone: "info",
+        icon: LoaderCircle,
+        spin: true,
+      };
     case "skipped":
-      return { label: "status.verify.skipped", tone: "neutral", icon: CircleDashed };
+      return {
+        label: "status.verify.skipped",
+        tone: "neutral",
+        icon: CircleDashed,
+      };
     default:
       return null;
   }
@@ -67,11 +92,20 @@ export function taskStatusMeta(status: Task["status"]): StatusMeta {
     case "failed":
       return { label: "status.task.failed", tone: "danger", icon: CircleX };
     case "running":
-      return { label: "status.task.running", tone: "info", icon: LoaderCircle, spin: true };
+      return {
+        label: "status.task.running",
+        tone: "info",
+        icon: LoaderCircle,
+        spin: true,
+      };
     case "pending":
       return { label: "status.task.pending", tone: "neutral", icon: Clock };
     case "interrupted":
-      return { label: "status.task.interrupted", tone: "warn", icon: CircleHelp };
+      return {
+        label: "status.task.interrupted",
+        tone: "warn",
+        icon: CircleHelp,
+      };
     case "canceled":
       return { label: "status.task.canceled", tone: "neutral", icon: Ban };
     default:
@@ -84,11 +118,20 @@ type DeliveryState = NotificationList["notifications"][number]["state"];
 export function deliveryMeta(state: DeliveryState): StatusMeta {
   switch (state) {
     case "delivered":
-      return { label: "status.delivery.delivered", tone: "ok", icon: MailCheck };
+      return {
+        label: "status.delivery.delivered",
+        tone: "ok",
+        icon: MailCheck,
+      };
     case "dead":
       return { label: "status.delivery.dead", tone: "danger", icon: MailX };
     case "delivering":
-      return { label: "status.delivery.delivering", tone: "info", icon: LoaderCircle, spin: true };
+      return {
+        label: "status.delivery.delivering",
+        tone: "info",
+        icon: LoaderCircle,
+        spin: true,
+      };
     case "pending":
       return { label: "status.delivery.pending", tone: "neutral", icon: Clock };
     default:
@@ -110,7 +153,9 @@ export interface HealthSummary {
 }
 
 const needsAttention = (d: OverviewEntry) =>
-  d.state !== "fresh" || d.lastSuccessVerifyStatus === "failed" || d.lastJobStatus === "failed";
+  d.state !== "fresh" ||
+  d.lastSuccessVerifyStatus === "failed" ||
+  d.lastJobStatus === "failed";
 
 export function summarize(dbs: OverviewEntry[]): HealthSummary {
   const count = (f: (d: OverviewEntry) => boolean) => dbs.filter(f).length;
@@ -156,13 +201,16 @@ export function bySeverity(dbs: OverviewEntry[]): OverviewEntry[] {
 /** Unix seconds of the last success; falls back to the server-computed age. */
 export function lastSuccessUnix(d: OverviewEntry): number | null {
   if (d.lastSuccessAt != null) return d.lastSuccessAt;
-  if (d.lastSuccessAgeHours != null) return Date.now() / 1000 - d.lastSuccessAgeHours * 3600;
+  if (d.lastSuccessAgeHours != null)
+    return Date.now() / 1000 - d.lastSuccessAgeHours * 3600;
   return null;
 }
 
 /** Grey = paused, unless something is actually wrong. */
 export function rowTone(d: OverviewEntry): Tone {
-  return d.schedulePaused && d.state === "fresh" ? "neutral" : protectionMeta(d.state).tone;
+  return d.schedulePaused && d.state === "fresh"
+    ? "neutral"
+    : protectionMeta(d.state).tone;
 }
 
 /** Protected databases beat; expired ones flatline; never-backed-up have no signal yet. */

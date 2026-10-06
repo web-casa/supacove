@@ -9,7 +9,7 @@ html {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizelegibility;
 }
 
 body {
@@ -26,7 +26,12 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: radial-gradient(circle, rgb(255 255 255 / 0.055) 1px, transparent 1.5px) 50% 0 / 26px 26px;
+  background: radial-gradient(
+      circle,
+      rgb(255 255 255 / 0.055) 1px,
+      transparent 1.5px
+    )
+    50% 0 / 26px 26px;
   mask-image: radial-gradient(ellipse 75% 60% at 50% 0%, #000, transparent);
   pointer-events: none;
 }
@@ -118,12 +123,12 @@ code {
 }
 
 @keyframes ping {
-  from {
+  0% {
     opacity: 0.55;
     transform: scale(1);
   }
   70%,
-  to {
+  100% {
     opacity: 0;
     transform: scale(3.2);
   }

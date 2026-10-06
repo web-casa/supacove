@@ -23,7 +23,7 @@ func Test(ctx context.Context, c *ConnInfo) (*TestResult, error) {
 	if err != nil {
 		return nil, ClassifyError(err)
 	}
-	defer conn.Close(context.WithoutCancel(ctx))
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
 	var version string
 	if err := conn.QueryRow(ctx, `SELECT version()`).Scan(&version); err != nil {
@@ -74,7 +74,7 @@ func CollectDependencies(ctx context.Context, c *ConnInfo) (*Dependencies, error
 	if err != nil {
 		return nil, ClassifyError(err)
 	}
-	defer conn.Close(context.WithoutCancel(ctx))
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
 	d := &Dependencies{}
 

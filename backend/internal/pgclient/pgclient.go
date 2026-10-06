@@ -33,11 +33,6 @@ const (
 // connection behaviour must flow through this application only (dev-plan
 // P2 task 2). pgx additionally enforces ConnStringAllowedKeys as a second
 // line of defense.
-var allowedParams = map[string]bool{
-	"sslmode":          true,
-	"connect_timeout":  true,
-	"application_name": true,
-}
 
 var sslmodes = map[string]bool{
 	"disable": true, "allow": true, "prefer": true, "require": true,

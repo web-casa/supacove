@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -201,7 +202,7 @@ func TestScheduleConfigRoundTrip(t *testing.T) {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
 	// Unknown database → not found.
-	if _, err := GetSchedule(context.Background(), r.store.DB, 999999); err != ErrDatabaseNotFound {
+	if _, err := GetSchedule(context.Background(), r.store.DB, 999999); !errors.Is(err, ErrDatabaseNotFound) {
 		t.Fatalf("unknown id err = %v, want ErrDatabaseNotFound", err)
 	}
 }

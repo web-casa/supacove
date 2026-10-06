@@ -9,4 +9,7 @@ afterEach(() => {
 });
 
 // jsdom lacks the view-transition API the hash router feature-detects.
-Object.defineProperty(document, "startViewTransition", { value: undefined, configurable: true });
+Object.defineProperty(document, "startViewTransition", {
+  value: undefined,
+  configurable: true,
+});
