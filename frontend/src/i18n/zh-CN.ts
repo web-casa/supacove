@@ -49,7 +49,6 @@ export const zhCN: Dict = {
   "common.hide": "隐藏",
   "common.showLatest": "只显示最近 {n} 条",
   "common.showAll": "显示全部 {n} 条",
-  "common.requestFailed": "请求失败",
   "lang.switch": "语言",
 
   // ---- health summary -------------------------------------------------------

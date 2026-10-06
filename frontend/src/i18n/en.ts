@@ -48,7 +48,6 @@ const raw = {
   "common.hide": "Hide",
   "common.showLatest": "Show latest {n}",
   "common.showAll": "Show all {n}",
-  "common.requestFailed": "Request failed",
   "lang.switch": "Language",
 
   // ---- health summary -------------------------------------------------------
