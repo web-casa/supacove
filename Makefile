@@ -14,7 +14,7 @@ GOBIN_DIR := $(GOBIN_DIR)
 endif
 OAPI := $(GOBIN_DIR)/oapi-codegen
 
-.PHONY: help build backend frontend api-gen api-check api-breaking metrics-check dev test lint check clean
+.PHONY: help build backend frontend api-gen api-check api-breaking metrics-check e2e dev test lint check clean
 .NOTPARALLEL:
 
 help:
@@ -51,6 +51,10 @@ metrics-check:
 	curl -sfS -b "$${SB_METRICS_COOKIE:?set SB_METRICS_COOKIE to a logged-in cookie jar}" \
 	  -o "$$TMP" "$${SB_BASE_URL:-http://127.0.0.1:8080}/metrics" && \
 	test -s "$$TMP" && promtool check metrics < "$$TMP"
+
+e2e: ## Playwright suite against the final embedded binary (scripts/e2e-run.sh)
+	cd frontend && npm ci && npx playwright install chromium
+	sh scripts/e2e-run.sh
 
 api-check: ## Fail if generated code drifted from the OpenAPI contract
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
