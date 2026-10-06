@@ -1,0 +1,12 @@
+import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach, vi } from "vitest";
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
+
+// jsdom lacks the view-transition API the hash router feature-detects.
+Object.defineProperty(document, "startViewTransition", { value: undefined, configurable: true });
