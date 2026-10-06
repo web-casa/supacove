@@ -236,7 +236,7 @@ func (v *Verifier) Verify(ctx context.Context, input Input) (res Result) {
 				return // keep the workdir as evidence
 			}
 		}
-		_ = os.Remove(plainPath) // most sensitive residue first // cleanup on a path whose outcome cannot change the result (errcheck)
+		_ = os.Remove(plainPath) // most sensitive residue first: best-effort wipe when the workdir is kept for diagnosis; failure leaves plaintext only inside the diagnosis dir the operator chose to keep (errcheck tolerated)
 		if preserveWorkDir {
 			return // keep the evidence (start failure or unconfirmed stop)
 		}
