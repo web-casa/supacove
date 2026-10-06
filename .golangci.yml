@@ -55,14 +55,19 @@ linters:
         # verifier; os.Remove cleanup sites are explicitly `_ =` annotated
         # where the outcome truly cannot change the result.
         - os.RemoveAll
-        # fmt.Fprintf hits today are HTTP/pipe writers (metrics, static
-        # handler) whose failure is unrecoverable mid-response; persistent
-        # file writes are NOT exempt and must be checked explicitly.
+        # FUNCTION-LEVEL exclusion: it also covers persistent file writes.
+        # Audited current hits are all HTTP/pipe writers (metrics, static
+        # handler) whose failure is unrecoverable mid-response; new
+        # persistent-file Fprintf call sites must not be added under this
+        # exemption — write with os.WriteFile and check the error.
         - fmt.Fprintf
-        # fmt.Sscanf sites parse regex-preselected filenames (job IDs from
-        # ^backup-job(\d+)\.dump\.age$ matches) plus test fixtures; the
-        # regexp gate bounds the digit run before the scan, and callers
-        # ignore the count deliberately. Production parse failures surface
+        # fmt.Sscanf sites parse job IDs out of filenames that the
+        # ^backup-job(\d+)\.dump\.age$ regexp already accepted. The count
+        # return is ignored deliberately: its only failure mode is int64
+        # overflow on a >19-digit name, which yields jobID 0 — never issued
+        # (SQLite autoincrement starts at 1) — so the row is reported as an
+        # unreferenced artifact instead of matching a real job. The regexp
+        # does NOT bound the value; this is the real trade-off. Production parse failures surface
         # through the regexp, not the scan.
         - fmt.Sscanf
       # Deliberate fire-and-forget patterns are annotated at the call site;

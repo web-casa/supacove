@@ -17,7 +17,10 @@ All notable changes to supabackup.
   concurrent enqueue admission, retention anchor across a new failure
 - Standalone restore E2E: ciphertext + offline age identity + kit script
   restore without any application state; single-byte tamper rejected
-- SB_JOB_TIMEOUT (6h default) and SB_FAILED_ARTIFACT_TTL_HOURS (72h default)
+- SB_JOB_TIMEOUT (6h default) and SB_FAILED_ARTIFACT_TTL_HOURS (72h default):
+  wall-clock budget per backup job — a hung stage becomes a classified
+  failure instead of silently stalling the single worker (overall review
+  P1-K2) — and the reclamation grace window for dead artifacts
 
 ### Fixed
 - Graceful shutdown (docker stop / upgrade) no longer lands a running backup
@@ -41,11 +44,6 @@ All notable changes to supabackup.
   IPv6 metadata endpoint and NAT64-encoded link-local addresses
 - UI localization (en / zh-CN) across the console and API responses
   (Accept-Language), including remediation guidance
-
-### Added
-- `SB_JOB_TIMEOUT` (default `6h`): wall-clock budget per backup job — a hung
-  stage becomes a classified failure instead of silently stalling the single
-  worker (overall review P1-K2)
 
 ## [0.1.0-alpha] — Phase 1–8
 

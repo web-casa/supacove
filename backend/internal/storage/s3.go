@@ -73,7 +73,8 @@ func (s *Store) Prefix() string { return s.cfg.Prefix }
 
 // Put implements Backend: single PUT below the multipart threshold,
 // manager.Uploader multipart above. The Uploader owns the entire multipart
-// lifecycle (create, parts, complete); on failure it aborts internally
+// lifecycle (create, parts, complete); on failure it aborts internally —
+// but with the CALLER's context, which on shutdown is already canceled
 // (LeavePartsOnError defaults to false) and the real upload ID is extracted
 // from manager.MultiUploadFailure for the error record — our previous
 // manual Create+Abort wrapper used a DIFFERENT upload ID than the Uploader,

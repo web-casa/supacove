@@ -32,20 +32,20 @@ func (s *Store) BackupNow(ctx context.Context, name string) (string, error) {
 	// failed VACUUM (context canceled, disk full) must never leave a partial
 	// file under the official snapshot name (review round 4, P1-08).
 	tmp := dest + ".inprogress"
-	_ = os.Remove(tmp) // stale temp of an earlier attempt; if it survives, the next VACUUM/rename reports it (errcheck tolerated)
+	_ = os.Remove(tmp) // remove THIS attempt's temp on its own failure path: the original error is returned unchanged, a failed remove may leave the temp behind (next attempt overwrites it) (errcheck tolerated)
 	// VACUUM INTO fails if the target exists and cannot run inside a
 	// transaction; the target path is passed as a bound parameter so path
 	// characters cannot alter the statement (review P1-07).
 	if _, err := s.DB.ExecContext(ctx, "VACUUM INTO ?", tmp); err != nil {
-		_ = os.Remove(tmp) // stale temp of an earlier attempt; if it survives, the next VACUUM/rename reports it (errcheck tolerated)
+		_ = os.Remove(tmp) // remove THIS attempt's temp on its own failure path: the original error is returned unchanged, a failed remove may leave the temp behind (next attempt overwrites it) (errcheck tolerated)
 		return "", fmt.Errorf("vacuum into backup snapshot: %w", err)
 	}
 	if err := os.Chmod(tmp, 0o600); err != nil {
-		_ = os.Remove(tmp) // stale temp of an earlier attempt; if it survives, the next VACUUM/rename reports it (errcheck tolerated)
+		_ = os.Remove(tmp) // remove THIS attempt's temp on its own failure path: the original error is returned unchanged, a failed remove may leave the temp behind (next attempt overwrites it) (errcheck tolerated)
 		return "", err
 	}
 	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp) // stale temp of an earlier attempt; if it survives, the next VACUUM/rename reports it (errcheck tolerated)
+		_ = os.Remove(tmp) // remove THIS attempt's temp on its own failure path: the original error is returned unchanged, a failed remove may leave the temp behind (next attempt overwrites it) (errcheck tolerated)
 		return "", err
 	}
 	return dest, nil

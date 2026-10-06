@@ -569,7 +569,7 @@ func decryptToFile(ctx context.Context, identity, ciphertextPath, plainPath stri
 	}
 	src.Close()
 	if decErr != nil {
-		_ = os.Remove(plainPath) // cleanup on a path whose outcome cannot change the result (errcheck)
+		_ = os.Remove(plainPath) // best-effort plaintext wipe when the workdir is KEPT for diagnosis: a failed remove leaves the file but never masks the verification verdict (errcheck tolerated)
 		if ctx.Err() != nil {
 			return fmt.Errorf("decryption canceled: %w", ctx.Err())
 		}
