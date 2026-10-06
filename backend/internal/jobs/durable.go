@@ -15,7 +15,7 @@ func durableWriteFile(path string, data []byte) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
+	defer func() { _ = os.Remove(tmpName) }() // temp file of the atomic-write dance; gone after the rename
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err

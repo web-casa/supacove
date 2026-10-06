@@ -26,9 +26,12 @@ linters:
     - nolintlint
     # noctx/contextcheck are deliberately OFF (documented): database
     # operations intentionally use the context-free pool handle so shutdown
-    # convergence can always write (round-2 P1-03), and every outbound HTTP
-    # client carries an explicit Timeout plus the netguard dial boundary.
-    # Enabling them would demand ~200 changes that contradict the design.
+    # convergence can always write (round-2 P1-03). Outbound HTTP is bounded
+    # per client instead: webhook/heartbeat clients carry an explicit Timeout
+    # plus the netguard dial boundary; the storage SDK client relies on the
+    # job-level execution budget (SB_JOB_TIMEOUT) and per-resume deadlines
+    # rather than a client Timeout — enabling noctx would demand ~200
+    # changes that contradict this design without adding a real boundary.
   settings:
     errcheck:
       check-type-assertions: true
@@ -48,8 +51,16 @@ linters:
         - (*os.File).Close
         - (io.ReadCloser).Close
         - (*github.com/cloudfan/supabackup/backend/internal/db.Store).Close
+        # os.RemoveAll here is only the throwaway temp-dir teardown in the
+        # verifier; os.Remove cleanup sites are explicitly `_ =` annotated
+        # where the outcome truly cannot change the result.
         - os.RemoveAll
+        # fmt.Fprintf targets here are HTTP/pipe writers whose failure is
+        # unrecoverable mid-response; persistent file writes are NOT exempt.
         - fmt.Fprintf
+        # fmt.Sscanf parses regex-preselected filenames (job IDs); overflow
+        # is bounded by the ^backup-job(\d+)$ match, and parse failure is
+        # handled by the regexp gate before the scan.
         - fmt.Sscanf
       # Deliberate fire-and-forget patterns are annotated at the call site;
       # a blanket exclusion would hide real leaks.
@@ -91,7 +102,14 @@ linters:
       # zero G301/G302/G306 hits.
       - path: _test\.go
         linters: [gosec]
-        text: "G30[126]|G702"
+        text: "G30[126]"
+      # Test fixtures assemble commands from literals the test itself wrote
+      # (docker run/exec.Command with t.TempDir args); G702 taint analysis has
+      # no production hit (verified: 0 after re-enabling). Production command
+      # construction is NOT exempt.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G702"
 
       # Generated strict-server glue: errors are wrapped by the framework.
       - path: backend/internal/api/

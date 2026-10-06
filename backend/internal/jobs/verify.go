@@ -362,7 +362,7 @@ func (r *Runner) runVerification(lifeCtx context.Context, req verifyRequest) {
 			if mb2, rerr := os.ReadFile(local); rerr == nil {
 				mb = mb2
 				merr = nil
-				defer func() { _ = os.Remove(local) }()
+				defer func() { _ = os.Remove(local) }() // downloaded verification copy; throwaway by contract
 			}
 		}
 	}
