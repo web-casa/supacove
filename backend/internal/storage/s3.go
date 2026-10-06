@@ -303,3 +303,9 @@ func (s *Store) DiagnosticTest(ctx context.Context) error {
 	}
 	return nil
 }
+
+// newStoreWithClient builds a Store over a caller-supplied client — the
+// injection point for the pagination/abort regression test.
+func newStoreWithClient(client *s3.Client, cfg Config, logger *slog.Logger) *Store {
+	return &Store{client: client, cfg: cfg, logger: logger}
+}

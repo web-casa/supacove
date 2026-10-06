@@ -79,7 +79,7 @@ lint:
 	golangci-lint run ./...
 	cd frontend && npm run lint && npm run stylelint
 
-check: lint frontend api-check api-breaking test ## Everything CI runs; frontend sets up deps before api-check
+check: lint frontend api-check api-breaking test ## Local gate: static checks + contract + unit tests (CI additionally runs e2e, image smoke and security scans)
 	cd frontend && npx vitest run
 	$(MAKE) build
 
