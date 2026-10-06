@@ -206,11 +206,11 @@ func TestPhase7OverviewAndNotifications(t *testing.T) {
 	}
 	metrics := readAll(t, resp)
 	for _, want := range []string{
-		"supabackup_jobs_total",
+		"supabackup_jobs",
 		"supabackup_last_success_timestamp",
 		"supabackup_outbox_pending",
 		"supabackup_databases_protection",
-		"supabackup_verification_total",
+		"supabackup_verification",
 	} {
 		if !strings.Contains(metrics, want) {
 			t.Fatalf("metrics missing %s:\n%s", want, metrics)

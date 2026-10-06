@@ -145,28 +145,34 @@ func (s *Store) abortMultipart(uploadID, key string) {
 	}
 }
 
-// AbortIncomplete lists in-flight multipart uploads for key and aborts them
-// on a detached context. Best effort; used after upload failures whose error
+// AbortIncomplete aborts every in-flight multipart session for key on a
+// detached context. Best effort; used after upload failures whose error
 // carries no upload ID.
+//
+// Rescan-to-fixed-point instead of marker pagination: MinIO invalidates the
+// key/upload-id markers once the previous page's sessions are aborted, so a
+// marker walk skips same-key survivors (GLM review round 5: 101 sessions,
+// 4/4 runs left exactly one behind). Relisting from the key after each
+// aborted batch is correct on both AWS and MinIO; the loop ends when a page
+// yields no session for this exact key, and a round cap plus the overall
+// deadline bound pathological churn.
 func (s *Store) AbortIncomplete(_ context.Context, key string) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 30*time.Second)
 	defer cancel()
-	// Pagination MUST carry both markers: with only a key marker S3 skips
-	// uploads of the SAME key on later pages (SDK ListMultipartUploads
-	// semantics), silently leaving sessions behind (review R2-1).
-	var keyMarker, uploadMarker *string
-	for {
+	const maxRounds = 100 // 100 rounds x 100/page = 10k sessions; deadline still rules
+	for round := 0; round < maxRounds; round++ {
+		from := key
 		out, err := s.client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
-			Bucket:         aws.String(s.cfg.Bucket),
-			Prefix:         aws.String(key),
-			KeyMarker:      keyMarker,
-			UploadIdMarker: uploadMarker,
-			MaxUploads:     aws.Int32(100),
+			Bucket:     aws.String(s.cfg.Bucket),
+			Prefix:     aws.String(key),
+			KeyMarker:  &from, // start AT the key; no upload-id marker
+			MaxUploads: aws.Int32(100),
 		})
 		if err != nil {
 			s.logger.Warn("list multipart uploads failed", "key", key, "err", err)
 			return
 		}
+		aborted := 0
 		for _, u := range out.Uploads {
 			if u.Key == nil || *u.Key != key || u.UploadId == nil {
 				continue
@@ -179,14 +185,15 @@ func (s *Store) AbortIncomplete(_ context.Context, key string) {
 				s.logger.Warn("multipart abort failed; parts persist until an "+
 					"incomplete-upload lifecycle rule (if the bucket has one) reclaims them",
 					"key", key, "upload_id", *u.UploadId, "err", aerr)
+			} else {
+				aborted++
 			}
 		}
-		if out.IsTruncated == nil || !*out.IsTruncated {
-			return
+		if aborted == 0 {
+			return // fixed point: nothing left for this exact key
 		}
-		keyMarker = out.NextKeyMarker
-		uploadMarker = out.NextUploadIdMarker
 	}
+	s.logger.Warn("multipart sweep hit the round cap; sessions may remain", "key", key)
 }
 
 var errNotFound = errors.New("object not found")

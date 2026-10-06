@@ -7,10 +7,20 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cloudfan/supabackup/backend/internal/outbox"
 )
+
+// promLabel renders a label value in the Prometheus text format: ONLY
+// backslash, double quote and newline are escaped — Go's %q additionally
+// emits \t, \r, \xNN, which real Prometheus parsers reject (GLM review
+// round 5: a database name containing a tab made the whole line invalid).
+func promLabel(v string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+	return `"` + r.Replace(v) + `"`
+}
 
 // handleMetrics serves the Prometheus-format /metrics endpoint.
 // Authenticated by the default-deny guard. Labels are deliberately
@@ -59,11 +69,11 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			failed("jobs")
 		}
 		rows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
-		fmt.Fprintf(w, "# HELP supabackup_jobs_total Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).\n")
-		fmt.Fprintf(w, "# TYPE supabackup_jobs_total gauge\n")
+		fmt.Fprintf(w, "# HELP supabackup_jobs Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).\n")
+		fmt.Fprintf(w, "# TYPE supabackup_jobs gauge\n")
 		var succeeded, failed int64
 		for _, x := range kvs {
-			fmt.Fprintf(w, "supabackup_jobs_total{status=%q} %d\n", x.status, x.n)
+			fmt.Fprintf(w, "supabackup_jobs{status=%s} %d\n", promLabel(x.status), x.n)
 			switch x.status {
 			case "succeeded":
 				succeeded = x.n
@@ -72,9 +82,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		// Legacy gauges (pre-Phase-7): kept so existing alert rules and
-		// dashboards keep firing across the upgrade; prefer jobs_total.
-		gauge("supabackup_jobs_succeeded", "DEPRECATED alias of supabackup_jobs_total{status=\"succeeded\"}.", succeeded)
-		gauge("supabackup_jobs_failed", "DEPRECATED alias of supabackup_jobs_total{status=\"failed\"}.", failed)
+		// dashboards keep firing across the upgrade; prefer supabackup_jobs.
+		gauge("supabackup_jobs_succeeded", "DEPRECATED alias of supabackup_jobs{status=\"succeeded\"}.", succeeded)
+		gauge("supabackup_jobs_failed", "DEPRECATED alias of supabackup_jobs{status=\"failed\"}.", failed)
 	}
 
 	// Remote commit inputs (protocol C success rate).
@@ -86,8 +96,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		 FROM jobs`).Scan(&committed, &uploadFailed); err != nil {
 		failed("remote") // omit the gauges: a query outage must not read as 0
 	} else {
-		gauge("supabackup_remote_commits_total", "Backups remotely committed (or deleted after a committed lifetime).", committed)
-		gauge("supabackup_remote_upload_failures_total", "Jobs failed in the storage_upload class.", uploadFailed)
+		gauge("supabackup_remote_commits", "Backups remotely committed (or deleted after a committed lifetime).", committed)
+		gauge("supabackup_remote_upload_failures", "Jobs failed in the storage_upload class.", uploadFailed)
 	}
 
 	// Verification status distribution over succeeded backups.
@@ -115,10 +125,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			failed("verification")
 		}
 		vrows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
-		fmt.Fprintf(w, "# HELP supabackup_verification_total Restore-verification states of succeeded backups.\n")
-		fmt.Fprintf(w, "# TYPE supabackup_verification_total gauge\n")
+		fmt.Fprintf(w, "# HELP supabackup_verification Restore-verification states of succeeded backups.\n")
+		fmt.Fprintf(w, "# TYPE supabackup_verification gauge\n")
 		for _, x := range kvs {
-			fmt.Fprintf(w, "supabackup_verification_total{status=%q} %d\n", x.status, x.n)
+			fmt.Fprintf(w, "supabackup_verification{status=%s} %d\n", promLabel(x.status), x.n)
 		}
 	}
 
@@ -153,7 +163,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# HELP supabackup_last_success_timestamp Last successful backup snapshot per database (unix seconds).\n")
 		fmt.Fprintf(w, "# TYPE supabackup_last_success_timestamp gauge\n")
 		for _, x := range kvs {
-			fmt.Fprintf(w, "supabackup_last_success_timestamp{database=%q} %d\n", x.name, x.at)
+			fmt.Fprintf(w, "supabackup_last_success_timestamp{database=%s} %d\n", promLabel(x.name), x.at)
 		}
 	}
 
@@ -209,7 +219,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# HELP supabackup_databases_protection Databases by protection state (fresh/expired/never).\n")
 		fmt.Fprintf(w, "# TYPE supabackup_databases_protection gauge\n")
 		for _, state := range []string{"fresh", "expired", "never"} {
-			fmt.Fprintf(w, "supabackup_databases_protection{state=%q} %d\n", state, counts[state])
+			fmt.Fprintf(w, "supabackup_databases_protection{state=%s} %d\n", promLabel(state), counts[state])
 		}
 	}
 
@@ -224,7 +234,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# HELP supabackup_scrape_errors Collectors that failed during this scrape.\n")
 		fmt.Fprintf(w, "# TYPE supabackup_scrape_errors gauge\n")
 		for _, c := range names {
-			fmt.Fprintf(w, "supabackup_scrape_errors{collector=%q} 1\n", c)
+			fmt.Fprintf(w, "supabackup_scrape_errors{collector=%s} 1\n", promLabel(c))
 		}
 	}
 }

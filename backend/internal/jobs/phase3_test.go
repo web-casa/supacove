@@ -208,10 +208,15 @@ echo "FAKEDUMP-P3"
 
 func (p *phase3Runner) addDestination(t *testing.T, keep int) int64 {
 	t.Helper()
+	return p.addDestinationKeepDays(t, keep, 0)
+}
+
+func (p *phase3Runner) addDestinationKeepDays(t *testing.T, keep, keepDays int) int64 {
+	t.Helper()
 	id, err := p.CreateDestination(context.Background(), Destination{
 		Name: "dest", Platform: "s3", Region: "test", Bucket: "bucket",
 		Prefix: "dest/", AccessKey: "AK", SecretKey: "SK", VerifyReadback: true,
-		KeepRemote: keep,
+		KeepRemote: keep, KeepDays: keepDays,
 	}, false) // no live diagnostic: the fake backend is the factory's product
 	if err != nil {
 		t.Fatalf("create destination: %v", err)
@@ -441,9 +446,14 @@ func TestUploadVerifyMismatchDeletesRemote(t *testing.T) {
 	if !strings.Contains(err.Error(), "verification mismatch") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	objKey := fmt.Sprintf("dest/databases/%d/backup-%d.dump.age", dbID, jobID)
+	destCfg := dest.StorageConfig()
+	uuid := backupUUIDOfT(t, p, jobID)
+	objKey := destCfg.BackupKey(uuid)
 	if _, ok := p.backend.objects[objKey]; ok {
 		t.Fatal("corrupt remote object must be deleted")
+	}
+	if p.backend.putCount == 0 {
+		t.Fatal("the ciphertext was never uploaded; the mismatch path was not exercised")
 	}
 	var state string
 	_ = p.store.DB.QueryRow(`SELECT remote_state FROM jobs WHERE id = ?`, jobID).Scan(&state)
@@ -462,10 +472,10 @@ func TestUploadFailureRetainsArtifact(t *testing.T) {
 
 	artifact := filepath.Join(p.dataDir, "staging", fmt.Sprintf("backup-job%d.dump.age", jobID))
 	manifest := artifact + ".manifest.json"
-	objKey := fmt.Sprintf("dest/databases/%d/backup-%d.dump.age", dbID, jobID)
-	p.backend.failPut[objKey] = 99 // all attempts fail
-
 	dest3, derr3 := p.GetDestination(context.Background(), destID)
+	destCfg3 := dest3.StorageConfig()
+	objKey := destCfg3.BackupKey(backupUUIDOfT(t, p, jobID))
+	p.backend.failPut[objKey] = 99 // all attempts fail
 	if derr3 != nil {
 		t.Fatal(derr3)
 	}
@@ -606,4 +616,13 @@ func TestReconcileClassification(t *testing.T) {
 		t.Fatalf("matched = %d, want >= 2", report.Matched)
 	}
 	_ = committed
+}
+
+func backupUUIDOfT(t *testing.T, p *phase3Runner, jobID int64) string {
+	t.Helper()
+	var uuid string
+	if err := p.store.DB.QueryRow(`SELECT backup_uuid FROM jobs WHERE id = ?`, jobID).Scan(&uuid); err != nil {
+		t.Fatal(err)
+	}
+	return uuid
 }

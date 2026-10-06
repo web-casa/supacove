@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -82,6 +83,12 @@ func requireMinIO(t *testing.T) *Store {
 		if minioContainer != "" && !minioStopped {
 			_ = exec.Command("docker", "rm", "-f", minioContainer).Run()
 			minioStopped = true
+			// The container is per-process shared: once stopped, a later
+			// test in the same run must start a FRESH instance instead of
+			// reusing the dead client (GLM r5: second MinIO test got
+			// connection refused after the first test's cleanup).
+			minioOnce = sync.Once{}
+			minioClient = nil
 		}
 	})
 	return minioClient
@@ -175,3 +182,36 @@ func TestMinIOEndToEnd(t *testing.T) {
 }
 
 func sha256New() hash.Hash { return sha256.New() }
+
+// GLM-r5 regression: AbortIncomplete must clear EVERY in-flight session of
+// a key on the real MinIO the project ships with — marker pagination was
+// observed to skip same-key survivors once earlier pages were aborted
+// (4/4 runs left exactly one of 101 behind).
+func TestMinIOAbortIncompleteSweepsPastOnePage(t *testing.T) {
+	s := requireMinIO(t)
+	ctx := context.Background()
+	const sessions = 101
+	key := "backups/sweep-many.dump.age"
+
+	for i := 0; i < sessions; i++ {
+		if _, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+			Bucket: aws.String(s.cfg.Bucket), Key: aws.String(key),
+		}); err != nil {
+			t.Fatalf("create session %d: %v", i, err)
+		}
+	}
+
+	s.AbortIncomplete(ctx, key)
+
+	out, err := s.client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
+		Bucket: aws.String(s.cfg.Bucket), Prefix: aws.String(key),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range out.Uploads {
+		if u.Key != nil && *u.Key == key {
+			t.Fatalf("in-flight session survived the sweep: uploadId=%s", aws.ToString(u.UploadId))
+		}
+	}
+}

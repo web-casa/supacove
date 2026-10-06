@@ -60,7 +60,7 @@ test.describe("embedded console", () => {
     await page.reload();
     await expect(page.getByText("保护状态").first()).toBeVisible();
     await page.locator(".lang-opt", { hasText: "EN" }).click();
-    await expect(page.getByText("Protection status")).toBeVisible();
+    await expect(page.getByText("Protection status").first()).toBeVisible();
   });
 
   test("failed registration shows a localized server message", async ({

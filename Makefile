@@ -73,6 +73,7 @@ test: ## Run backend tests with the race detector
 ## Static analysis: gofmt + vet + golangci-lint (backend),
 ## eslint + stylelint (frontend).
 lint:
+	@test -x frontend/node_modules/.bin/eslint || (cd frontend && npm ci)
 	@test -z "$$(gofmt -l backend | grep -v api.gen.go)" || (gofmt -l backend | grep -v api.gen.go && echo "run gofmt -w" && exit 1)
 	go vet ./backend/...
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"; exit 1; }

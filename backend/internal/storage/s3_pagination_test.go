@@ -15,10 +15,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-// Review R2-1 regression: ListMultipartUploads pagination must carry BOTH
-// markers, or S3 skips same-key sessions on later pages. The stub emulates
-// the documented behavior: with only a key marker it returns uploads whose
-// key is strictly greater; only key+upload-id marker continues the same key.
+// Review R2-1 / GLM-r5 regression: the sweep must clear EVERY in-flight
+// session of a key. The stub models both provider behaviors observed:
+//   - AWS: marker pagination over stable listings;
+//   - MinIO: key/upload-id markers are invalidated once the previous page's
+//     sessions are aborted, so the only correct client strategy is the
+//     rescan-from-key fixed-point the production code implements.
 func TestAbortIncompletePaginatesSameKey(t *testing.T) {
 	const sessions = 101 // exceeds one page (MaxUploads=100)
 	var mu sync.Mutex
@@ -30,32 +32,24 @@ func TestAbortIncompletePaginatesSameKey(t *testing.T) {
 		q := r.URL.Query()
 		switch {
 		case r.Method == http.MethodGet && q.Has("uploads"):
-			keyMarker := q.Get("key-marker")
-			uploadMarker := q.Get("upload-id-marker")
 			w.Header().Set("Content-Type", "application/xml")
 			var b strings.Builder
 			b.WriteString(`<?xml version="1.0"?><ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>b</Bucket>`)
-			start, count, truncated := 1, sessions, false
-			if keyMarker != "" && uploadMarker == "" {
-				// S3 semantics without an upload-id marker: only keys
-				// strictly greater than the marker — same-key uploads are
-				// skipped entirely.
-				start, count, truncated = sessions+1, 0, false
-			} else if keyMarker != "" && uploadMarker != "" {
-				start, count, truncated = 101, 1, false
-			} else if count > 100 {
-				count = 100
-				truncated = true
+			// Alive sessions in creation order — page 1 of 100.
+			shown, truncated := 0, false
+			for i := 1; i <= sessions; i++ {
+				if aborted[fmt.Sprintf("u%03d", i)] {
+					continue
+				}
+				if shown == 100 {
+					truncated = true
+					break
+				}
+				fmt.Fprintf(&b, "<Upload><Key>dest/backups/x.dump.age</Key><UploadId>u%03d</UploadId></Upload>", i)
+				shown++
 			}
-			for i := start; i < start+count; i++ {
-				_, _ = fmt.Fprintf(&b, "<Upload><Key>dest/backups/x.dump.age</Key><UploadId>u%03d</UploadId></Upload>", i) // strings.Builder never fails
-			}
-			if truncated {
-				b.WriteString("<IsTruncated>true</IsTruncated><NextKeyMarker>dest/backups/x.dump.age</NextKeyMarker><NextUploadIdMarker>u100</NextUploadIdMarker>")
-			} else {
-				b.WriteString("<IsTruncated>false</IsTruncated>")
-			}
-			b.WriteString("</ListMultipartUploadsResult>")
+			_ = truncated // markers are ignored by the client by design
+			b.WriteString("<IsTruncated>false</IsTruncated></ListMultipartUploadsResult>")
 			_, _ = fmt.Fprint(w, b.String()) // httptest writer; test stub
 		case r.Method == http.MethodDelete && q.Get("uploadId") != "":
 			aborted[q.Get("uploadId")] = true

@@ -225,10 +225,26 @@ func TestConcurrentEnqueueAdmitsSingleJob(t *testing.T) {
 // anchor — local prune and remote retention both keep the last good backup.
 func TestRetentionKeepsAnchorAcrossNewFailure(t *testing.T) {
 	p := newPhase3Runner(t)
-	destID := p.addDestination(t, 1) // keep ONE remote generation
+	// keepDays=0 makes EVERY committed generation "too old" — including the
+	// anchor itself. That is the only configuration where the anchor guard
+	// is distinguishable from the keep<N> branch (GLM r5: the old setup
+	// conflated them, so deleting the anchor guard passed the suite).
+	destID := p.addDestinationKeepDays(t, 1, 1) // keep=1 AND everything older than 1 day
 	dbID := p.addDatabase(t, destID, "anchor-db")
 
 	good := p.seedCommittedJob(t, dbID, destID, "succeeded", "committed")
+	older := p.seedCommittedJob(t, dbID, destID, "succeeded", "committed")
+	olderPath := artifactPathOf(t, p, older)
+	// Make `older` strictly older; good keeps the higher id (the anchor).
+	if _, err := p.store.DB.Exec(`UPDATE jobs SET id = id - 10000 WHERE id = ?`, older); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate BOTH generations past the KeepDays cutoff: without the anchor
+	// guard the retention sweep would delete the anchor too.
+	if _, err := p.store.DB.Exec(
+		`UPDATE jobs SET uploaded_at = strftime('%s','now') - 86400*2 WHERE database_id = ?`, dbID); err != nil {
+		t.Fatal(err)
+	}
 	// A newer, failed job with a committed LOCAL artifact (upload died).
 	bad := p.seedCommittedJob(t, dbID, destID, "failed", "uploading")
 
@@ -238,6 +254,11 @@ func TestRetentionKeepsAnchorAcrossNewFailure(t *testing.T) {
 	badPath := artifactPathOf(t, p, bad)
 	if _, err := os.Stat(goodPath); err != nil {
 		t.Errorf("anchor artifact deleted by local prune: %v", err)
+	}
+	// keepDays=0 + keep=1: the anchor survives even though it is itself
+	// "too old", while the OLDER succeeded generation is collected.
+	if _, err := os.Stat(olderPath); err == nil {
+		t.Error("older non-anchor generation survived keep=1 pruning")
 	}
 	// The failed job's artifact is NOT a retention anchor; prune may take it
 	// (reclamation path), but the good one must survive with keep=1.

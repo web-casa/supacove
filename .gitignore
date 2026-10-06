@@ -27,3 +27,7 @@ data/
 # OS / editor
 .DS_Store
 *.swp
+
+# playwright
+frontend/test-results/
+frontend/playwright-report/

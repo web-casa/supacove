@@ -8,7 +8,10 @@ export default defineConfig({
   timeout: 60_000,
   retries: 0,
   use: {
-    baseURL: process.env.SB_E2E_BASE_URL ?? "http://127.0.0.1:36360",
+    baseURL: process.env.SB_E2E_BASE_URL ?? "http://127.0.0.1:36470",
+    // The specs assert English UI strings; pin the locale so a zh-default
+    // runner cannot flip the console language mid-assertion.
+    locale: "en-US",
     viewport: { width: 1440, height: 900 },
     // Local runs reuse the system Chromium; CI uses the Playwright-managed
     // browser installed by `npx playwright install chromium`.

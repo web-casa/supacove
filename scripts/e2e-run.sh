@@ -12,10 +12,12 @@ trap 'kill "$PID" 2>/dev/null || true; rm -rf "$DATA"' EXIT
 make frontend backend
 SB_DATA_DIR="$DATA" SB_ADDR="127.0.0.1:$PORT" ./bin/supabackup serve &
 PID=$!
+READY=0
 for _ in $(seq 1 30); do
-  curl -sf "http://127.0.0.1:$PORT/api/ready" >/dev/null && break
+  if curl -sf "http://127.0.0.1:$PORT/api/ready" >/dev/null; then READY=1; break; fi
   sleep 0.5
 done
+[ "$READY" = 1 ] || { echo "server never became ready on :$PORT" >&2; exit 1; }
 # The CLI prints prose around the token; extract the indented token line.
 TOKEN="$(SB_DATA_DIR="$DATA" ./bin/supabackup bootstrap | awk 'NF==1 && length($0)>20 { sub(/^ +/, ""); sub(/ +$/, ""); print; exit }')"
 

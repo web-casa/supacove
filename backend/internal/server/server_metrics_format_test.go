@@ -13,7 +13,9 @@ import (
 
 var (
 	metricNameRe = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
-	labelPairRe  = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\]|\\.)*)"$`)
+	// Only \, \" and \n are legal escapes in the Prometheus text format;
+	// anything else (Go %q's \t, \r, \xNN) must fail the gate.
+	labelPairRe = regexp.MustCompile(`^([a-zA-Z_][a-zA-Z0-9_]*)="((?:[^"\\\n]|\\["\\n])*)"$`)
 )
 
 // The hand-written exposition text must satisfy the Prometheus format on
@@ -87,7 +89,7 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	var oddDB int64
 	if err := env.store.DB.QueryRow(
 		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
-		 VALUES ('we"ird\name' || char(10) || 'x', 'generic', '', 'x', 0, 0) RETURNING id`).Scan(&oddDB); err != nil {
+		 VALUES ('we"ird\name' || char(10) || char(9) || 'x', 'generic', '', 'x', 0, 0) RETURNING id`).Scan(&oddDB); err != nil {
 		t.Fatal(err)
 	}
 	// The database label only appears once a SUCCESSFUL job exists for it:
@@ -198,16 +200,27 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	if len(seen) == 0 {
 		t.Fatal("no samples scraped")
 	}
-	// The odd database name MUST appear as a label value — without this the
-	// escaping assertions above would be vacuous (review Q8).
+	// The odd database name MUST appear AND decode back to the exact stored
+	// string — without the equality check, escaped-but-wrong values pass
+	// (GLM review round 5: the old check only looked for \" to exist).
+	const oddName = "we\"ird\\name\n\tx"
 	found := false
 	for key := range seen {
-		if strings.HasPrefix(key, "supabackup_last_success_timestamp{") && strings.Contains(key, `\"`) {
+		if !strings.HasPrefix(key, "supabackup_last_success_timestamp{") {
+			continue
+		}
+		labels := strings.TrimSuffix(strings.TrimPrefix(key, "supabackup_last_success_timestamp{"), "}")
+		v := labelPairRe.FindStringSubmatch(labels)
+		if v == nil {
+			continue
+		}
+		decoded := strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\n`, "\n").Replace(v[2])
+		if decoded == oddName {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("the odd database-name label never reached the exposition text")
+		t.Errorf("the odd database name never round-tripped through the exposition (want %q)", oddName)
 	}
 	// Every family carries both HELP and TYPE.
 	for name := range families {

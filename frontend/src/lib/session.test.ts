@@ -57,3 +57,52 @@ describe("session loss (401)", () => {
     expect(qc.getQueryData(["overview"])).toBeDefined();
   });
 });
+
+describe("default retry predicate (401 must never retry)", () => {
+  // The predicate lives on the client's defaultOptions; exercise it through
+  // the public surface: a query WITHOUT an explicit retry option must fail
+  // fast on 401 (the whole point of the guard) while a 500 retries once.
+  it("401 fails without retries", async () => {
+    const qc = newSessionQueryClient();
+    let attempts = 0;
+    await qc
+      .fetchQuery({
+        queryKey: ["p401"],
+        queryFn: () => {
+          attempts++;
+          return Promise.reject(new ApiError(401, "unauthenticated", "login required"));
+        },
+        // retry deliberately NOT overridden: defaults must apply
+        staleTime: 0,
+        gcTime: 0,
+      })
+      .catch(() => undefined);
+    expect(attempts).toBe(1);
+  });
+
+  it("500 retries exactly once (failures<1) then surfaces", async () => {
+    const qc = newSessionQueryClient();
+    let attempts = 0;
+    await qc
+      .fetchQuery({
+        queryKey: ["p500"],
+        queryFn: () => {
+          attempts++;
+          return Promise.reject(new ApiError(500, "internal", "boom"));
+        },
+      })
+      .catch(() => undefined);
+    expect(attempts).toBe(2); // initial + exactly one retry
+  });
+
+  it("predicate itself: 401→false, 500 first failure→true, second→false", () => {
+    const qc = newSessionQueryClient();
+    // The retry function is reachable via defaultOptions after construction.
+    const retry = qc.getDefaultOptions().queries?.retry;
+    expect(typeof retry).toBe("function");
+    const fn = retry as (f: number, e: unknown) => boolean;
+    expect(fn(0, new ApiError(401, "unauthenticated", "x"))).toBe(false);
+    expect(fn(0, new ApiError(500, "internal", "x"))).toBe(true);
+    expect(fn(1, new ApiError(500, "internal", "x"))).toBe(false);
+  });
+});
