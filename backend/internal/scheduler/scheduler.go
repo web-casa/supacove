@@ -185,7 +185,10 @@ func (s *Scheduler) tick(ctx context.Context) {
 		}
 		if err := s.enqueue(ctx, sch, now); err != nil {
 			if errors.Is(err, jobs.ErrAlreadyQueued) {
-				s.log.Info("backup already queued; schedule cursor advanced", "database", sch.Name)
+				// The enqueue transaction (cursor + job) rolled back: the
+				// cursor is NOT advanced, so the slot re-fires once the
+				// in-flight run finishes (one catch-up backup).
+				s.log.Info("backup already queued; cursor not advanced, slot re-fires after it finishes", "database", sch.Name)
 			} else {
 				s.log.Error("schedule enqueue failed", "database", sch.Name, "err", err)
 			}

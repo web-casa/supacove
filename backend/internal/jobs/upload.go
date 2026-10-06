@@ -359,7 +359,74 @@ func (r *Runner) deleteWithRetry(ctx context.Context, backend storage.Backend, k
 // P1-09 file lease), as is the newest VERIFIED backup when newer backups
 // are unverified (round-2 P1-09: the local restore proof is an anchor
 // too). Recovery-kit files are never pruned here — they are tiny text and
-// stay downloadable.
+// PruneExpiredArtifacts reclaims staging space from jobs that can no longer
+// use their committed artifact: failed and canceled jobs are never resumed,
+// and shutdown-interrupted jobs get a fresh resume attempt at every startup
+// BEFORE this sweep runs (main calls ResumeRemotePhase first), so an
+// artifact still un-committed remotely after the TTL is dead weight.
+// Without this sweep a long destination outage fills staging and — with a
+// quota configured — permanently locks every database's backups (overall
+// review P1-K1). A TTL of 0 disables the sweep (keep everything).
+func (r *Runner) PruneExpiredArtifacts(ctx context.Context) {
+	if r.failedArtifactTTL <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-r.failedArtifactTTL).Unix()
+	rows, err := r.authDB.QueryContext(ctx, `
+		SELECT id, artifact_path, manifest_path FROM jobs
+		WHERE artifact_state = 'committed' AND artifact_path != ''
+		  AND status IN ('failed','canceled','interrupted')
+		  AND finished_at IS NOT NULL AND finished_at < ?`, cutoff)
+	if err != nil {
+		r.log.Error("expired-artifact sweep query", "err", err)
+		return
+	}
+	type reclaim struct {
+		id                 int64
+		artifact, manifest string
+	}
+	var list []reclaim
+	for rows.Next() {
+		var rc reclaim
+		if err := rows.Scan(&rc.id, &rc.artifact, &rc.manifest); err != nil {
+			r.log.Error("expired-artifact sweep scan", "err", err)
+			rows.Close()
+			return
+		}
+		list = append(list, rc)
+	}
+	if err := rows.Err(); err != nil {
+		r.log.Error("expired-artifact sweep rows", "err", err)
+		rows.Close()
+		return
+	}
+	rows.Close()
+	for _, rc := range list {
+		for _, path := range []string{rc.artifact, rc.manifest} {
+			if path == "" {
+				continue
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				r.log.Error("expired-artifact remove", "job", rc.id, "path", path, "err", err)
+			}
+		}
+		if _, err := r.authDB.ExecContext(ctx, `
+			UPDATE jobs SET artifact_path = '', artifact_sha256 = '', artifact_size = 0,
+			  manifest_path = '', artifact_state = ''
+			WHERE id = ? AND status IN ('failed','canceled','interrupted')`, rc.id); err != nil {
+			r.log.Error("expired-artifact clear", "job", rc.id, "err", err)
+		} else {
+			r.log.Info("expired artifact reclaimed", "job", rc.id)
+		}
+	}
+	if len(list) > 0 {
+		r.log.Info("expired artifacts reclaimed", "count", len(list))
+	}
+}
+
+// pruneLocalArtifacts enforces protocol D's local half: keep the newest
+// `keep` committed artifacts per database, delete the rest — the newest is
+// always protected, and anything remotely committed stays downloadable.
 func (r *Runner) pruneLocalArtifacts(ctx context.Context, dbID int64, keep int) {
 	rows, err := r.authDB.QueryContext(ctx, `
 		SELECT id, artifact_path, manifest_path, remote_state, COALESCE(verify_status,'')

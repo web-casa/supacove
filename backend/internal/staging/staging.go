@@ -76,7 +76,7 @@ func (s *Staging) OrphanCleanupStartup() (removed []string, err error) {
 				continue
 			}
 			removed = append(removed, name)
-		case strings.HasPrefix(name, "job-creds-"),
+		case strings.HasPrefix(name, "job-creds-"), strings.HasPrefix(name, "verify-fetch-"),
 			strings.HasPrefix(name, ".durable-"), strings.HasSuffix(name, ".manifest.json.tmp"):
 			if rerr := os.RemoveAll(full); rerr != nil {
 				errs = append(errs, fmt.Errorf("remove credential dir %s: %w", name, rerr))

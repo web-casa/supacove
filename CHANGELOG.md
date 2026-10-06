@@ -2,6 +2,36 @@
 
 All notable changes to supabackup.
 
+## [Unreleased]
+
+### Fixed
+- Graceful shutdown (docker stop / upgrade) no longer lands a running backup
+  as a false `failed` (with a false failure webhook and /fail heartbeat):
+  shutdown-interrupted jobs are recorded as `interrupted` and their committed
+  artifacts are re-uploaded by startup convergence (overall review P1-R1)
+- Failed/canceled/interrupted jobs' staging artifacts are now reclaimed after
+  a grace window (`SB_FAILED_ARTIFACT_TTL_HOURS`, default 72h) — previously
+  they accumulated forever and could lock all backups once the staging quota
+  was hit (overall review P1-K1)
+- `totalDumpBytes` now measures the compressed pg_dump archive (counted
+  before age encryption) instead of duplicating the ciphertext total
+  (overall review P1-A1)
+- Export success-rate denominator now counts jobs that began executing;
+  queued cancels are excluded from both sides (contract documents the
+  denominator) (overall review P1-A2)
+- Migration 0008's Down section no longer breaks rollbacks below v8
+- Startup recovery annotations are idempotent: repeated restarts no longer
+  grow `error_message`
+- `/metrics` requires a session; SSRF dial guard now also refuses the AWS
+  IPv6 metadata endpoint and NAT64-encoded link-local addresses
+- UI localization (en / zh-CN) across the console and API responses
+  (Accept-Language), including remediation guidance
+
+### Added
+- `SB_JOB_TIMEOUT` (default `6h`): wall-clock budget per backup job — a hung
+  stage becomes a classified failure instead of silently stalling the single
+  worker (overall review P1-K2)
+
 ## [0.1.0-alpha] — Phase 1–8
 
 ### Backup kernel

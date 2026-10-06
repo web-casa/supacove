@@ -435,21 +435,27 @@ func (a *apiService) GetStats(ctx context.Context, _ api.GetStatsRequestObject) 
 	// Segmented success rates (Phase 8): each stage gets its own honest
 	// denominator over TERMINAL jobs.
 	//   export: dump phase succeeded = succeeded jobs PLUS upload-phase
-	//     failures (the dump itself was fine; only the upload failed).
-	//     Canceled/interrupted jobs never attempted a dump — excluded.
+	//     failures (the dump itself was fine; only the upload failed) —
+	//     over jobs that BEGAN executing; see the query comment below.
 	//   remote: committed (or deleted after committed life) vs upload failures.
 	//   verify: verified vs failed/unsupported among SUCCEEDED backups
 	//     (matches the contract wording exactly).
+	// Export rate: exports completed over jobs that BEGAN executing
+	// (started_at set). Jobs canceled while queued never attempted a dump
+	// and are excluded from both numerator and denominator; jobs canceled
+	// or interrupted after starting count as not-exported (conservative).
+	// The remote/verify subtotals keep the plain terminal denominator.
 	var exportOK, remoteOK, remoteFailed, vOK, vBad, terminal int64
 	err = a.srv.store.DB.QueryRowContext(ctx, `
 		SELECT
-		  COALESCE(SUM(CASE WHEN status = 'succeeded' OR
-		                    (status = 'failed' AND error_class = 'storage_upload') THEN 1 END), 0),
+		  COALESCE(SUM(CASE WHEN (status = 'succeeded' OR
+		                          (status = 'failed' AND error_class = 'storage_upload'))
+		                     AND started_at IS NOT NULL THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN remote_state IN ('committed','deleted') THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN status = 'failed' AND error_class = 'storage_upload' THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN status = 'succeeded' AND verify_status = 'verified' THEN 1 END), 0),
 		  COALESCE(SUM(CASE WHEN status = 'succeeded' AND verify_status IN ('failed','unsupported') THEN 1 END), 0),
-		  COUNT(*)
+		  COALESCE(SUM(CASE WHEN started_at IS NOT NULL THEN 1 END), 0)
 		FROM jobs WHERE status NOT IN ('pending','running')`).
 		Scan(&exportOK, &remoteOK, &remoteFailed, &vOK, &vBad, &terminal)
 	if err != nil {

@@ -660,7 +660,10 @@ export interface components {
              * @description succeeded / terminal-state jobs; null when nothing has finished.
              */
             successRate: number | null;
-            /** Format: double */
+            /**
+             * Format: double
+             * @description Succeeded exports over jobs that began executing (started_at set). Jobs canceled while queued never attempted a dump and are excluded from both numerator and denominator; jobs canceled or interrupted after starting count as not-exported (conservative denominator).
+             */
             exportSuccessRate?: number | null;
             /**
              * Format: double
@@ -684,7 +687,7 @@ export interface components {
             avgDurationSecs?: number | null;
             /**
              * Format: int64
-             * @description Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind.
+             * @description Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind. Records written by releases that measured after encryption may reflect ciphertext size (equal to totalArtifactBytes' per-job value) rather than the smaller pre-encryption archive.
              */
             totalDumpBytes?: number;
             /**

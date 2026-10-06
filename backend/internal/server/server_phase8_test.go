@@ -51,20 +51,29 @@ func TestPhase8GetStatsRegression(t *testing.T) {
 		VALUES (?, 'succeeded', 0, 0, 100, 110, 405, 10.0, 873, 'verified', 'committed', '')`, dbID); err != nil {
 		t.Fatal(err)
 	}
+	// All three began executing (started_at set): they attempted an export.
 	if _, err := env.store.DB.Exec(`
-		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at, error_class)
-		VALUES (?, 'failed', 0, 0, 120, 'storage_upload')`, dbID); err != nil {
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at, error_class)
+		VALUES (?, 'failed', 0, 0, 101, 120, 'storage_upload')`, dbID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.store.DB.Exec(`
-		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at, error_class)
-		VALUES (?, 'failed', 0, 0, 130, 'network')`, dbID); err != nil {
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at, error_class)
+		VALUES (?, 'failed', 0, 0, 102, 130, 'network')`, dbID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.store.DB.Exec(`
-		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at,
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at,
 		                  artifact_size, verify_status)
-		VALUES (?, 'succeeded', 0, 0, 140, 100, 'failed')`, dbID); err != nil {
+		VALUES (?, 'succeeded', 0, 0, 103, 140, 100, 'failed')`, dbID); err != nil {
+		t.Fatal(err)
+	}
+	// Queued cancel: never began executing, so it is excluded from the
+	// export rate on BOTH sides (overall review P1-A2) while still counting
+	// toward totalJobs/successRate.
+	if _, err := env.store.DB.Exec(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, finished_at)
+		VALUES (?, 'canceled', 0, 0, 150)`, dbID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.store.DB.Exec(`
@@ -79,10 +88,12 @@ func TestPhase8GetStatsRegression(t *testing.T) {
 		t.Fatalf("populated stats status = %d (%v)", code, body)
 	}
 	b, _ = json.Marshal(body)
-	// terminal = 4; export OK = succeeded(2) + upload-failure(1) = 3 → 75%.
+	// Executed jobs = 4 (the queued cancel is excluded from the export
+	// rate); export OK = succeeded(2) + upload-failure(1) = 3 → 75%.
 	// remote OK = 1 committed vs 1 failure → 50%. verify: 1/2 → 50%.
+	// totalJobs includes the queued cancel (5).
 	for _, want := range []string{
-		`"totalJobs":4`,
+		`"totalJobs":5`,
 		`"totalDumpBytes":300`,
 		`"totalArtifactBytes":505`,
 		`"totalSourceBytes":873`,

@@ -65,7 +65,7 @@ type Result struct {
 	DumpToolVer   string
 	ClientMajor   int
 	EncryptedTo   string // recipient fingerprint
-	PlaintextArc  int64  // bytes of compressed archive streamed by pg_dump
+	PlaintextArc  int64  // compressed archive bytes streamed by pg_dump, counted before age encryption
 	StdErrExcerpt string // sanitized, bounded stderr
 }
 
@@ -394,6 +394,10 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	hasher := sha256.New()
 	counter := &countingWriter{w: tmp, quota: writerBudget}
 	encTarget := io.MultiWriter(counter, hasher)
+	// Measure the compressed pg_dump archive BEFORE encryption (overall
+	// review P1-A1): counting the age output instead recorded ciphertext
+	// bytes, making volume metric 2 identical to metric 3.
+	archiveCounter := &countingReader{r: dumpOut}
 
 	if err := cmd.Start(); err != nil {
 		return nil, &Classified{Class: pgclient.ClassClientVer, Err: err}
@@ -407,7 +411,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 	stderrMu := sync.Mutex{}
 
 	wg.Go(func() {
-		encErr = agekey.EncryptStream(t.Recipient, dumpOut, encTarget)
+		encErr = agekey.EncryptStream(t.Recipient, archiveCounter, encTarget)
 		if encErr != nil {
 			// Consumer failure: make sure no process-group member keeps the
 			// pipe open past this point.
@@ -540,7 +544,7 @@ func (c *Config) Run(ctx context.Context, jobID int64, t Target) (res *Result, e
 		DumpToolVer:   toolVersion,
 		ClientMajor:   clientMajor,
 		EncryptedTo:   agekey.Fingerprint(t.Recipient),
-		PlaintextArc:  counter.n,
+		PlaintextArc:  archiveCounter.n,
 		StdErrExcerpt: excerpt,
 	}, nil
 }
@@ -556,6 +560,18 @@ func KillGroup(p *os.Process) {
 // consumer goroutine turns it into an immediate cancel+kill (round-2 review
 // P1-13 remainder: the 500 ms scanner let 8 MiB through a 1 MiB budget).
 var errQuotaExceeded = errors.New("staging quota exceeded mid-stream")
+
+// countingReader counts bytes pulled through it — the pg_dump archive size.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (cr *countingReader) Read(p []byte) (int, error) {
+	n, err := cr.r.Read(p)
+	cr.n += int64(n)
+	return n, err
+}
 
 type countingWriter struct {
 	w        io.Writer

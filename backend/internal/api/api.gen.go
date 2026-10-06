@@ -439,10 +439,12 @@ type ScheduleUpdate struct {
 // StatsSummary defines model for StatsSummary.
 type StatsSummary struct {
 	// AvgDurationSecs Mean BACKUP EXECUTION duration (dump through remote commit — it includes the upload, not only pg_dump) over succeeded jobs that recorded one; null when no job has a measurement.
-	AvgDurationSecs   *float64 `json:"avgDurationSecs"`
-	Canceled          int64    `json:"canceled"`
-	Databases         int      `json:"databases"`
-	Destinations      int      `json:"destinations"`
+	AvgDurationSecs *float64 `json:"avgDurationSecs"`
+	Canceled        int64    `json:"canceled"`
+	Databases       int      `json:"databases"`
+	Destinations    int      `json:"destinations"`
+
+	// ExportSuccessRate Succeeded exports over jobs that began executing (started_at set). Jobs canceled while queued never attempted a dump and are excluded from both numerator and denominator; jobs canceled or interrupted after starting count as not-exported (conservative denominator).
 	ExportSuccessRate *float64 `json:"exportSuccessRate"`
 	Failed            int64    `json:"failed"`
 	LastSuccessAt     *int64   `json:"lastSuccessAt,omitempty"`
@@ -460,7 +462,7 @@ type StatsSummary struct {
 	// TotalArtifactBytes Sum of age-ciphertext sizes over succeeded backups (volume metric 3).
 	TotalArtifactBytes int64 `json:"totalArtifactBytes"`
 
-	// TotalDumpBytes Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind.
+	// TotalDumpBytes Sum of the compressed pg_dump archive sizes RECORDED in the statistics table (volume metric 2). This is a subtotal over recorded samples: successful backups whose stats row is missing (older records, rare write failures) are NOT included — compare with totalArtifactBytes (complete, from the jobs table) with that coverage difference in mind. Records written by releases that measured after encryption may reflect ciphertext size (equal to totalArtifactBytes' per-job value) rather than the smaller pre-encryption archive.
 	TotalDumpBytes *int64 `json:"totalDumpBytes,omitempty"`
 	TotalJobs      int64  `json:"totalJobs"`
 

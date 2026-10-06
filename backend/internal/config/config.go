@@ -61,6 +61,17 @@ type Config struct {
 	// VerifyPGBin overrides the PostgreSQL server binary directory used by
 	// the embedded verifier. Empty auto-detects /usr/lib/postgresql/<maj>/bin.
 	VerifyPGBin string
+	// JobTimeout is the wall-clock budget for one backup job — dump, upload
+	// and read-back (restore verification carries its own). Global
+	// concurrency is 1, so a single hung job would stall every database's
+	// backups; the budget turns a hang into a classified failure. 0
+	// disables the budget.
+	JobTimeout time.Duration
+	// FailedArtifactTTLHours is how long a failed/canceled/interrupted
+	// job's committed staging artifact is kept before reclamation (nothing
+	// ever re-reads it; the window is protocol D's grace for manual
+	// recovery). 0 keeps artifacts forever.
+	FailedArtifactTTLHours int
 	// Version metadata, wired at build time.
 	Version, Commit, BuildDate string
 }
@@ -83,20 +94,38 @@ func Load() (*Config, error) {
 		}
 		quota = n
 	}
+	jobTimeout := 6 * time.Hour
+	if v := os.Getenv("SB_JOB_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("invalid SB_JOB_TIMEOUT %q: must be a duration like 6h or 30m, >= 0", v)
+		}
+		jobTimeout = d
+	}
+	failedTTLHours := 72
+	if v := os.Getenv("SB_FAILED_ARTIFACT_TTL_HOURS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("invalid SB_FAILED_ARTIFACT_TTL_HOURS %q: must be a non-negative integer", v)
+		}
+		failedTTLHours = n
+	}
 	c := &Config{
-		DataDir:            envOr("SB_DATA_DIR", "./data"),
-		LocalKeep:          localKeep,
-		StagingQuotaBytes:  quota,
-		Addr:               envOr("SB_ADDR", ":8080"),
-		SecretFile:         os.Getenv("SB_SECRET_FILE"),
-		InsecureCookie:     envBool("SB_INSECURE_COOKIE"),
-		PublicOrigin:       os.Getenv("SB_PUBLIC_ORIGIN"),
-		TrustedProxies:     os.Getenv("SB_TRUSTED_PROXIES"),
-		VerifyEnabled:      envBool("SB_VERIFY_ENABLED"),
-		VerifyIdentityFile: os.Getenv("SB_VERIFY_IDENTITY_FILE"),
-		VerifyPGBin:        os.Getenv("SB_VERIFY_PGBIN"),
-		BootstrapTokenTTL:  15 * time.Minute,
-		SessionTTL:         7 * 24 * time.Hour,
+		DataDir:                envOr("SB_DATA_DIR", "./data"),
+		LocalKeep:              localKeep,
+		StagingQuotaBytes:      quota,
+		JobTimeout:             jobTimeout,
+		FailedArtifactTTLHours: failedTTLHours,
+		Addr:                   envOr("SB_ADDR", ":8080"),
+		SecretFile:             os.Getenv("SB_SECRET_FILE"),
+		InsecureCookie:         envBool("SB_INSECURE_COOKIE"),
+		PublicOrigin:           os.Getenv("SB_PUBLIC_ORIGIN"),
+		TrustedProxies:         os.Getenv("SB_TRUSTED_PROXIES"),
+		VerifyEnabled:          envBool("SB_VERIFY_ENABLED"),
+		VerifyIdentityFile:     os.Getenv("SB_VERIFY_IDENTITY_FILE"),
+		VerifyPGBin:            os.Getenv("SB_VERIFY_PGBIN"),
+		BootstrapTokenTTL:      15 * time.Minute,
+		SessionTTL:             7 * 24 * time.Hour,
 	}
 	c.DataDir = filepath.Clean(c.DataDir)
 	if c.SecretFile == "" {

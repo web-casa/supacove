@@ -3,9 +3,13 @@
 ## 前提条件
 
 - Docker 和 Docker Compose（推荐）
-- 或者：Go 1.24+ 编译 + PostgreSQL 客户端工具 14–18 + age 加密工具
+- 或者：Go 1.26.6+ 编译（与 go.mod 一致）+ PostgreSQL 客户端工具 14–18 + age 加密工具
 
-## Docker Compose（推荐）
+## Docker Compose
+
+> 仓库自带的 `compose.yaml` 是**开发环境**脚手架（内置 `SB_INSECURE_COOKIE=1`、
+> 固定开发口令和本地 PG/MinIO），只用于本地试用。生产部署请以镜像 +
+> 下文的环境变量表自建 compose（cookie 需要 HTTPS 反代），不要原样上生产。
 
 ```bash
 git clone https://github.com/your-org/supabackup.git
@@ -33,6 +37,8 @@ docker compose exec app /app/supabackup bootstrap
 | `SB_LOG_LEVEL` | `info` | debug/warn/error |
 | `SB_LOCAL_KEEP` | `5` | 每库本地保留的 artifact 数量 |
 | `SB_STAGING_QUOTA_BYTES` | `0`（不限） | 暂存目录硬配额（字节） |
+| `SB_JOB_TIMEOUT` | `6h` | 单个备份任务的墙钟预算（dump+上传+回读）；超时任务按网络类失败落库。`0` 关闭预算 |
+| `SB_FAILED_ARTIFACT_TTL_HOURS` | `72` | failed/canceled/interrupted 任务的本地工件保留时长（小时）；到期自动回收暂存空间。`0` 永久保留 |
 | `SB_HEARTBEAT_URL` | （空） | **回退**死人开关心跳 URL（未单独配置心跳的库继承；共享回退端点意味着多库共同消除同一个 silence，不是每库独立监控）。单独配置某库心跳用 `PUT /api/databases/{id}/schedule`；显式禁用某库填 `"-"`。成功 ping 要求 `heartbeatPeriodHours > 0` 且快照年龄 ≤ period+grace；失败 ping 发送到 `URL/fail`。beta 无 start 信号（v1.0）。 |
 | `SB_PUBLIC_ORIGIN` | （空） | 反代部署时的外部 origin |
 | `SB_TRUSTED_PROXIES` | （空） | 信任的代理 CIDR 列表 |

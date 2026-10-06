@@ -104,25 +104,40 @@ type Runner struct {
 	verifyInFlight map[int64]bool // job IDs whose artifact a verification is reading
 	verifyIdentity string
 	verifyTimeout  time.Duration
+	// jobTimeout is the wall-clock budget for one whole backup job (dump,
+	// upload, read-back); 0 disables it. failedArtifactTTL is how long a
+	// failed/canceled/interrupted job's committed staging artifact survives
+	// before reclamation; 0 keeps everything.
+	jobTimeout        time.Duration
+	failedArtifactTTL time.Duration
 }
+
+// Defaults for the two knobs above; overridable per instance
+// (SB_JOB_TIMEOUT / SB_FAILED_ARTIFACT_TTL_HOURS, setters for tests).
+const (
+	defaultJobTimeout        = 6 * time.Hour
+	defaultFailedArtifactTTL = 72 * time.Hour
+)
 
 func NewRunner(store *db.Store, key []byte, stagingDir string, recipient func(ctx context.Context) (string, error), log *slog.Logger) *Runner {
 	return &Runner{
-		store:          store,
-		authDB:         store.DB,
-		stagingDir:     stagingDir,
-		cfg:            dumper.Config{StagingDir: stagingDir},
-		key:            key,
-		recipient:      recipient,
-		log:            log,
-		cancelFns:      make(map[int64]context.CancelFunc),
-		perDB:          make(map[int64]bool),
-		wake:           make(chan struct{}, 1),
-		stopDone:       make(chan struct{}),
-		destBackends:   make(map[int64]storage.Backend),
-		verifyQueue:    make(chan verifyRequest, verifyQueueCap),
-		verifyInFlight: make(map[int64]bool),
-		verifyTimeout:  defaultVerifyTimeout,
+		store:             store,
+		authDB:            store.DB,
+		stagingDir:        stagingDir,
+		cfg:               dumper.Config{StagingDir: stagingDir},
+		key:               key,
+		recipient:         recipient,
+		log:               log,
+		cancelFns:         make(map[int64]context.CancelFunc),
+		perDB:             make(map[int64]bool),
+		wake:              make(chan struct{}, 1),
+		stopDone:          make(chan struct{}),
+		destBackends:      make(map[int64]storage.Backend),
+		verifyQueue:       make(chan verifyRequest, verifyQueueCap),
+		verifyInFlight:    make(map[int64]bool),
+		verifyTimeout:     defaultVerifyTimeout,
+		jobTimeout:        defaultJobTimeout,
+		failedArtifactTTL: defaultFailedArtifactTTL,
 		backendFactory: func(ctx context.Context, d *Destination) (storage.Backend, error) {
 			return storage.New(ctx, d.StorageConfig(), log)
 		},
@@ -147,7 +162,8 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 	if _, err := r.authDB.ExecContext(ctx, `
 		UPDATE jobs SET error_message = error_message ||
 		  ' [recovery: artifact committed before interruption — restore manually or re-run]'
-		WHERE status = 'interrupted' AND artifact_state IN ('committed','committed_no_manifest')`); err != nil {
+		WHERE status = 'interrupted' AND artifact_state IN ('committed','committed_no_manifest')
+		  AND COALESCE(error_message,'') NOT LIKE '%[recovery:%'`); err != nil {
 		return n, err
 	}
 	if _, err := r.authDB.ExecContext(ctx, `
@@ -251,7 +267,7 @@ func (r *Runner) RecoverInterrupted(ctx context.Context) (int64, error) {
 		if _, uerr := r.authDB.ExecContext(ctx, `
 			UPDATE jobs SET error_message = COALESCE(NULLIF(error_message,''),'') ||
 			  ' [recovery: referenced artifact file is MISSING from staging]'
-			WHERE id = ?`, mm.id); uerr != nil {
+			WHERE id = ? AND COALESCE(error_message,'') NOT LIKE '%[recovery:%'`, mm.id); uerr != nil {
 			r.log.Error("missing-artifact annotation failed", "job", mm.id, "err", uerr)
 		} else {
 			r.log.Warn("referenced artifact missing from staging", "job", mm.id, "path", mm.path)
@@ -352,8 +368,11 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 			continue
 		}
 		// Restore to running so the remote phase can execute with the
-		// production contract, then re-run it.
-		if _, err := r.authDB.ExecContext(ctx,
+		// production contract, then re-run it. State repairs use the
+		// context-free handle ON PURPOSE: a SIGTERM during this synchronous
+		// startup pass cancels ctx, and the repairs below must still land
+		// (fix review, reliability P2-2/P2-3).
+		if _, err := r.authDB.Exec(
 			`UPDATE jobs SET status = 'running' WHERE id = ? AND cancel_requested = 0`, j.id); err != nil {
 			r.log.Error("resume: restore running", "job", j.id, "err", err)
 			continue
@@ -371,8 +390,31 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 			manifestPath:  j.manifestPath,
 			manifestBytes: mb,
 		}
-		if uerr := r.uploadAndCommitRemote(ctx, j.id, j.dbID, upload, dest); uerr != nil {
+		// A hung destination must not pin the synchronous startup pass
+		// before the HTTP listener exists (overall review P1-K2 remainder):
+		// each resume carries the same budget as a normal job.
+		resumeCtx := ctx
+		if r.jobTimeout > 0 {
+			var cancelResume context.CancelFunc
+			resumeCtx, cancelResume = context.WithTimeout(ctx, r.jobTimeout)
+			defer cancelResume()
+		}
+		if uerr := r.uploadAndCommitRemote(resumeCtx, j.id, j.dbID, upload, dest); uerr != nil {
 			r.log.Error("resume: remote phase failed", "job", j.id, "err", uerr)
+			// A dead context here is shutdown (parent signal ctx) or the
+			// resume budget — NEVER a verdict on the backup itself. Restore
+			// `interrupted` with the artifact and upload intent intact so
+			// the next startup retries, instead of a false `failed` that
+			// would notify, ping /fail and permanently retire the job
+			// (overall review P1-R1 remainder; fix review reliability P2-2).
+			if resumeCtx.Err() != nil {
+				if _, ierr := r.authDB.Exec(`
+					UPDATE jobs SET status = 'interrupted'
+					WHERE id = ? AND status = 'running' AND cancel_requested = 0`, j.id); ierr != nil {
+					r.log.Error("resume: shutdown restore failed", "job", j.id, "err", ierr)
+				}
+				return
+			}
 			r.fail(j.id, ClassStorageUp, pgclient.SanitizeMessage(uerr.Error()))
 			continue
 		}
@@ -430,6 +472,21 @@ func (r *Runner) Start(parent context.Context) {
 		r.wg.Go(func() {
 			r.ResumePendingVerifications(r.lifeCtx)
 		})
+		// Periodic staging reclamation (overall review P1-K1): the startup
+		// call happens in main right after ResumeRemotePhase; this ticker
+		// keeps long-running instances from accumulating dead artifacts.
+		r.wg.Go(func() {
+			tick := time.NewTicker(6 * time.Hour)
+			defer tick.Stop()
+			for {
+				select {
+				case <-r.lifeCtx.Done():
+					return
+				case <-tick.C:
+					r.PruneExpiredArtifacts(r.lifeCtx)
+				}
+			}
+		})
 	})
 }
 
@@ -452,6 +509,15 @@ func (r *Runner) SetQuota(bytes int64) { r.cfg.QuotaBytes = bytes }
 // SetLocalKeep configures how many local staged artifacts per database are
 // retained (protocol D local half; newest is always protected).
 func (r *Runner) SetLocalKeep(n int) { r.localKeep = clampKeep(n, 1) }
+
+// SetJobTimeout overrides the per-job wall-clock budget (test hook;
+// SB_JOB_TIMEOUT in production). 0 disables the budget.
+func (r *Runner) SetJobTimeout(d time.Duration) { r.jobTimeout = d }
+
+// SetFailedArtifactTTL overrides the grace window before failed/canceled/
+// interrupted artifacts are reclaimed from staging (test hook;
+// SB_FAILED_ARTIFACT_TTL_HOURS in production). 0 keeps everything.
+func (r *Runner) SetFailedArtifactTTL(d time.Duration) { r.failedArtifactTTL = d }
 
 // SetStatsRecorder wires the statistics persistence layer.
 func (r *Runner) SetStatsRecorder(sr *stats.Recorder) { r.statsRecorder = sr }
@@ -635,6 +701,16 @@ func (r *Runner) settleCanceledPending() {
 // runJob executes one backup end-to-end and records the outcome. It never
 // panics into the worker loop.
 func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
+	// Wall-clock budget over the WHOLE job — dump, upload and read-back (the
+	// restore-verification phase carries its own). Global concurrency is 1,
+	// so one hung endpoint would otherwise pin every database's backups
+	// forever (overall review P1-K2). 0 = unlimited.
+	if r.jobTimeout > 0 {
+		var cancelBudget context.CancelFunc
+		ctx, cancelBudget = context.WithTimeout(ctx, r.jobTimeout)
+		defer cancelBudget()
+	}
+
 	// Known secrets, populated once the credentials are decrypted; every
 	// failure path redacts them from stored/logged text (round-3 review
 	// P1-02 remainder — labeled-but-kept values still leak).
@@ -645,15 +721,19 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			r.log.Error("job panic", "job", jobID, "panic", redact(fmt.Sprint(rec)))
-			r.fail(jobID, ClassUnknown, redact(fmt.Sprintf("internal panic: %v", rec)))
+			// A panic racing the shutdown must not land a false `failed`
+			// either (fix review, reliability P3-1): settleCtxGone first,
+			// real failure only when the context is healthy.
+			if !r.settleCtxGone(ctx, jobID) {
+				r.fail(jobID, ClassUnknown, redact(fmt.Sprintf("internal panic: %v", rec)))
+			}
 		}
 	}()
 
 	// Load target credentials (protocol B: decrypt with the master secret).
 	name, platform, envTag, connEnc, err := r.loadDatabase(ctx, dbID)
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, ClassUnknown, "load database record: "+err.Error())
@@ -661,22 +741,19 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 	plain, err := crypto.Decrypt(r.key, connEnc)
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, ClassUnknown,
 			"stored credentials are unreadable — the master secret changed or the data is corrupted; re-add the database")
 		return
 	}
-	if ctx.Err() != nil && r.ranToCancellation(jobID) {
-		r.finalizeCanceled(jobID)
+	if r.settleCtxGone(ctx, jobID) {
 		return
 	}
 	ci, err := pgclient.ParseURI(string(plain))
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, ClassUnknown, "stored connection URI invalid: "+err.Error())
@@ -697,8 +774,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// the upload or cause the job to be wrongly reported as succeeded).
 	destSnapshot, destErr := r.DestinationForDatabase(ctx, dbID)
 	if destErr != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, ClassUnknown, redact("resolve destination: "+destErr.Error()))
@@ -710,8 +786,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 
 	recipient, err := r.recipient(ctx)
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, ClassUnknown, redact("age recipient lookup failed: "+err.Error()))
@@ -725,8 +800,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// 1) Connection test + version (pgx — same semantics as pg_dump).
 	test, err := pgclient.Test(ctx, ci)
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, classify(err), redact("connection test failed: "+err.Error()))
@@ -736,8 +810,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	// 2) Dependency collection (protocol E manifest payload).
 	deps, err := pgclient.CollectDependencies(ctx, ci)
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, classify(err), redact("dependency collection failed: "+err.Error()))
@@ -745,15 +818,16 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 	}
 
 	// 3) Dump + encrypt + atomic commit (protocol A).
-	// (A user cancel that lands mid-dump is finalized as `canceled` below;
-	// instance shutdown is finalized as `interrupted` by startup recovery.)
+	// (A user cancel that lands mid-dump is finalized as `canceled`; instance
+	// shutdown lands as `interrupted` right here — no failure notification,
+	// no /fail heartbeat. An expired job budget is a real failure, classified
+	// by settleCtxGone.)
 	dumpStart := time.Now().UTC()
 	result, err := r.cfg.Run(ctx, jobID, dumper.Target{
 		Conn: ci, ServerMajor: test.ServerMajor, Recipient: recipient,
 	})
 	if err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, classify(err), redact(err.Error()))
@@ -843,8 +917,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		manifestBytes: mb,
 	}
 	if err := r.uploadAndCommitRemote(ctx, jobID, dbID, upload, destSnapshot); err != nil {
-		if ctx.Err() != nil && r.ranToCancellation(jobID) {
-			r.finalizeCanceled(jobID)
+		if r.settleCtxGone(ctx, jobID) {
 			return
 		}
 		r.fail(jobID, ClassStorageUp, redact(err.Error()))
@@ -986,6 +1059,56 @@ func (r *Runner) ranToCancellation(jobID int64) bool {
 	var flag int
 	_ = r.authDB.QueryRow(`SELECT cancel_requested FROM jobs WHERE id = ?`, jobID).Scan(&flag)
 	return flag == 1
+}
+
+// interruptForShutdown writes the `interrupted` state for a running job whose
+// context died from instance shutdown (docker stop / upgrade / host reboot):
+// no failure notification, no /fail heartbeat. Startup convergence still
+// applies — ResumeRemotePhase re-uploads committed artifacts, and the next
+// cron tick produces a fresh backup regardless. The conditional UPDATE keeps
+// cancel arbitration on the cancel path (overall review P1-R1: graceful
+// shutdown previously landed here as a false `failed`).
+func (r *Runner) interruptForShutdown(jobID int64) {
+	res, err := r.authDB.Exec(`
+		UPDATE jobs SET status = 'interrupted', finished_at = strftime('%s','now')
+		WHERE id = ? AND status = 'running' AND cancel_requested = 0`, jobID)
+	if err != nil {
+		r.log.Error("shutdown interruption failed", "job", jobID, "err", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		r.log.Info("job interrupted by instance shutdown", "job", jobID)
+		return
+	}
+	// A user Cancel landed between our ranToCancellation probe and the
+	// conditional UPDATE: finish the arbitration it requested instead of
+	// leaving a zombie `running` row that would block this database's queue
+	// until the next restart (fix review, reliability P2-1).
+	r.finalizeCanceled(jobID)
+}
+
+// settleCtxGone finalizes a job whose execution context has ended and
+// reports whether the caller must return without further failure handling.
+// Three endings, three destinations:
+//   - user cancel (cancel_requested set) → `canceled`
+//   - instance shutdown (lifeCtx done)  → `interrupted`, silently
+//   - the job's own budget (WithTimeout) → a real `failed` with an explicit
+//     reason: a hung stage must be visible, never silently resumed
+func (r *Runner) settleCtxGone(ctx context.Context, jobID int64) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	if r.ranToCancellation(jobID) {
+		r.finalizeCanceled(jobID)
+		return true
+	}
+	if r.lifeCtx != nil && r.lifeCtx.Err() != nil {
+		r.interruptForShutdown(jobID)
+		return true
+	}
+	r.fail(jobID, ClassNetwork,
+		fmt.Sprintf("backup exceeded its execution budget (SB_JOB_TIMEOUT=%s); a stage hung past the deadline and the job was terminated", r.jobTimeout))
+	return true
 }
 
 func (r *Runner) fail(jobID int64, class, msg string) {

@@ -97,8 +97,9 @@ func TestRunCommitsOnlyOnFullSuccess(t *testing.T) {
 	if !strings.Contains(res.DumpToolVer, "99.0") || res.ClientMajor != 99 {
 		t.Fatalf("unexpected tool info: %s / %d", res.DumpToolVer, res.ClientMajor)
 	}
-	if res.PlaintextArc == 0 {
-		t.Fatal("archive byte counter must be non-zero")
+	if res.PlaintextArc == 0 || res.PlaintextArc > res.SizeBytes {
+		t.Fatalf("PlaintextArc=%d must be the pre-encryption archive (0 < arc <= ciphertext %d)",
+			res.PlaintextArc, res.SizeBytes)
 	}
 }
 

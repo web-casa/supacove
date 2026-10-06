@@ -225,6 +225,8 @@ func runServe() error {
 		func(ctx context.Context) (string, error) { return srv.RecipientFor(ctx) }, log)
 	runner.SetQuota(cfg.StagingQuotaBytes)
 	runner.SetLocalKeep(cfg.LocalKeep)
+	runner.SetJobTimeout(cfg.JobTimeout)
+	runner.SetFailedArtifactTTL(time.Duration(cfg.FailedArtifactTTLHours) * time.Hour)
 	runner.SetStatsRecorder(stats.New(store.DB))
 	// SB_HEARTBEAT_URL is the FALLBACK heartbeat for databases without
 	// their own config (Phase 7: per-database dead-man switches take
@@ -285,6 +287,11 @@ func runServe() error {
 	// a historical write failure left behind, and re-queue verifications
 	// that were pending at shutdown (phase-5 review P1-09/P1-06).
 	runner.ResumeRemotePhase(ctx)
+	// AFTER the resume attempt: shutdown-interrupted artifacts still
+	// eligible for a future resume keep their grace window; only those past
+	// the TTL — and never-resumed failed/canceled ones — are reclaimed
+	// (overall review P1-K1).
+	runner.PruneExpiredArtifacts(ctx)
 	runner.BackfillRecoveryKits(ctx)
 	runner.Start(ctx)
 	defer runner.Stop()

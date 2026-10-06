@@ -11,5 +11,7 @@ ALTER TABLE jobs ADD COLUMN manifest_version_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE jobs DROP COLUMN artifact_version_id;
 ALTER TABLE jobs DROP COLUMN manifest_version_id;
 
--- Phase 3 round-1: duration_secs column on jobs (missing from 0004)
-ALTER TABLE jobs ADD COLUMN duration_secs REAL NOT NULL DEFAULT 0;
+-- duration_secs is NOT added here: 0004 already carries the column (it was
+-- completed there in a later fix). A former trailing ALTER in this Down
+-- section made every rollback below v8 fail with "duplicate column name"
+-- (overall review P2-R1).

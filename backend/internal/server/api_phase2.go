@@ -374,8 +374,3 @@ func envTagOrEmpty(v *string) string {
 	}
 	return strings.TrimSpace(*v)
 }
-
-func sanitizeForStore(msg string) string {
-	r := strings.NewReplacer("password=", "password=[REDACTED]")
-	return r.Replace(msg)
-}
