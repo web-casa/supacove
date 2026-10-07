@@ -2,6 +2,8 @@
 
 结论：**NEEDS_FIXES**。
 
+**交付时 HEAD 增量说明：**评审期间其他工作流提交了 `0abdf00212269785877bf33ee83a2349799f27ce`，并将本报告初稿一并纳入提交。本评审没有执行该提交。已补查增量：R6-01 的 AWS 生产退化在新 HEAD **已修复**，独立 AWS 语义探针转绿；当前仍有 **R6-02、R6-03 两项 P2 阻塞问题**。下文九项表及详细发现保留起始快照 e77eddd 的取证记录，最终 HEAD 判定见文末增量表。
+
 评审日期：2026-10-07。提交范围：`6194e58..e77eddd2d7ca5faae6d13c9e59d6582690dc1b70`，包括 `c2cdf7f` 全量 diff 与 `e77eddd` CHANGELOG。基线采用本轮用户给出的九项发现及修复声明；未把旧提交消息中的“已通过”当成本轮执行证据。
 
 发现 1 项 P1、2 项 P2，以及注释准确性问题。业务代码未由本评审修改；探针、变异及副本均在 `/tmp`。评审中途工作区出现其他来源对 `backend/internal/storage/s3.go`、`s3_pagination_test.go` 的未提交修改，已移除 marker；本报告仍评价指定提交快照，未覆盖或计入这些修改。以下行号均对应 **e77eddd 快照**。
@@ -121,3 +123,27 @@ FAIL
 ## 重新验收条件
 
 修复 R6-01、R6-02、R6-03，并同步不准确注释。随后在允许 Docker/监听端口的环境中，对新的提交运行真实 handler 输出的 `promtool check metrics`，执行非 skip 的 MinIO 101-session 测试与 storage 三次独立 `-count=1`，确认无遗留测试容器，并补跑后端全量测试和 govulncheck。当前既有已复现的生产退化，也有尚未完成的真实服务验收，因此不能 APPROVED。
+
+
+## 交付时 HEAD 0abdf00 增量复核
+
+本节把评审范围延伸至 `6194e58..0abdf00212269785877bf33ee83a2349799f27ce`，避免将已提交的修复继续报告为当前生产缺陷。
+
+- `s3.go` 已去除 `KeyMarker`，只发送 Bucket/Prefix/MaxUploads。将新生产文件放入临时副本，保留本评审独立建立的 AWS 严格过滤桩，`TestAbortIncompletePaginatesSameKey` exit 0（101 个 session 全部 abort）。日志：`/tmp/r6-evidence/aws-marker-0abdf00.log`。因此 **R6-01 已关闭**。
+- 新仓库桩在任意 marker 出现时返回空列表，能约束当前“无 marker”策略；但“任意 marker 都空”仍不是 AWS 与 MinIO API 的完整模型，第一页仍固定 `IsTruncated=false`。应把注释收窄为本算法的 marker 禁用回归桩，避免声称精确模拟两种提供方。此建模精度问题不否定新算法已修复本次 AWS 退化。
+- CHANGELOG 增加无 marker 行为和 AWS 严格大于语义，与新实现相符；末尾泛称 marker pagination 必然在某提供方错误略宽泛，宜限定为本次“删除前页后继续用 marker”的场景。
+- CI、MinIO 生命周期、retention、metrics、前端文件在该增量未变，既有取证仍适用。真实 Docker/promtool 的环境缺口也没有消失。未将初始快照的 build/lint 结果冒充新 HEAD 全量重跑。
+
+| 原条目 | 最终 HEAD 判定 |
+|---|---|
+| 1 metrics | FIXED；真实 promtool 验收仍未完成。 |
+| 2 固定点重扫 | PARTIALLY：AWS 生产退化已修复并经独立桩验证，桩建模声明仍需收窄，真实 MinIO 非 skip 验收尚缺。 |
+| 3 govulncheck | PARTIALLY：pin 已修复，注释不准确，联网扫描未完成。 |
+| 4 retention | FIXED；保留错误注释备注。 |
+| 5 上传测试 | FIXED。 |
+| 6 session retry | FIXED。 |
+| 7 CI/Makefile/e2e | PARTIALLY：R6-02 未修复。 |
+| 8 MinIO 回收 | PARTIALLY：R6-03 未修复。 |
+| 9 CHANGELOG | FIXED；新增量与无 marker 算法一致。 |
+
+**最终结论仍为 NEEDS_FIXES**：需修复 R6-02、R6-03，补正注释，并完成真实服务验收。R6-01 不再列入当前 HEAD 的待修复项。

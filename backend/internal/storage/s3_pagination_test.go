@@ -32,11 +32,11 @@ func TestAbortIncompletePaginatesSameKey(t *testing.T) {
 		q := r.URL.Query()
 		switch {
 		case r.Method == http.MethodGet && q.Has("uploads"):
-			// Model both real providers' marker pitfalls: AWS answers a
-			// same-key KeyMarker with strictly-greater keys (none here),
-			// MinIO invalidates markers after in-page aborts. A client that
-			// relies on markers across aborted pages loses sessions on
-			// either provider — so any marker at all yields an empty page.
+			// Any marker in the request means the client fell back to
+			// pagination, which loses same-key sessions on the real
+			// providers (AWS: same-key KeyMarker = strictly greater;
+			// MinIO: markers invalidated after in-page aborts). The stub
+			// models that failure mode as an empty result set.
 			if q.Get("key-marker") != "" || q.Get("upload-id-marker") != "" {
 				w.Header().Set("Content-Type", "application/xml")
 				_, _ = fmt.Fprint(w, `<?xml version="1.0"?><ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>b</Bucket><IsTruncated>false</IsTruncated></ListMultipartUploadsResult>`) // httptest writer; test stub

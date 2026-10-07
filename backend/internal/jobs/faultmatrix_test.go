@@ -225,10 +225,11 @@ func TestConcurrentEnqueueAdmitsSingleJob(t *testing.T) {
 // anchor — local prune and remote retention both keep the last good backup.
 func TestRetentionKeepsAnchorAcrossNewFailure(t *testing.T) {
 	p := newPhase3Runner(t)
-	// keepDays=0 makes EVERY committed generation "too old" — including the
-	// anchor itself. That is the only configuration where the anchor guard
-	// is distinguishable from the keep<N> branch (GLM r5: the old setup
-	// conflated them, so deleting the anchor guard passed the suite).
+	// KeepDays=1 with both generations backdated two days makes EVERY
+	// committed generation "too old" — including the anchor itself. That
+	// is the configuration where the anchor guard is distinguishable from
+	// the keep<N> branch (GLM r5: the old setup conflated them, so deleting
+	// the anchor guard passed the suite).
 	destID := p.addDestinationKeepDays(t, 1, 1) // keep=1 AND everything older than 1 day
 	dbID := p.addDatabase(t, destID, "anchor-db")
 
@@ -255,7 +256,7 @@ func TestRetentionKeepsAnchorAcrossNewFailure(t *testing.T) {
 	if _, err := os.Stat(goodPath); err != nil {
 		t.Errorf("anchor artifact deleted by local prune: %v", err)
 	}
-	// keepDays=0 + keep=1: the anchor survives even though it is itself
+	// KeepDays=1 + keep=1: the anchor survives even though it is itself
 	// "too old", while the OLDER succeeded generation is collected.
 	if _, err := os.Stat(olderPath); err == nil {
 		t.Error("older non-anchor generation survived keep=1 pruning")

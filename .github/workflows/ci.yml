@@ -53,6 +53,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The baseline guard diffs against the PR base SHA: a shallow
+          # clone would make that diff error INSIDE an if-condition and
+          # silently pass (review R6-02).
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -68,9 +73,19 @@ jobs:
       - name: No breaking contract changes vs baseline
         run: "\"$(go env GOPATH)/bin/oasdiff\" breaking --fail-on ERR api/openapi-baseline.yaml api/openapi.yaml"
       - name: Baseline changes require a release tag
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD | grep -q '^api/openapi-baseline.yaml$'; then
+          set -euo pipefail
+          # Release tags are the sanctioned baseline-refresh path.
+          [ "$IS_TAG" = "true" ] && exit 0
+          # Fail CLOSED: an unusable base (missing object) is a guard
+          # failure, not a pass; --no-renames closes the rename bypass.
+          git cat-file -e "$BASE_SHA^{commit}"
+          changed="$(git diff --name-only --no-renames "$BASE_SHA" HEAD)"
+          if printf '%s\n' "$changed" | grep -q '^api/openapi-baseline.yaml$'; then
             echo "::error::api/openapi-baseline.yaml moved outside a release tag; breaking-change protection would be void"
             exit 1
           fi

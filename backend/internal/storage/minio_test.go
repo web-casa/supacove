@@ -68,6 +68,7 @@ func requireMinIO(t *testing.T) *Store {
 			}); err == nil {
 				minioClient = store
 				minioAddr = addr
+				minioStopped = false // a FRESH container: cleanups must run again
 				return
 			}
 			time.Sleep(500 * time.Millisecond)
@@ -81,7 +82,10 @@ func requireMinIO(t *testing.T) *Store {
 	}
 	t.Cleanup(func() {
 		if minioContainer != "" && !minioStopped {
-			_ = exec.Command("docker", "rm", "-f", minioContainer).Run()
+			name := minioContainer
+			if err := exec.Command("docker", "rm", "-f", name).Run(); err != nil {
+				t.Logf("minio container %s cleanup failed: %v (remove manually)", name, err)
+			}
 			minioStopped = true
 			// The container is per-process shared: once stopped, a later
 			// test in the same run must start a FRESH instance instead of
