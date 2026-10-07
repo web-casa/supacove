@@ -1,0 +1,53 @@
+---
+title: Restore & disaster recovery
+description: Recovery kits, standalone restores without the metadata database, and the three key incidents
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+## Routine restore: the recovery kit
+
+```bash
+AGE_IDENTITY_FILE=/path/identity.txt \
+PGPASSWORD='<target db password>' \
+sh restore-job7.sh 'postgresql://user@host:5432/restored?sslmode=require' backup-job7.dump.age
+```
+
+Order of operations: verify the ciphertext SHA-256 (mismatch exits 1 before any
+decryption) → age-decrypt to a temporary plaintext → `pg_restore` → print the
+restored table count. Create the target database first (`createdb`).
+
+## Standalone restore: without this instance
+
+If the instance is gone entirely, recovery needs exactly:
+
+1. the `*.dump.age` and its `*.manifest.json` from the bucket (or staging);
+2. your offline age identity;
+3. the recovery kit script (or manual age + pg_restore guided by the manifest).
+
+The manifest is self-describing: backup UUID, server version, table count,
+SHA-256, recipient fingerprint. The SQLite metadata database is NOT a
+prerequisite for recovery.
+
+## The three key incidents
+
+<Steps>
+  <Step title="Master secret lost/corrupted, age identity intact">
+    Backups remain decryptable, but stored connection strings and destination
+    credentials are unreadable — re-register databases and destinations.
+    Startup refuses to run without a readable master secret (fail closed).
+  </Step>
+  <Step title="Age identity lost, master secret intact">
+    Existing ciphertext is unrecoverable. The instance keeps producing new
+    backups under a fresh `age init` identity.
+  </Step>
+  <Step title="Both lost">
+    Existing backups are unrecoverable. Immediately: new `age init`, recreate
+    destination credentials, re-register databases so the protection chain
+    restarts.
+  </Step>
+</Steps>
+
+The command-level playbook lives in the repository's `docs/disaster-recovery.md`
+(developer documentation), including pre-migrate snapshots, old-binary rollback
+and WAL/SHM isolation details.

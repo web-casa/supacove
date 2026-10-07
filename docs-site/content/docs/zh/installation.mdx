@@ -1,0 +1,56 @@
+---
+title: 安装部署
+description: 镜像、源码构建与部署拓扑；compose 仅用于开发
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## 运行形态
+
+supabackup 是单个 Go 二进制（内嵌前端），外加三个外部依赖：
+
+| 依赖 | 用途 | 版本要求 |
+|---|---|---|
+| PostgreSQL 客户端工具 | `pg_dump` / `pg_restore` | 14–18（镜像内置） |
+| age | 加解密 | 任意近期版本（镜像内置） |
+| S3 兼容对象存储 | 远端提交（可选但推荐） | S3 / R2 / B2 / MinIO |
+
+## 镜像构建
+
+```bash
+docker build --target runtime -t supabackup:<tag> .
+```
+
+<Callout type="warn">
+默认（最后）stage 是实验性的 `runtime-spike`（含内嵌 PostgreSQL 服务端）。
+生产必须显式 `--target runtime`。
+</Callout>
+
+## 源码构建
+
+```bash
+# Go 1.26.6+（与 go.mod 一致；更低的工具链会直接拒绝编译）
+make backend   # 构建前端并嵌入，产出 bin/supabackup
+```
+
+## 目录与权限
+
+- `SB_DATA_DIR`（默认 `./data`，镜像内为 `/app/data`）：主密钥、元数据库、暂存区。
+  进程以 UID 10001 运行并期望该目录 0700。
+- 主密钥文件 0600、拒绝符号链接；age 私钥**不**放在数据目录。
+
+## docker compose：仅开发
+
+仓库自带的 `compose.yaml` 内置 `SB_INSECURE_COOKIE=1` 与固定开发口令，
+并拉起开发用 PostgreSQL/MinIO——**只用于本地试用**。生产请自建 compose 或
+systemd，并确保：
+
+1. 前端位于 HTTPS 反代之后（会话 cookie 带 `Secure`；纯 HTTP 下无法登录是
+   有意的 fail-closed 行为，除非显式 `SB_INSECURE_COOKIE=1`，仅限本地）。
+2. 数据卷独立备份（它是主密钥所在地）。
+
+## 升级
+
+二进制自升级：停止 → 替换二进制/镜像 → 启动。启动时会自动迁移 SQLite schema，
+并在迁移前按版本保留快照（pre-migrate snapshot）。停机撞上正在运行的备份时，
+该任务记为 `interrupted` 而非失败，已提交的本地密文会在启动后续传。

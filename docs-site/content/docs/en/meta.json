@@ -1,0 +1,14 @@
+{
+  "index": "Introduction",
+  "quickstart": "Quickstart",
+  "installation": "Installation",
+  "configuration": "Configuration",
+  "databases": "Registering databases",
+  "scheduling": "Schedules & retention",
+  "heartbeat": "Dead-man switch",
+  "notifications": "Notification webhooks",
+  "backups": "Backups & downloads",
+  "restore": "Restore & disaster recovery",
+  "monitoring": "Monitoring & metrics",
+  "troubleshooting": "Troubleshooting"
+}

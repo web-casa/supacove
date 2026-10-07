@@ -1,0 +1,58 @@
+---
+title: Installation
+description: Image, source build and deployment topology; compose is development-only
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## Runtime shape
+
+One Go binary with the console embedded, plus three external dependencies:
+
+| Dependency | Purpose | Version |
+|---|---|---|
+| PostgreSQL client tools | `pg_dump` / `pg_restore` | 14–18 (in image) |
+| age | encryption/decryption | any recent (in image) |
+| S3-compatible storage | remote commit (optional, recommended) | S3 / R2 / B2 / MinIO |
+
+## Image
+
+```bash
+docker build --target runtime -t supabackup:<tag> .
+```
+
+<Callout type="warn">
+The default (last) stage is the experimental `runtime-spike` image with an
+embedded PostgreSQL server. Production builds MUST pass `--target runtime`.
+</Callout>
+
+## Source
+
+```bash
+# Go 1.26.6+ (matches go.mod; older toolchains refuse outright)
+make backend   # builds the console and embeds it into bin/supabackup
+```
+
+## Directories and permissions
+
+- `SB_DATA_DIR` (default `./data`, `/app/data` in the image): master secret,
+  metadata database, staging. The process runs as UID 10001 and expects 0700.
+- The master secret file is 0600 and symlink-refusing; the age identity does
+  NOT belong in the data directory.
+
+## docker compose: development only
+
+The bundled `compose.yaml` sets `SB_INSECURE_COOKIE=1` and fixed development
+passwords and starts dev PostgreSQL/MinIO — local experimentation only. For
+production, ensure:
+
+1. TLS in front (session cookies are `Secure`; plain-HTTP logins failing is a
+   deliberate fail-closed default unless `SB_INSECURE_COOKIE=1`, local only).
+2. The data volume is backed up independently — it holds the master secret.
+
+## Upgrading
+
+Stop → replace binary/image → start. Schema migrations run at startup with
+per-version pre-migrate snapshots. A shutdown that lands on a running backup
+records `interrupted` (not failed) and resumes the remote commit at the next
+startup.

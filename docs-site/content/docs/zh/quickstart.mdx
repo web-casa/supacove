@@ -1,0 +1,75 @@
+---
+title: 快速开始
+description: 构建镜像、初始化实例、注册数据库并完成首次加密备份
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## 1. 构建镜像
+
+```bash
+docker build --target runtime -t supabackup:local .
+```
+
+镜像以非 root（UID 10001）运行，内置 PostgreSQL 客户端 14–18 与 age。
+
+## 2. 启动
+
+```bash
+docker run -d --name supabackup \
+  -p 127.0.0.1:8080:8080 \
+  -v supabackup-data:/app/data \
+  supabackup:local
+```
+
+数据卷保存主密钥、SQLite 元数据库与暂存密文——**它是除对象存储外最重要的资产**。
+
+## 3. 初始化管理员
+
+实例是全新的：第一个管理员账号必须由本地一次性令牌创建。
+
+```bash
+docker exec supabackup /app/supabackup bootstrap
+```
+
+输出形如：
+
+```text
+One-time bootstrap token (valid 15m0s):
+
+  jkwioY…
+
+Use it in the web UI to create the admin account. It will not be shown again.
+```
+
+打开 `http://127.0.0.1:8080`，点“使用 CLI 令牌初始化新实例”，粘贴令牌并设置
+用户名与至少 12 位密码。令牌 15 分钟内有效、仅可用一次。
+
+## 4. 初始化 age 加密身份
+
+```bash
+docker exec supabackup /app/supabackup age init > identity.txt
+```
+
+<Callout type="error" title="私钥只出现这一次">
+`identity.txt` 是解密所有备份的唯一私钥。请离线加密保存；实例内只保存公钥
+（recipient），不保存私钥。丢失私钥 = 备份不可恢复。
+</Callout>
+
+## 5. 注册数据库并备份
+
+在控制台“注册第一个数据库”中选择平台或“自托管/其他”，粘贴或分字段填写连接串。
+保存前会先做一次真实连接测试；连接串加密存储，之后不再显示。
+
+回到总览，点该库的“立即备份”。任务在“近期任务”里显示状态；成功后可下载
+**恢复套件**（restore.sh）与密文工件。
+
+## 6. 验证恢复（强烈建议做一次）
+
+```bash
+AGE_IDENTITY_FILE=$PWD/identity.txt \
+PGPASSWORD='<目标库密码>' \
+sh restore.sh 'postgresql://user@host:5432/restored?sslmode=require' backup-job2.dump.age
+```
+
+套件会先校验密文 SHA-256，再解密、`pg_restore` 到新库，并输出恢复的表数。

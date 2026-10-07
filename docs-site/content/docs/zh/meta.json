@@ -1,0 +1,14 @@
+{
+  "index": "简介",
+  "quickstart": "快速开始",
+  "installation": "安装部署",
+  "configuration": "配置参考",
+  "databases": "注册数据库",
+  "scheduling": "计划与保留",
+  "heartbeat": "死人开关",
+  "notifications": "通知 Webhook",
+  "backups": "备份与下载",
+  "restore": "恢复与灾备",
+  "monitoring": "监控与指标",
+  "troubleshooting": "故障排查"
+}

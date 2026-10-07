@@ -1,0 +1,56 @@
+---
+title: Registering databases
+description: Connection-string rules, per-platform gotchas, roles and TLS modes
+---
+
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+## Flow
+
+1. Console → "Add database" → pick a platform (or self-hosted/other).
+2. Paste a `postgres://` / `postgresql://` string, or fill the fields
+   (special characters in passwords are encoded for you).
+3. A client-side pre-flight flags pooled endpoints, missing TLS modes and
+   unsupported parameters immediately; the server then runs a real connection
+   test before saving.
+4. The string is encrypted with the master secret and never shown again —
+   only a redacted preview.
+
+## Platform notes
+
+<Tabs items={["Supabase", "Neon", "Railway", "Self-hosted"]}>
+  <Tab value="Supabase">
+    Use the **session pooler (port 5432)** or the direct connection (IPv6-only
+    without the IPv4 add-on). **Never the transaction pooler (6543)**:
+    `pg_dump` cannot run through it.
+  </Tab>
+  <Tab value="Neon">
+    Turn connection pooling off and copy the string (host without `-pooler`).
+    Pooled endpoints are incompatible with `pg_dump` on ANY port. Cold compute
+    wakes in a few seconds; the first test may be slow.
+  </Tab>
+  <Tab value="Railway">
+    Use `DATABASE_PUBLIC_URL` (host ends in `.proxy.rlwy.net`). The
+    `DATABASE_URL` host (`*.railway.internal`) resolves only inside Railway.
+  </Tab>
+  <Tab value="Self-hosted">
+    The host must be reachable FROM the supabackup container: `localhost` is
+    the container itself; use `host.docker.internal` or a LAN address for a
+    database on the Docker host. The role must be able to read everything
+    `pg_dump` exports (owner, or `pg_read_all_data` on PostgreSQL 14+).
+  </Tab>
+</Tabs>
+
+## TLS modes (sslmode)
+
+- Remote hosts MUST state sslmode explicitly (registration refuses otherwise).
+- `verify-full` with a CA-signed certificate; `require` to encrypt without
+  verifying; `disable` only on private networks you trust (password and data
+  travel in cleartext).
+- Loopback defaults to `prefer`.
+
+## Reading a failed registration
+
+A 422 shows only the fixed message ("connection test failed — verify host,
+port, credentials and TLS mode"); the driver error is never echoed — that is
+credential protection. Diagnose from the redacted detail line in the server log.

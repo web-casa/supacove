@@ -1,0 +1,47 @@
+---
+title: 恢复与灾备
+description: 恢复套件、独立恢复（无元数据库）与三类密钥事故
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+## 常规恢复：恢复套件
+
+```bash
+AGE_IDENTITY_FILE=/path/identity.txt \
+PGPASSWORD='<目标库密码>' \
+sh restore-job7.sh 'postgresql://user@host:5432/restored?sslmode=require' backup-job7.dump.age
+```
+
+脚本顺序：校验密文 SHA-256（不匹配立即退出 1，不做任何解密）→ age 解密到临时明文
+→ `pg_restore` → 输出恢复表数。目标库需事先创建（`createdb`）。
+
+## 独立恢复：不依赖本实例
+
+实例完全丢失时，恢复只需要：
+
+1. 对象存储（或暂存盘）中的 `*.dump.age` 与同名 `*.manifest.json`；
+2. 离线保存的 age 私钥；
+3. 恢复套件脚本（或按 manifest 中的哈希手工执行 age + pg_restore）。
+
+manifest 是自描述的：备份 UUID、服务器版本、表数、SHA-256、recipient 指纹。
+元数据库（SQLite）**不是**恢复的前提。
+
+## 三类密钥事故
+
+<Steps>
+  <Step title="主密钥丢失/损坏，age 私钥还在">
+    备份仍可解密。但已保存的数据库连接串与目的地凭据无法读取——需要重新注册
+    数据库与目的地。启动会因主密钥不可读而拒绝运行（fail closed）。
+  </Step>
+  <Step title="age 私钥丢失，主密钥还在">
+    已有密文**不可恢复**。实例仍可继续产生新备份（用新 `age init` 的身份）。
+  </Step>
+  <Step title="两者都丢">
+    已有备份不可恢复。立即：新 `age init`、重建目的地凭据、重新注册数据库，
+    让保护链重新开始。
+  </Step>
+</Steps>
+
+完整命令级流程见仓库 `docs/disaster-recovery.md`（开发文档），其中含
+pre-migrate 快照、旧二进制回退与 WAL/SHM 隔离等细节。

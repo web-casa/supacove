@@ -14,7 +14,7 @@ GOBIN_DIR := $(GOBIN_DIR)
 endif
 OAPI := $(GOBIN_DIR)/oapi-codegen
 
-.PHONY: help build backend frontend api-gen api-check api-breaking metrics-check e2e dev test lint check clean
+.PHONY: help build backend frontend api-gen api-check api-breaking metrics-check e2e docs docs-build dev test lint check clean
 .NOTPARALLEL:
 
 help:
@@ -51,6 +51,12 @@ metrics-check:
 	curl -sfS -b "$${SB_METRICS_COOKIE:?set SB_METRICS_COOKIE to a logged-in cookie jar}" \
 	  -o "$$TMP" "$${SB_BASE_URL:-http://127.0.0.1:8080}/metrics" && \
 	test -s "$$TMP" && promtool check metrics < "$$TMP"
+
+docs: ## Run the Fumadocs documentation site in dev mode
+	cd docs-site && npm ci && npm run dev
+
+docs-build: ## Build the documentation site (parity check + next build)
+	cd docs-site && npm ci && npm run build
 
 e2e: ## Playwright suite against the final embedded binary (scripts/e2e-run.sh)
 	cd frontend && npm ci && npx playwright install chromium

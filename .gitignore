@@ -31,3 +31,9 @@ data/
 # playwright
 frontend/test-results/
 frontend/playwright-report/
+
+# docs site build artifacts
+docs-site/.next/
+docs-site/node_modules/
+docs-site/.source/
+docs-site/next-env.d.ts

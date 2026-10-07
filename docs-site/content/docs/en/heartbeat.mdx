@@ -1,0 +1,36 @@
+---
+title: Dead-man switch (heartbeat)
+description: "External monitoring integration: success ping, fail ping, age gate, disabling"
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+supabackup integrates with dead-man switches such as healthchecks.io: after
+every successful AND fresh backup it pings your URL; production-path failures
+ping `<url>/fail`.
+
+## Configuration
+
+In the database's "Schedule & heartbeat" drawer:
+
+- **Heartbeat URL**: empty inherits the server-wide `SB_HEARTBEAT_URL`;
+  `-` disables explicitly (no success and no fail pings).
+- **Expected period (hours)**: required when a URL is set. Your external
+  monitor alerts when pings stop for period+grace.
+- **Grace (hours)**: extra tolerance on the period.
+
+## When a success ping fires
+
+1. an effective URL exists (per-database or fallback) and is not `-`;
+2. the expected period is > 0;
+3. the newest successful backup is not older than period + grace;
+4. with a remote destination configured: that backup must be remote-committed
+   (local-only deployments are exempt).
+
+Fail pings bypass the age gate (the failure IS the signal) but still respect `-`.
+
+<Callout>
+One URL expresses "this monitor is alive". With several databases sharing the
+fallback URL, any healthy one refreshes it — configure per-database URLs when
+you need per-database monitoring.
+</Callout>

@@ -1,0 +1,56 @@
+---
+title: Configuration
+description: "Every SB_* variable: defaults, semantics, risks"
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+All configuration is via environment variables; there is no config file.
+
+## Core
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SB_DATA_DIR` | `./data` (`/app/data` in image) | master secret, SQLite, staging |
+| `SB_ADDR` | `:8080` | HTTP listen address |
+| `SB_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `SB_SECRET_FILE` | (inside data dir) | override master secret path |
+| `SB_PUBLIC_ORIGIN` | empty | external origin behind a proxy; Origins must match exactly when set |
+| `SB_TRUSTED_PROXIES` | empty | CIDRs allowed to supply X-Forwarded-For; empty trusts none |
+
+## Sessions and bootstrap
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SB_INSECURE_COOKIE` | `false` | allow session cookies without `Secure`. **Local plain-HTTP dev only** |
+| bootstrap token TTL | 15 minutes | one-time token from the `bootstrap` subcommand |
+| session TTL | 7 days | fixed |
+
+## Backups and staging
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SB_LOCAL_KEEP` | `5` | staged ciphertext copies kept per database (newest success always protected) |
+| `SB_STAGING_QUOTA_BYTES` | `0` (unlimited) | staging hard budget; exceeding it fails new backups with the disk class |
+| `SB_JOB_TIMEOUT` | `6h` | wall-clock budget per job (export+upload+read-back). Expiry fails the job as a network-class failure and notifies; `0` disables |
+| `SB_FAILED_ARTIFACT_TTL_HOURS` | `72` | grace before failed/canceled/interrupted artifacts are reclaimed; `0` keeps forever |
+
+## Restore verification (off by default)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SB_VERIFY_ENABLED` | `false` | enable embedded-PostgreSQL restore verification after every success |
+| `SB_VERIFY_IDENTITY_FILE` | empty | required when verification is on; enforced 0600, non-symlink |
+| `SB_VERIFY_PGBIN` | empty | override server binaries for the throwaway instance |
+
+<Callout type="warn">
+Enabling verification hands the decryption identity to the running instance —
+a deliberate trust decision (ADR-004). While off, tasks show "not verified";
+backup correctness is unaffected.
+</Callout>
+
+## Heartbeat fallback
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SB_HEARTBEAT_URL` | empty | server-wide dead-man-switch fallback; databases without their own URL inherit it |

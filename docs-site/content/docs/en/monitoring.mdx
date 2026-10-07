@@ -1,0 +1,46 @@
+---
+title: Monitoring & metrics
+description: /metrics semantics, dashboard denominators, alerting suggestions
+---
+
+## Access
+
+`GET /metrics` requires an authenticated session (Prometheus scrapes must carry
+session credentials) and answers with `Cache-Control: no-store`. Unauthenticated
+requests receive a 401 JSON error.
+
+## Families
+
+| Metric | Semantics |
+|---|---|
+| `supabackup_jobs{status=…}` | current distribution of task states (gauge, not a monotonic counter) |
+| `supabackup_verification{status=…}` | verification-state distribution over succeeded jobs |
+| `supabackup_last_success_timestamp{database=…}` | newest success per database (unix seconds) |
+| `supabackup_databases_protection{state=…}` | protection distribution (fresh/expired/never) |
+| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | lifetime remote commits vs upload failures |
+| `supabackup_outbox_pending` / `_delivering` / `_dead` | notification queue health |
+| `supabackup_staging_bytes` | staging usage (a collector failure still emits a best-effort value AND sets scrape_errors) |
+| `supabackup_scrape_errors{collector=…}` | collector-fault signal: nonzero means some families of that scrape may be missing |
+
+Labels carry only low-cardinality values (states, database names, collector
+names) — never job IDs, hosts or credentials.
+
+## Console statistics denominators
+
+- **Export success rate**: over jobs that began executing, those whose export
+  completed (including "export fine, upload failed"); jobs canceled while
+  queued are excluded on both sides.
+- **Archive total**: a subtotal over RECORDED samples (backup_stats rows);
+  historical rows may hold ciphertext sizes (old semantics), so the sum can be
+  slightly high on upgraded instances.
+- **Average duration**: export-through-remote-commit wall time over succeeded
+  jobs; no samples renders `—`, never a fake 0.
+
+## Alerting suggestions
+
+1. `supabackup_last_success_timestamp` older than schedule + freshness
+   threshold → backups stalled.
+2. `supabackup_outbox_dead > 0` → an alert never reached its webhook.
+3. `supabackup_staging_bytes` growing → destination outage or a long
+   reclamation grace.
+4. Dead-man switch silence (external) → process death or fleet-wide failure.

@@ -1,0 +1,39 @@
+---
+title: 监控与指标
+description: /metrics 语义、面板口径与告警建议
+---
+
+## 访问
+
+`GET /metrics` 需要登录会话（Prometheus 抓取需携带会话凭据），返回
+`Cache-Control: no-store`。未认证请求得到 401 JSON。
+
+## 指标家族
+
+| 指标 | 语义 |
+|---|---|
+| `supabackup_jobs{status=…}` | 当前各状态任务分布（gauge，非单调计数器） |
+| `supabackup_verification{status=…}` | 成功任务的验证状态分布 |
+| `supabackup_last_success_timestamp{database=…}` | 每库最近一次成功备份（unix 秒） |
+| `supabackup_databases_protection{state=…}` | 保护状态分布（fresh/expired/never） |
+| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | 远端提交与上传失败累计 |
+| `supabackup_outbox_pending` / `_delivering` / `_dead` | 通知队列健康 |
+| `supabackup_staging_bytes` | 暂存占用（采集失败时仍输出尽力值并置 scrape_errors） |
+| `supabackup_scrape_errors{collector=…}` | 采集器故障信号：非零时同次抓取的对应家族可能缺失 |
+
+标签只含低基数值（状态、库名、采集器名），不含任务 ID、主机或凭据。
+
+## 控制台统计口径
+
+- **导出成功率**：已开始执行的任务中，导出成功（含“导出成功但上传失败”）的比例；
+  排队即取消的任务双侧排除。
+- **归档体积合计**：仅统计已记录样本（backup_stats 有值的历史成功备份）；旧记录可能
+  存的是密文大小（历史口径），合计可能略偏高。
+- **平均耗时**：导出到远端提交的墙钟，仅成功任务；无样本显示 `—`（不是 0）。
+
+## 告警建议
+
+1. `supabackup_last_success_timestamp` 超过 计划周期+新鲜度阈值 → 备份停摆。
+2. `supabackup_outbox_dead > 0` → 有告警未送达（检查 webhook 可达性）。
+3. `supabackup_staging_bytes` 持续增长 → 目的地故障或回收宽限过长。
+4. 死人开关静默（外部）→ 实例进程死亡或全库失败。

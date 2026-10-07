@@ -1,0 +1,49 @@
+---
+title: 注册数据库
+description: 连接串规则、四平台注意事项、角色权限与 TLS 模式
+---
+
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
+## 注册流程
+
+1. 控制台“添加数据库”→ 选择平台（或“自托管/其他”）。
+2. 粘贴 `postgres://` / `postgresql://` 连接串，或分字段填写（密码特殊字符自动编码）。
+3. 客户端预检会即时指出池化端点、缺失 TLS 模式、不支持的参数等问题；
+   保存前服务器再做一次真实连接测试。
+4. 连接串以主密钥加密存储；界面上不再回显，只提供脱敏预览。
+
+## 平台注意事项
+
+<Tabs items={["Supabase", "Neon", "Railway", "自托管"]}>
+  <Tab value="Supabase">
+    使用 **Session pooler（端口 5432）** 或直连。直连仅 IPv6（除非购买 IPv4 附加组件）。
+    **不要用 Transaction pooler（6543）**：`pg_dump` 无法通过它运行。
+  </Tab>
+  <Tab value="Neon">
+    关闭连接池化后复制连接串（主机名不含 `-pooler`）。池化端点在**任何端口**都与
+    `pg_dump` 不兼容。空闲计算节点唤醒需要数秒，首次测试可能偏慢。
+  </Tab>
+  <Tab value="Railway">
+    使用 `DATABASE_PUBLIC_URL`（主机以 `.proxy.rlwy.net` 结尾）。
+    `DATABASE_URL` 的 `*.railway.internal` 主机只在 Railway 内部可解析。
+  </Tab>
+  <Tab value="自托管">
+    主机必须从 supabackup 容器可达：`localhost` 指容器自身，Docker 宿主机上的库
+    请用 `host.docker.internal` 或局域网地址。角色需能读取 `pg_dump` 导出的全部内容
+    （库属主或 `pg_read_all_data` 成员，PostgreSQL 14+）。
+  </Tab>
+</Tabs>
+
+## TLS 模式（sslmode）
+
+- 远端主机**必须显式**指定 sslmode（未指定会被注册拒绝）。
+- 有 CA 签名证书用 `verify-full`；只加密不校验用 `require`；
+  `disable` 仅用于你信任的私有网络（密码与数据明文传输）。
+- 本地回环默认 `prefer`。
+
+## 连接失败怎么读
+
+注册返回 422 时，界面只给出固定文案（“连接测试失败——请检查主机、端口、凭据和
+TLS 模式”），不回显底层驱动错误——这是有意的凭据保护。排查请用服务器日志中
+**已脱敏**的详情行。

@@ -1,0 +1,47 @@
+---
+title: Backups & downloads
+description: Task state machine, the three download forms, failure semantics
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## Task states
+
+| State | Meaning |
+|---|---|
+| `pending` | queued |
+| `running` | executing |
+| `succeeded` | export + encryption + (if configured) remote commit all succeeded |
+| `failed` | a real failure in some stage; carries an error class and first-step remediation |
+| `canceled` | user-canceled |
+| `interrupted` | instance shutdown/crash; converges via startup resume |
+
+<Callout>
+`succeeded` does NOT mean "restore-verified". Verification has its own
+verifyStatus (`verified` / `failed` / `unsupported` / `not verified`) shown
+beside the task.
+</Callout>
+
+## Error classes and first steps
+
+Seven classes: `network` (reachability/timeout), `auth` (credentials refused),
+`permission` (insufficient privileges), `client_version` (pg_dump older than
+the server), `disk` (local space/quota), `storage_upload` (remote upload or
+read-back failed; the local ciphertext is retained), `verification` (export
+integrity). Failed rows render the class's first troubleshooting step.
+
+## Download forms
+
+1. **Recovery kit** (`restore-job<N>.sh`): hash-gated decrypt+restore script
+   for a succeeded backup.
+2. **Local ciphertext** (`backup-job<N>.dump.age`): the staged artifact,
+   same-origin download.
+3. **Bucket object** (presigned URL, 15-minute TTL): only for remote-committed
+   backups.
+
+All three require an authenticated session; anonymous requests get 401.
+
+## Concurrency
+
+One pending/running job per database at a time; duplicate triggers answer 409
+(the console says a job is already queued or running).

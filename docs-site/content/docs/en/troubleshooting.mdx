@@ -1,0 +1,49 @@
+---
+title: Troubleshooting
+description: "Frequent issues: login, pooling, resume, staging, verification, webhooks"
+---
+
+## Cannot log in over plain HTTP
+
+Production session cookies are `Secure`; browsers drop them on http:// —
+logins appear to do nothing. Put TLS in front. `SB_INSECURE_COOKIE=1` is for
+local development only.
+
+## "Connection test failed" at registration
+
+The console never shows the driver error (credential protection). Read the
+redacted line in the server log: `keyword_view` gives host:port/db
+(user, sslmode) — check reachability, credentials and TLS against it.
+
+## Supabase/Neon backups fail with network or client_version
+
+You probably hit a pooled endpoint: Supabase wants 5432 (session), never 6543;
+Neon hosts must not contain `-pooler`. The pre-flight and registration pooling
+warnings exist exactly for this.
+
+## An interrupted job never resumed
+
+Resume runs only at startup (`ResumeRemotePhase`). Confirm `resume:` lines in
+the log after restart. If the local artifact was already reclaimed by the TTL
+(default 72h) there is nothing to resume; the next scheduled run produces a
+fresh artifact.
+
+## Staging fills up / new backups fail with the disk class
+
+Check `supabackup_staging_bytes` and destination health. Failed artifacts are
+reclaimed after `SB_FAILED_ARTIFACT_TTL_HOURS`. In an emergency you may delete
+staged `backup-job*.dump.age` files belonging to FAILED jobs only — never the
+succeeded anchor.
+
+## Verification stays "not verified"
+
+Verification is off by default (`SB_VERIFY_ENABLED=false`). Enabling it
+requires `SB_VERIFY_IDENTITY_FILE` pointing at a 0600 age identity file. Disk
+budget shortfalls settle as skipped with a reason.
+
+## Webhooks receive nothing
+
+Read the delivery log: `delivering` stuck usually means the receiver never
+returns; `dead` means retries are exhausted. "Send test" separates
+configuration problems from receiver problems. Delivery is at-least-once —
+deduplicate on `X-Supabackup-Event-ID`.

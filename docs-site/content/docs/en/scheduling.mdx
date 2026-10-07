@@ -1,0 +1,38 @@
+---
+title: Schedules & retention
+description: cron schedules, freshness thresholds, pause semantics, retention policy
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## Schedules
+
+Per database, in the "Schedule & heartbeat" drawer:
+
+- **Cron expression**: standard five fields (minute hour day month weekday) or
+  `@daily`-style aliases; empty = manual only. Timezone: IANA names
+  (e.g. `Europe/Berlin`).
+- **Freshness threshold (hours)**: the newest successful backup older than
+  this marks the database EXPIRED; `0` disables.
+- **Pause**: suspends scheduled runs; manual "Back up now" keeps working.
+
+A due run whose database already has a pending/running job is skipped (one job
+per database); the log states the cursor did not advance and the slot re-fires
+once the in-flight run finishes.
+
+## Retention (two tracks)
+
+**Local**: the newest `SB_LOCAL_KEEP` ciphertexts per database; the newest
+successful backup and the newest restore-verified backup are always protected.
+Artifacts of failed/canceled/interrupted jobs are reclaimed after
+`SB_FAILED_ARTIFACT_TTL_HOURS`.
+
+**Remote**: per-destination days/copies, subject to the same two anchors:
+
+1. the newest committed backup (the anchor) is never auto-deleted;
+2. the newest restore-verified backup is never auto-deleted.
+
+<Callout type="warn">
+With no anchor at all (nothing ever committed successfully), automatic
+destructive cleanup does not run.
+</Callout>

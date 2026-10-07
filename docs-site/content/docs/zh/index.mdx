@@ -1,0 +1,52 @@
+---
+title: supabackup 是什么
+description: 自托管的 PostgreSQL 加密备份工具：BYOS、age 加密、可验证恢复
+---
+
+import { Card, Cards } from "fumadocs-ui/components/card";
+
+import { ShieldAlert, RefreshCw, LifeBuoy, Lock } from "lucide-react";
+
+supabackup 是一个自托管的 PostgreSQL 备份服务，面向 Supabase、Neon、Railway
+以及任意自托管 PostgreSQL。它把 `pg_dump` 的输出流式加密（age）后写入**你自己的**
+对象存储（S3 / R2 / B2 / MinIO），并在本地暂存一份可下载的密文。
+
+## 四条保证
+
+<Cards>
+  <Card title="失败不伪装成功" icon={<ShieldAlert className="size-4" />}>
+    导出、加密、提交任何一步失败，任务都会落为 failed，绝不会标记 succeeded。
+  </Card>
+  <Card title="重启可收敛" icon={<RefreshCw className="size-4" />}>
+    停机中断的任务记为 interrupted；已提交的本地密文在下次启动自动续传。
+  </Card>
+  <Card title="备份独立可恢复" icon={<LifeBuoy className="size-4" />}>
+    恢复只需要三样东西：密文文件、离线保存的 age 私钥、恢复套件脚本。
+  </Card>
+  <Card title="秘密不出错误面" icon={<Lock className="size-4" />}>
+    密码与凭据在日志、API 错误、任务记录、指标四条出口都被脱敏。
+  </Card>
+</Cards>
+
+## 备份流水线
+
+```text
+源库 pg_dump --format=custom
+  → age 流式加密（X25519 + ChaCha20-Poly1305）
+  → 本地暂存原子提交（staging，.inprogress → 最终名）
+  → 远端对象存储提交（含读回哈希校验）
+  → 可选：内嵌 PostgreSQL 恢复验证
+  → 通知 outbox（webhook，带重试）
+```
+
+## 控制界面
+
+单页控制台内嵌在二进制中，支持中文/英文切换（`Accept-Language` 与界面语言一致，
+API 的校验错误、排查建议也会跟随界面语言）。登录采用会话 cookie + CSRF 双提交；
+生产部署必须位于 HTTPS 反代之后。
+
+## 下一步
+
+- [快速开始](/zh/docs/quickstart)：十分钟内完成首次加密备份。
+- [配置参考](/zh/docs/configuration)：全部 `SB_*` 环境变量。
+- [恢复与灾备](/zh/docs/restore)：三种密钥丢失场景的操作步骤。

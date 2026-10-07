@@ -1,0 +1,42 @@
+---
+title: 故障排查
+description: 高频问题速查：登录、池化、池、时区、暂存与验证
+---
+
+## 无法登录（纯 HTTP 部署）
+
+生产默认会话 cookie 带 `Secure`，纯 HTTP 下浏览器不保存 → 表现为登录“无反应”。
+正确做法是加 TLS 反代；仅本地开发可 `SB_INSECURE_COOKIE=1`。
+
+## 注册报“连接测试失败”
+
+界面不显示底层驱动错误（凭据保护）。看服务器日志的脱敏行：
+`keyword_view` 给出 host:port/db(user, sslmode)，据此逐项核对连通性/凭据/TLS。
+
+## Supabase/Neon 备份总是失败且类为 network 或 client
+
+大概率命中池化端点：Supabase 用 5432（session），不要用 6543；Neon 主机名不能含
+`-pooler`。预检与注册时的池化警告就是为此而设。
+
+## 任务 interrupted 后没有续传
+
+续传只发生在**启动时**（`ResumeRemotePhase`）。确认重启后日志有
+`resume:` 行；若本地工件已被回收宽限清理（默认 72h），则不会续传，下一次计划
+备份会产生新工件。
+
+## 暂存涨满 / 新备份报 disk 类失败
+
+检查 `supabackup_staging_bytes` 与目的地健康。失败工件在
+`SB_FAILED_ARTIFACT_TTL_HOURS` 后自动回收；紧急时可手动删除 staging 中
+`backup-job*.dump.age`（仅删 failed 任务对应的，勿删 succeeded 的锚点）。
+
+## 验证一直“未验证”
+
+验证默认关闭（`SB_VERIFY_ENABLED=false`）。开启需要 `SB_VERIFY_IDENTITY_FILE`
+指向 0600 的 age 私钥文件。磁盘预算不足时验证落为 skipped 并说明原因。
+
+## Webhook 收不到事件
+
+投递日志看状态：`delivering` 卡住通常是接收端不返回；`dead` 表示重试耗尽。
+“发送测试”可区分配置问题与接收端问题。事件为至少一次语义，接收端应按
+`X-Supabackup-Event-ID` 去重。

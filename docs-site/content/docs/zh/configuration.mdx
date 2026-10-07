@@ -1,0 +1,55 @@
+---
+title: 配置参考
+description: 全部 SB_* 环境变量：默认值、语义与风险
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+全部配置经环境变量注入，无配置文件。
+
+## 核心
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SB_DATA_DIR` | `./data`（镜像内 `/app/data`） | 主密钥、SQLite、暂存区所在目录 |
+| `SB_ADDR` | `:8080` | HTTP 监听地址 |
+| `SB_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| `SB_SECRET_FILE` | （数据目录内） | 主密钥文件路径覆盖 |
+| `SB_PUBLIC_ORIGIN` | 空 | 反代外部 origin；设置后 Origin 必须严格相等 |
+| `SB_TRUSTED_PROXIES` | 空 | 允许携带 X-Forwarded-For 的 CIDR 列表；空 = 不信任任何代理 |
+
+## 会话与引导
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SB_INSECURE_COOKIE` | `false` | 允许无 `Secure` 的会话 cookie。**仅本地纯 HTTP 开发**；生产必须 TLS |
+| 引导令牌 TTL | 15 分钟 | `bootstrap` 子命令输出的一次性令牌 |
+| 会话 TTL | 7 天 | 固定值 |
+
+## 备份与暂存
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SB_LOCAL_KEEP` | `5` | 每库本地保留的密文工件数（最新成功备份永远受保护） |
+| `SB_STAGING_QUOTA_BYTES` | `0`（不限） | 暂存硬配额；达到后新备份以磁盘类失败落库 |
+| `SB_JOB_TIMEOUT` | `6h` | 单个备份任务的墙钟预算（导出+上传+回读）。超时按网络类失败落库并通知；`0` 关闭预算 |
+| `SB_FAILED_ARTIFACT_TTL_HOURS` | `72` | failed/canceled/interrupted 任务本地密文的回收宽限；`0` 永久保留 |
+
+## 恢复验证（默认关闭）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SB_VERIFY_ENABLED` | `false` | 开启每次成功备份后的内嵌 PostgreSQL 恢复验证 |
+| `SB_VERIFY_IDENTITY_FILE` | 空 | 开启验证**必须**提供 age 私钥文件；强制 0600、非符号链接 |
+| `SB_VERIFY_PGBIN` | 空 | 覆盖内嵌实例的服务端二进制目录 |
+
+<Callout type="warn">
+开启验证意味着把解密私钥交给运行中的实例——这是一个显式的信任决策
+（ADR-004）。关闭时验证状态显示为“未验证”，不影响备份正确性。
+</Callout>
+
+## 心跳兜底
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SB_HEARTBEAT_URL` | 空 | 服务器级死人开关兜底 URL；未单独配置的库继承它 |

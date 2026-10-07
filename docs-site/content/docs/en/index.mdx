@@ -1,0 +1,58 @@
+---
+title: What is supabackup
+description: Self-hosted encrypted PostgreSQL backups with BYOS storage and verifiable restores
+---
+
+import { Card, Cards } from "fumadocs-ui/components/card";
+
+import { ShieldAlert, RefreshCw, LifeBuoy, Lock } from "lucide-react";
+
+supabackup is a self-hosted PostgreSQL backup service for Supabase, Neon,
+Railway and any self-hosted PostgreSQL. It streams `pg_dump` output through
+age encryption into **your own** object storage (S3 / R2 / B2 / MinIO) and
+keeps a downloadable ciphertext copy in local staging.
+
+## Four guarantees
+
+<Cards>
+  <Card title="Failures never look like success" icon={<ShieldAlert className="size-4" />}>
+    Any failure in export, encryption or commit lands the job as failed —
+    never as succeeded.
+  </Card>
+  <Card title="Restarts converge" icon={<RefreshCw className="size-4" />}>
+    Shutdown-interrupted jobs are recorded as interrupted; committed local
+    ciphertext is re-uploaded at the next startup.
+  </Card>
+  <Card title="Backups restore standalone" icon={<LifeBuoy className="size-4" />}>
+    Recovery needs exactly three things: the ciphertext, your offline age
+    identity, and the recovery kit script.
+  </Card>
+  <Card title="Secrets never leak into errors" icon={<Lock className="size-4" />}>
+    Passwords and credentials are redacted across logs, API errors, task
+    history and metrics.
+  </Card>
+</Cards>
+
+## The pipeline
+
+```text
+source pg_dump --format=custom
+  → age stream encryption (X25519 + ChaCha20-Poly1305)
+  → atomic commit in local staging (.inprogress → final name)
+  → remote object-storage commit with read-back hash verification
+  → optional embedded-PostgreSQL restore verification
+  → notification outbox (webhooks, with retries)
+```
+
+## Console
+
+The single-page console is embedded in the binary and ships in Chinese and
+English; the UI language also drives API-side messages via `Accept-Language`.
+Sessions use cookies plus double-submit CSRF; production deployments must sit
+behind TLS.
+
+## Next
+
+- [Quickstart](/en/docs/quickstart): first encrypted backup in ten minutes.
+- [Configuration](/en/docs/configuration): every `SB_*` variable.
+- [Restore & DR](/en/docs/restore): the three key-loss scenarios.
