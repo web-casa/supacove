@@ -72,3 +72,48 @@
 已扫描完整 diff 并对读改动涉及的中英文。除上述问题外，未发现其他新增实质内容缺陷或 MDX 编译问题。非阻断清理：根布局重复导入 global.css；语言布局注释声称根仍有 html、Next 将 html 提升到 head，与当前根布局返回 fragment 不符；restore 的 description 仍称“三类”，正文已改四种情形。
 
 浏览器语言菜单点击、干净 npm ci 仍属未完成验收；生产构建及 HTML 检查也未通过。本轮并非仅剩浏览器/安装环境限制：P2-02、P2-08、P2-11 仍有明确内容问题，因此结论为 **NEEDS_FIXES**。
+
+## 第 4 轮确认
+
+日期：2026-10-07。基线：本报告第三轮的 7 FIXED / 3 PARTIALLY；修复 HEAD：`15a704c`；审查范围：`git diff 1d8579a..HEAD`。结论：**NEEDS_FIXES**。
+
+三项内容核验为 **3 FIXED / 0 NOT_FIXED**。本轮未发现新增实质内容缺陷；阻断项是要求的 `npm run build` 仍未取得成功结果，不能以环境原因替代构建通过，也不据此断言实现存在编译缺陷。
+
+| 编号 | 判定 | 核验依据 |
+|---|---|---|
+| P2-02 | FIXED | `docs-site/content/docs/zh/heartbeat.mdx:17–20`、`en/heartbeat.mdx:18–23` 均删除自动清零承诺，明确禁用期间成功/失败 ping 均不发送，保存的周期在改回真实/继承 URL 后可继续使用；继承 URL 的成功 ping 仍要求正周期。与 `backend/internal/server/api_phase7.go:143–170` 的字段更新和校验、`backend/internal/jobs/queries_schedule.go:58–67` 的原值保存、`backend/internal/jobs/heartbeat.go:59` 的禁用分支一致。 |
+| P2-08 | FIXED | `zh/restore.mdx:66–77`、`en/restore.mdx:79–94` 均将场景 1 指向空目录启动、bootstrap、仅在旧私钥仍可用时写回原 recipient、重新注册数据库/目的地及调度；pre-migrate 快照回滚、隔离 WAL/SHM、启动旧版本归场景 4，与 `docs/disaster-recovery.md` 对应步骤一致。两语均提供 Markdown 手册链接及明确本地路径回退；本地手册存在，`git remote -v` 无输出。本项按允许的本地路径回退验收，不宣称 GitHub 目标已验证可访问。 |
+| P2-11 | FIXED | `docs/docs-site-plan.md:62` 验收 URL 已为 `/zh/docs/quickstart`、`/en/docs/quickstart`，与实际路由一致。本判定针对本轮指定的 URL 修复；生产构建及 HTML 验收单列如下，尚未通过。 |
+
+### 构建与冒烟记录
+
+工作树开始时干净。通过 `git archive HEAD docs-site` 在 `/tmp/docs-review4-zl7y4J/docs-site` 创建副本，复制现有 `node_modules`；使用 Node 22.22.2，未修改仓库实现或依赖，仅追加本节。未执行干净 `npm ci`。
+
+| 验证 | 结果 | 证据 |
+|---|---|---|
+| 原样 `npm run build` | 未绿（阻断） | parity 通过：两语各 12 slugs；Next 16.4.0 / MDX 生成完成后停在 `Creating an optimized production build ...`，人工中止，退出 130。见 `/tmp/docs-review4-zl7y4J/build.log`。 |
+| 补充 `npm run build -- --webpack` | FAIL | 退出 1：`Could not parse output from TypeScript's --showConfig`，cause 为 `Unexpected end of JSON input`。见同目录 `build-webpack.log`。不将替代构建当作原样构建通过。 |
+| 执行环境定位 | 受限 | Node 22 独立 `spawnSync` 执行 `console.log(12345)` 返回空 stdout，且 error 明确为 `spawnSync … EPERM`；直接执行 `tsc --showConfig` 则输出 2045 字节。见 `spawn.log`、`tsconfig-output.json`。构建失败具有环境限制证据。 |
+| `next start --hostname 127.0.0.1 --port 4339` | FAIL / 环境阻塞 | 实际报 `listen EPERM: operation not permitted 127.0.0.1:4339`；独立 Node TCP 监听测试同样 EPERM。见 `start.log`。当前工具沙箱并非可监听环境。 |
+| zh/en 各一页 200、根 `html lang`、stylesheet、搜索 API 命中 | 未完成 | 无成功生产构建且服务无法监听；没有将源码推断或第三轮的直接函数调用冒充本轮 HTTP 冒烟通过。 |
+| 完整 diff 与格式检查 | PASS | 已扫描范围内全部 6 个文件（含第三轮报告），对读两语 heartbeat / restore 及上下文；未发现新增实质事实错误或两语语义偏差。`git diff --check 1d8579a..HEAD` 通过。 |
+
+干净 `npm ci`、浏览器点击继续列为非阻断遗留；第三轮已记录的重复 CSS 导入、布局注释及 description 旧计数均未在本 diff 改动，不新增阻断。最终批准仍需在允许子进程执行及监听的环境取得原样 `npm run build` 成功，并补齐生产 HTTP 冒烟。本轮不要求继续修改已通过的三项内容。
+
+## 仓库所有者补记：第 4 轮环境受阻的构建/冒烟验收在主环境完成
+
+评审沙箱无法完成 `npm run build` 与 `next start`（监听 EPERM），该阻断项在
+主工作环境中对同一 HEAD（15a704c）实际执行：
+
+| 验收项 | 结果 |
+|---|---|
+| `rm -rf .next && npm run build`（含 parity） | **exit 0**，24 页 SSG/Static 生成 |
+| 路由 200：`/zh/docs`、`/zh/docs/quickstart`、`/zh/docs/restore`、`/en/docs/quickstart`、`/en/docs/monitoring`；`/` 307 到默认语言 | 全部通过 |
+| 每路由 `<html lang>` | zh 页 `lang="zh"`，en 页 `lang="en"` |
+| 样式表 | 页面含 `rel="stylesheet"` link |
+| 搜索 API | zh「心跳」7 命中、en「pooler」5 命中 |
+| 语言切换器 | SSR 输出当前 locale 按钮（选项列表由客户端水合渲染，与 R3 判定一致） |
+
+结合第 4 轮三项内容判定 3 FIXED 与无新增实质缺陷的结论，文档站内容侧收敛；
+遗留仅为环境性事项（干净 npm ci 的 CI 首跑、浏览器点击验收），与仓库其他
+CI 首跑项同批处理。
