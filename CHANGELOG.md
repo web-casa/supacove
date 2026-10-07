@@ -34,10 +34,12 @@ All notable changes to supabackup.
   values are now escaped with the Prometheus-legal set only (`\\`, `\"`,
   newline) — Go's `%q` previously emitted `\t`/`\xNN`, which real scrapers
   reject outright (GLM review round 5)
-- `AbortIncomplete` (leftover multipart cleanup) now rescans from the key to
-  a fixed point instead of walking markers: MinIO invalidates key/upload-id
-  markers once earlier pages are aborted, so marker pagination skipped
-  same-key survivors (4/4 observed runs left one of 101 sessions behind)
+- `AbortIncomplete` (leftover multipart cleanup) now lists without any
+  pagination marker and repeats to a fixed point: AWS treats a same-key
+  KeyMarker as strictly-greater (skipping every session of that key) and
+  MinIO invalidates both markers once earlier pages are aborted — marker
+  pagination was wrong on one provider or the other either way (4/4
+  observed MinIO runs left one of 101 sessions behind)
 
 ### Fixed
 - Graceful shutdown (docker stop / upgrade) no longer lands a running backup

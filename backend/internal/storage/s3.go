@@ -161,11 +161,14 @@ func (s *Store) AbortIncomplete(_ context.Context, key string) {
 	defer cancel()
 	const maxRounds = 100 // 100 rounds x 100/page = 10k sessions; deadline still rules
 	for round := 0; round < maxRounds; round++ {
-		from := key
+		// NO markers at all, by design: AWS treats KeyMarker as
+		// strictly-greater (a same-key marker would skip every session of
+		// this key), and MinIO invalidates both markers after the previous
+		// page's aborts. Relisting from scratch each round is correct on
+		// both and ends when a page yields nothing for this exact key.
 		out, err := s.client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
 			Bucket:     aws.String(s.cfg.Bucket),
 			Prefix:     aws.String(key),
-			KeyMarker:  &from, // start AT the key; no upload-id marker
 			MaxUploads: aws.Int32(100),
 		})
 		if err != nil {
