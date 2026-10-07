@@ -13,8 +13,10 @@ PGPASSWORD='<目标库密码>' \
 sh restore-job7.sh 'postgresql://user@host:5432/restored?sslmode=require' backup-job7.dump.age
 ```
 
-脚本顺序：校验密文 SHA-256（不匹配立即退出 1，不做任何解密）→ age 解密到临时明文
-→ `pg_restore` → 输出恢复表数。目标库需事先创建（`createdb`）。
+脚本顺序：校验密文 SHA-256（不匹配立即退出 1，不做任何解密）→ 拒绝非空目标库
+→ age 解密到临时明文 → `pg_restore` → 在 manifest 表数已知时做**相等**检查并输出。
+注意恢复失败可能留下部分写入，需清理目标库后重试。目标库需事先创建（`createdb`）。
+manifest 的 `backupId` 是实例内标识（`job-N`），不是桶内对象键（对象键使用备份 UUID）。
 
 ## 独立恢复：不依赖本实例
 
@@ -22,7 +24,7 @@ sh restore-job7.sh 'postgresql://user@host:5432/restored?sslmode=require' backup
 
 1. 对象存储（或暂存盘）中的 `*.dump.age` 与同名 `*.manifest.json`；
 2. 离线保存的 age 私钥；
-3. 恢复套件脚本（或按 manifest 中的哈希手工执行 age + pg_restore）。
+3. 恢复套件脚本。**恢复主机需要自备工具**：套件会检查 `age`、`pg_restore`、`psql` 与 `sha256sum`（或 `shasum`），缺失即退出 3——服务镜像内置的是 age 算法库，不是恢复环境的 CLI。
 
 manifest 是自描述的：备份 UUID、服务器版本、表数、SHA-256、recipient 指纹。
 元数据库（SQLite）**不是**恢复的前提。
@@ -30,18 +32,35 @@ manifest 是自描述的：备份 UUID、服务器版本、表数、SHA-256、re
 ## 三类密钥事故
 
 <Steps>
-  <Step title="主密钥丢失/损坏，age 私钥还在">
-    备份仍可解密。但已保存的数据库连接串与目的地凭据无法读取——需要重新注册
-    数据库与目的地。启动会因主密钥不可读而拒绝运行（fail closed）。
+  <Step title="主密钥文件缺失，age 私钥还在">
+    备份密文仍可解密。实例**会生成一把新主密钥**继续运行——已保存的连接串与
+    目的地凭据将无法读取，需要重新注册数据库与目的地。先尝试从备份找回原密钥，
+    再考虑重建。
+  </Step>
+  <Step title="主密钥文件损坏/权限不合规/被替换">
+    启动被拒绝（fail closed）。损坏或权限问题需修复文件；若密钥内容已被换掉
+    （格式合法但值不同），实例可以启动，但旧凭据全部解密失败——等同于丢失。
   </Step>
   <Step title="age 私钥丢失，主密钥还在">
-    已有密文**不可恢复**。实例仍可继续产生新备份（用新 `age init` 的身份）。
+    已有密文**不可恢复**。注意：`age init` **不是轮换接口**——实例已配置
+    recipient 时它会直接报错。恢复未来保护需要按“保留原 recipient 记录”的
+    重建流程在新实例上进行；原实例将继续用旧公钥产生无法解密的备份，
+    应尽快停用其调度。
   </Step>
   <Step title="两者都丢">
-    已有备份不可恢复。立即：新 `age init`、重建目的地凭据、重新注册数据库，
-    让保护链重新开始。
+    已有备份不可恢复。立即：停用旧实例调度、保全数据目录与桶内对象（审计需要）、
+    在新实例完成 `age init` + 目的地凭据 + 数据库重新注册，让保护链重新开始。
   </Step>
 </Steps>
 
-完整命令级流程见仓库 `docs/disaster-recovery.md`（开发文档），其中含
-pre-migrate 快照、旧二进制回退与 WAL/SHM 隔离等细节。
+## 与仓库灾备手册的场景对应
+
+命令级完整流程在仓库 `docs/disaster-recovery.md`（开发文档）。场景索引：
+
+- 场景 1（age 私钥可用、主密钥/实例丢失）→ 本页“独立恢复”。
+- 场景 2（主密钥缺失/损坏/被替换的三种处置）→ 本页“密钥事故”第二、三步。
+- 场景 3（实例+元数据库全丢，从桶恢复）→ 本页“独立恢复”，对象键为
+  `<prefix>backups/<备份UUID>.dump.age`。
+- 场景 4（SQLite 损坏/数据卷丢失）→ 手册的 pre-migrate 快照与 schema 重建步骤；
+  备份密文不依赖元数据库，恢复路径同场景 3。
+

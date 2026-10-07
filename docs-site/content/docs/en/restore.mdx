@@ -14,8 +14,12 @@ sh restore-job7.sh 'postgresql://user@host:5432/restored?sslmode=require' backup
 ```
 
 Order of operations: verify the ciphertext SHA-256 (mismatch exits 1 before any
-decryption) → age-decrypt to a temporary plaintext → `pg_restore` → print the
-restored table count. Create the target database first (`createdb`).
+decryption) → refuse a non-empty target database → age-decrypt to a temporary
+plaintext → `pg_restore` → when the manifest carries a table count, assert
+EQUALITY and print it. A failed restore may leave partial writes: clean the
+target before retrying. Create the target database first (`createdb`). The
+manifest's `backupId` is the instance-local id (`job-N`), not the bucket object
+key (objects are keyed by the backup UUID).
 
 ## Standalone restore: without this instance
 
@@ -23,7 +27,7 @@ If the instance is gone entirely, recovery needs exactly:
 
 1. the `*.dump.age` and its `*.manifest.json` from the bucket (or staging);
 2. your offline age identity;
-3. the recovery kit script (or manual age + pg_restore guided by the manifest).
+3. the recovery kit script. **The restore host needs its own tools**: the kit checks for `age`, `pg_restore`, `psql` and `sha256sum` (or `shasum`) and exits 3 when missing — the service image embeds the age Go library, not a CLI for your restore box.
 
 The manifest is self-describing: backup UUID, server version, table count,
 SHA-256, recipient fingerprint. The SQLite metadata database is NOT a
@@ -32,22 +36,45 @@ prerequisite for recovery.
 ## The three key incidents
 
 <Steps>
-  <Step title="Master secret lost/corrupted, age identity intact">
-    Backups remain decryptable, but stored connection strings and destination
-    credentials are unreadable — re-register databases and destinations.
-    Startup refuses to run without a readable master secret (fail closed).
+  <Step title="Master secret file missing, age identity intact">
+    Ciphertext stays decryptable. The instance **generates a fresh master
+    secret** and keeps running — stored connection strings and destination
+    credentials become unreadable and must be re-registered. Try to recover
+    the original key from backups before rebuilding anything.
+  </Step>
+  <Step title="Master secret corrupted / bad permissions / replaced">
+    Startup is refused (fail closed) for corruption and permission problems.
+    A key that was merely replaced (valid format, different value) lets the
+    instance start, but every old credential fails to decrypt — equivalent to
+    losing it.
   </Step>
   <Step title="Age identity lost, master secret intact">
-    Existing ciphertext is unrecoverable. The instance keeps producing new
-    backups under a fresh `age init` identity.
+    Existing ciphertext is unrecoverable. Note: `age init` is **not** a
+    rotation interface — it refuses when a recipient is already configured.
+    Restoring future protection means rebuilding on a new instance while
+    preserving the original recipient record; the old instance keeps writing
+    backups nobody can decrypt, so pause its schedules promptly.
   </Step>
   <Step title="Both lost">
-    Existing backups are unrecoverable. Immediately: new `age init`, recreate
-    destination credentials, re-register databases so the protection chain
-    restarts.
+    Existing backups are unrecoverable. Immediately: pause the old instance,
+    preserve the data directory and bucket objects (for audit), then complete
+    `age init` + destination credentials + database re-registration on a new
+    instance so the protection chain restarts.
   </Step>
 </Steps>
 
-The command-level playbook lives in the repository's `docs/disaster-recovery.md`
-(developer documentation), including pre-migrate snapshots, old-binary rollback
-and WAL/SHM isolation details.
+## Mapping to the repository playbook
+
+The command-level playbook lives in `docs/disaster-recovery.md` (developer
+documentation). Scenario index:
+
+- Scenario 1 (age identity available, master secret/instance lost) →
+  "Standalone restore" on this page.
+- Scenario 2 (master secret missing / corrupted / replaced) → the second and
+  third key-incident steps above.
+- Scenario 3 (instance and metadata database gone, restore from the bucket) →
+  "Standalone restore"; object keys are `<prefix>backups/<backup-uuid>.dump.age`.
+- Scenario 4 (SQLite corruption / data-volume loss) → the playbook's
+  pre-migrate snapshot and schema rebuild steps; ciphertext never depends on
+  the metadata database, so recovery follows scenario 3.
+

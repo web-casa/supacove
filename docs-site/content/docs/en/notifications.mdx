@@ -15,8 +15,9 @@ Each event is delivered to every matching webhook as one JSON POST with
 
 ## Delivery semantics (outbox)
 
-- Transactional: the notification commits in the same transaction as the
-  terminal state — a committed failure can never lose its alert.
+- Transactional in the normal path: the notification commits with the terminal
+  state; compensation paths (fallback enqueue plus the scheduler reconciliation
+  sweep) provide the durable no-lost-alert guarantee.
 - At-least-once: retries back off 30/60/120/240s, up to 5 attempts; exhaustion
   marks the delivery `dead` (visible in the UI, never silently dropped).
 - Single instance: leases and dedup assume one running instance (enforced by a
@@ -26,8 +27,10 @@ Each event is delivered to every matching webhook as one JSON POST with
 
 - "Send test" performs a real delivery immediately (outside the outbox) and
   reports delivered/failed with an error category.
-- The delivery log shows state, attempts and last error per notification
-  (errors are classified and redacted; URLs are never stored there).
+- The delivery log shows state, `attempts` (cumulative FAILED rounds — a
+  success does not increment it, and it is not an HTTP request count) and last
+  error per notification (errors are classified and redacted; URLs are never
+  stored there).
 - Webhook URLs may point at LAN/loopback receivers (a supported scenario) but
   link-local and cloud-metadata endpoints are refused — including IPv6
   `fd00:ec2::254` and NAT64 encodings.

@@ -43,11 +43,14 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 ## TLS modes (sslmode)
 
-- Remote hosts MUST state sslmode explicitly (registration refuses otherwise).
+- Remote hosts MUST state sslmode explicitly: raw API calls without it are
+  refused; the console fills in your dropdown selection automatically (and
+  drops unsupported query parameters).
 - `verify-full` with a CA-signed certificate; `require` to encrypt without
   verifying; `disable` only on private networks you trust (password and data
   travel in cleartext).
-- Loopback defaults to `prefer`.
+- Loopback addresses default to `prefer` at backend parse time (not a console
+  completion).
 
 ## Reading a failed registration
 

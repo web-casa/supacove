@@ -11,7 +11,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 docker build --target runtime -t supabackup:local .
 ```
 
-镜像以非 root（UID 10001）运行，内置 PostgreSQL 客户端 14–18 与 age。
+镜像以非 root（UID 10001）运行，内置 PostgreSQL 客户端 14–18；加密使用内置 age 算法库（无需外部 age CLI）。
 
 ## 2. 启动
 
@@ -42,7 +42,8 @@ One-time bootstrap token (valid 15m0s):
 Use it in the web UI to create the admin account. It will not be shown again.
 ```
 
-打开 `http://127.0.0.1:8080`，点“使用 CLI 令牌初始化新实例”，粘贴令牌并设置
+打开 `http://127.0.0.1:8080`（本地纯 HTTP 回环可以直接登录；生产必须 TLS，否则
+浏览器不保存 Secure cookie）。点“使用 CLI 令牌初始化新实例”，粘贴令牌并设置
 用户名与至少 12 位密码。令牌 15 分钟内有效、仅可用一次。
 
 ## 4. 初始化 age 加密身份

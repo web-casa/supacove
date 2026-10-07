@@ -23,11 +23,15 @@ In the database's "Schedule & heartbeat" drawer:
 
 1. an effective URL exists (per-database or fallback) and is not `-`;
 2. the expected period is > 0;
-3. the newest successful backup is not older than period + grace;
+3. the time from THIS run's export start (dumpStart) to now is within
+   period + grace — not the completion time, and not a poll of history: a
+   very long successful run may legitimately not ping;
 4. with a remote destination configured: that backup must be remote-committed
    (local-only deployments are exempt).
 
-Fail pings bypass the age gate (the failure IS the signal) but still respect `-`.
+Fail pings bypass the age gate (the failure IS the signal) but still respect
+`-`. Your external monitor's alerting period is configured on the monitor
+side; supabackup only pings.
 
 <Callout>
 One URL expresses "this monitor is alive". With several databases sharing the

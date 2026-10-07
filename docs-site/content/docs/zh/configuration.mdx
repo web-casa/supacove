@@ -31,8 +31,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SB_LOCAL_KEEP` | `5` | 每库本地保留的密文工件数（最新成功备份永远受保护） |
-| `SB_STAGING_QUOTA_BYTES` | `0`（不限） | 暂存硬配额；达到后新备份以磁盘类失败落库 |
-| `SB_JOB_TIMEOUT` | `6h` | 单个备份任务的墙钟预算（导出+上传+回读）。超时按网络类失败落库并通知；`0` 关闭预算 |
+| `SB_STAGING_QUOTA_BYTES` | `0`（不限） | 暂存硬配额；达到后新备份以磁盘类失败落库。即使为 0，仍保留 64 MiB 的文件系统空闲下限检查 |
+| `SB_JOB_TIMEOUT` | `6h` | 单个备份任务的墙钟预算（导出+上传+回读）。普通运行中超时按网络类失败落库并通知；**启动续传**超时则恢复为 interrupted（不通知）。`0` 关闭预算 |
 | `SB_FAILED_ARTIFACT_TTL_HOURS` | `72` | failed/canceled/interrupted 任务本地密文的回收宽限；`0` 永久保留 |
 
 ## 恢复验证（默认关闭）
@@ -40,7 +40,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SB_VERIFY_ENABLED` | `false` | 开启每次成功备份后的内嵌 PostgreSQL 恢复验证 |
-| `SB_VERIFY_IDENTITY_FILE` | 空 | 开启验证**必须**提供 age 私钥文件；强制 0600、非符号链接 |
+| `SB_VERIFY_IDENTITY_FILE` | 空 | 开启验证**必须**提供 age 私钥文件；要求为普通文件、非符号链接、无 group/other 权限且运行用户可读（0600 或 0400） |
 | `SB_VERIFY_PGBIN` | 空 | 覆盖内嵌实例的服务端二进制目录 |
 
 <Callout type="warn">

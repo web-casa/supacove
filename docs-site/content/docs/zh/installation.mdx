@@ -7,12 +7,12 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 运行形态
 
-supabackup 是单个 Go 二进制（内嵌前端），外加三个外部依赖：
+supabackup 是单个 Go 二进制（内嵌前端）。运行期外部依赖只有两项；age 以 Go 库内置：
 
 | 依赖 | 用途 | 版本要求 |
 |---|---|---|
 | PostgreSQL 客户端工具 | `pg_dump` / `pg_restore` | 14–18（镜像内置） |
-| age | 加解密 | 任意近期版本（镜像内置） |
+| age（算法库） | 加解密 | 服务内置 Go 库 filippo.io/age，**不需要** age CLI |
 | S3 兼容对象存储 | 远端提交（可选但推荐） | S3 / R2 / B2 / MinIO |
 
 ## 镜像构建
@@ -29,14 +29,21 @@ docker build --target runtime -t supabackup:<tag> .
 ## 源码构建
 
 ```bash
-# Go 1.26.6+（与 go.mod 一致；更低的工具链会直接拒绝编译）
-make backend   # 构建前端并嵌入，产出 bin/supabackup
+# 需要 Node 22（控制台前端）；Go 最终生效版本须 1.26.6+（与 go.mod 一致；
+# 本地工具链更旧且允许自动下载时 GOTOOLCHAIN 会拉取满足版本，否则编译失败）
+make build     # = frontend + backend：先构建控制台并嵌入，再产出 bin/supabackup
 ```
+
+<Callout type="warn">
+单独 `make backend` 只编译 Go：未经 `make frontend` 嵌入控制台时，实例会对
+页面请求返回 503。源码部署必须走 `make build`。
+</Callout>
 
 ## 目录与权限
 
 - `SB_DATA_DIR`（默认 `./data`，镜像内为 `/app/data`）：主密钥、元数据库、暂存区。
-  进程以 UID 10001 运行并期望该目录 0700。
+  期望 0700。**UID 10001 仅容器镜像成立**；源码/systemd 部署由运行用户决定，
+  请让该用户独占数据目录。
 - 主密钥文件 0600、拒绝符号链接；age 私钥**不**放在数据目录。
 
 ## docker compose：仅开发
@@ -52,5 +59,5 @@ systemd，并确保：
 ## 升级
 
 二进制自升级：停止 → 替换二进制/镜像 → 启动。启动时会自动迁移 SQLite schema，
-并在迁移前按版本保留快照（pre-migrate snapshot）。停机撞上正在运行的备份时，
-该任务记为 `interrupted` 而非失败，已提交的本地密文会在启动后续传。
+并在迁移前按版本保留快照（pre-migrate snapshot）。停机撞上正在运行的备份时，该任务记为 `interrupted` 而非失败；满足续传条件
+（interrupted + 本地已提交 + 已记录远端意图 + 目的地可用）的密文会在启动后续传。

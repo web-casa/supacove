@@ -13,22 +13,28 @@ description: 高频问题速查：登录、池化、池、时区、暂存与验�
 界面不显示底层驱动错误（凭据保护）。看服务器日志的脱敏行：
 `keyword_view` 给出 host:port/db(user, sslmode)，据此逐项核对连通性/凭据/TLS。
 
-## Supabase/Neon 备份总是失败且类为 network 或 client
+## Supabase/Neon 备份失败
 
-大概率命中池化端点：Supabase 用 5432（session），不要用 6543；Neon 主机名不能含
-`-pooler`。预检与注册时的池化警告就是为此而设。
+先按错误类分流：`network` 查连通性/池化端点（Supabase 用 5432 而非 6543；Neon 主机名
+不能含 `-pooler`，预检警告即为此设）；`client_version` 与池化无关——它是**找不到匹配
+版本的 pg_dump 或缺少客户端**，处理办法是升级/安装对应主版本的 postgresql-client，
+换主机端口无济于事。
 
 ## 任务 interrupted 后没有续传
 
-续传只发生在**启动时**（`ResumeRemotePhase`）。确认重启后日志有
-`resume:` 行；若本地工件已被回收宽限清理（默认 72h），则不会续传，下一次计划
-备份会产生新工件。
+续传只发生在**启动时**（`ResumeRemotePhase`）。确认重启后日志出现 `resumed remote commit completed`（成功）或 resume 相关的错误/
+跳过行；**没有这些行不代表没尝试**——续传只作用于同时满足 interrupted + 本地工件已
+提交 + 远端 intent（uploading/committed）+ 目的地可用的任务。在“记录远端 intent 之前”
+停机、local-only 部署、或 failed 任务都不在续传范围内，只能手动恢复或等新备份。
+TTL 从 `finished_at` 起算，且启动顺序是先续传后清理，所以“超过 72h 就一定没了”不成立。
 
 ## 暂存涨满 / 新备份报 disk 类失败
 
 检查 `supabackup_staging_bytes` 与目的地健康。失败工件在
-`SB_FAILED_ARTIFACT_TTL_HOURS` 后自动回收；紧急时可手动删除 staging 中
-`backup-job*.dump.age`（仅删 failed 任务对应的，勿删 succeeded 的锚点）。
+`SB_FAILED_ARTIFACT_TTL_HOURS` 后自动回收；紧急时可手动删除 staging 中 failed 任务对应的密文，但**这是不可逆的**：上传失败的
+工件保留着一次成功导出的完整密文，可能仍是唯一可恢复副本，且 failed 任务不会被启动
+续传。删除前先核对任务与工件、把仍有价值的密文与 manifest 拷走保全；不要按通配符盲删，
+也不要把 `failed` 状态本身当作安全删除依据（succeeded 的锚点更不可动）。
 
 ## 验证一直“未验证”
 

@@ -17,15 +17,16 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `interrupted` | 实例停机/崩溃中断；可被启动续传收敛 |
 
 <Callout>
-`succeeded` 不包含“已恢复验证”的含义。验证结果在任务的 verifyStatus
-（`verified` / `failed` / `unsupported` / `not verified`）单独展示。
+`succeeded` 不包含“已恢复验证”的含义。验证结果在任务的 verifyStatus 单独展示，枚举为 `pending` / `running` /
+`verified` / `failed` / `unsupported` / `skipped`（界面标签“未验证”对应 skipped）。
 </Callout>
 
 ## 错误类与第一步排查
 
-七类：`network`（连通/超时）、`auth`（凭据被拒）、`permission`（权限不足）、
-`client_version`（pg_dump 比服务器旧）、`disk`（本地空间/配额）、
-`storage_upload`（远端上传/回读失败，本地密文保留）、`verification`（导出完整性校验）。
+八类：`network`（连通/超时）、`auth`（凭据被拒）、`permission`（权限不足）、
+`client_version`（找不到匹配版本的 pg_dump 或缺少客户端）、`disk`（本地空间/配额）、
+`storage_upload`（远端上传/回读失败，本地密文保留）、`verification`（导出完整性校验）、
+`unknown`（兜底分类）。
 失败行会展示该类对应的排查第一步。
 
 ## 下载形态
@@ -34,7 +35,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 2. **本地密文**（`backup-job<N>.dump.age`）：暂存区中的工件，同源下载。
 3. **桶内对象**（presigned URL，15 分钟有效）：仅对已远端提交的备份提供。
 
-三者都需要已登录会话；匿名请求一律 401。
+获取前两者需要登录会话（匿名 401）。第三种是**承载秘密的 URL**：拿到链接的任何人可直接向对象存储下载，15 分钟内有效、无需 supabackup 会话——请按秘密对待，不要贴进工单或日志。
 
 ## 并发与去重
 

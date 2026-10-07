@@ -37,10 +37,11 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 ## TLS 模式（sslmode）
 
-- 远端主机**必须显式**指定 sslmode（未指定会被注册拒绝）。
+- 远端主机**必须显式**指定 sslmode：直接调用 API 时缺失会被拒绝；控制台会按你
+  在下拉框的选择自动补上（并过滤不支持的查询参数）。
 - 有 CA 签名证书用 `verify-full`；只加密不校验用 `require`；
   `disable` 仅用于你信任的私有网络（密码与数据明文传输）。
-- 本地回环默认 `prefer`。
+- 本地回环地址缺省按 `prefer` 处理（后端解析时的默认，非界面补全）。
 
 ## 连接失败怎么读
 

@@ -14,7 +14,8 @@ Per database, in the "Schedule & heartbeat" drawer:
   (e.g. `Europe/Berlin`).
 - **Freshness threshold (hours)**: the newest successful backup older than
   this marks the database EXPIRED; `0` disables.
-- **Pause**: suspends scheduled runs; manual "Back up now" keeps working.
+- **Pause**: suspends scheduled runs **and stops new expiry events** for that database (already-queued notifications still deliver); manual "Back up now" keeps working.
+- **First enable**: the cursor starts at zero, so the first tick after saving fires immediately rather than waiting for the next cron instant.
 
 A due run whose database already has a pending/running job is skipped (one job
 per database); the log states the cursor did not advance and the slot re-fires
@@ -33,6 +34,9 @@ Artifacts of failed/canceled/interrupted jobs are reclaimed after
 2. the newest restore-verified backup is never auto-deleted.
 
 <Callout type="warn">
-With no anchor at all (nothing ever committed successfully), automatic
-destructive cleanup does not run.
+Remote retention never performs destructive cleanup without an anchor (no
+successful commit ever). The failed-artifact TTL reclamation is NOT anchor-
+protected, though: if every backup failed to upload, their local ciphertext is
+still reclaimed after the grace window — export what matters first, or set
+`SB_FAILED_ARTIFACT_TTL_HOURS=0`.
 </Callout>

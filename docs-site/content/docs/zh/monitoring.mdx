@@ -12,12 +12,12 @@ description: /metrics 语义、面板口径与告警建议
 
 | 指标 | 语义 |
 |---|---|
-| `supabackup_jobs{status=…}` | 当前各状态任务分布（gauge，非单调计数器） |
+| `supabackup_jobs{status=…}` | 当前各状态任务分布（gauge，非单调计数器；历史 `_total` 后缀族已改名） |
 | `supabackup_verification{status=…}` | 成功任务的验证状态分布 |
 | `supabackup_last_success_timestamp{database=…}` | 每库最近一次成功备份（unix 秒） |
 | `supabackup_databases_protection{state=…}` | 保护状态分布（fresh/expired/never） |
-| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | 远端提交与上传失败累计 |
-| `supabackup_outbox_pending` / `_delivering` / `_dead` | 通知队列健康 |
+| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | 当前远端已提交（含已删除）与上传失败任务数（gauge，查询自任务表，非独立计数器；不要按单调 counter 做 rate） |
+| `supabackup_outbox_pending` / `supabackup_outbox_dead` | 通知队列健康（投递中数量请看控制台“投递日志”，无对应指标） |
 | `supabackup_staging_bytes` | 暂存占用（采集失败时仍输出尽力值并置 scrape_errors） |
 | `supabackup_scrape_errors{collector=…}` | 采集器故障信号：非零时同次抓取的对应家族可能缺失 |
 
@@ -29,11 +29,12 @@ description: /metrics 语义、面板口径与告警建议
   排队即取消的任务双侧排除。
 - **归档体积合计**：仅统计已记录样本（backup_stats 有值的历史成功备份）；旧记录可能
   存的是密文大小（历史口径），合计可能略偏高。
-- **平均耗时**：导出到远端提交的墙钟，仅成功任务；无样本显示 `—`（不是 0）。
+- **平均耗时**：导出到远端提交的墙钟，仅成功任务且仅正样本；无样本显示 `—`（不是 0）。
+- **导出成功率**分母仅含终态任务，运行中的任务不参与。
 
 ## 告警建议
 
-1. `supabackup_last_success_timestamp` 超过 计划周期+新鲜度阈值 → 备份停摆。
+1. `time() - supabackup_last_success_timestamp` 超过你配置的**新鲜度阈值**（该值取自任务 `started_at`，是成功快照的近似起点）→ 备份停摆。从未成功过的库不会出现在该家族中，用 `supabackup_databases_protection{state="never"}` 覆盖。
 2. `supabackup_outbox_dead > 0` → 有告警未送达（检查 webhook 可达性）。
 3. `supabackup_staging_bytes` 持续增长 → 目的地故障或回收宽限过长。
 4. 死人开关静默（外部）→ 实例进程死亡或全库失败。

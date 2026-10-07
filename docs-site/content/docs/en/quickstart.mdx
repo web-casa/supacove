@@ -11,7 +11,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 docker build --target runtime -t supabackup:local .
 ```
 
-The image runs as non-root (UID 10001) and ships PostgreSQL clients 14–18 and age.
+The image runs as non-root (UID 10001) and ships PostgreSQL clients 14–18; encryption uses the built-in age Go library (no external age CLI).
 
 ## 2. Run it
 
@@ -33,7 +33,9 @@ A fresh instance can only be claimed with a local one-time token:
 docker exec supabackup /app/supabackup bootstrap
 ```
 
-Open `http://127.0.0.1:8080`, choose "Initialize a fresh instance with a CLI
+Open `http://127.0.0.1:8080` (plain-HTTP loopback works locally; production
+requires TLS or the browser drops the Secure cookie). Choose "Initialize a
+fresh instance with a CLI
 token", paste the token and pick a username plus a password of at least 12
 characters. Tokens live 15 minutes and are single-use.
 

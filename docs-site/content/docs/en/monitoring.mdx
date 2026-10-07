@@ -13,12 +13,12 @@ requests receive a 401 JSON error.
 
 | Metric | Semantics |
 |---|---|
-| `supabackup_jobs{status=…}` | current distribution of task states (gauge, not a monotonic counter) |
+| `supabackup_jobs{status=…}` | current distribution of task states (gauge, not a monotonic counter; the historical `_total`-suffixed families were renamed) |
 | `supabackup_verification{status=…}` | verification-state distribution over succeeded jobs |
 | `supabackup_last_success_timestamp{database=…}` | newest success per database (unix seconds) |
 | `supabackup_databases_protection{state=…}` | protection distribution (fresh/expired/never) |
-| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | lifetime remote commits vs upload failures |
-| `supabackup_outbox_pending` / `_delivering` / `_dead` | notification queue health |
+| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | current counts of remote-committed (incl. deleted-after-commit) and upload-failed jobs — gauges queried from the jobs table, NOT standalone counters; never apply rate() |
+| `supabackup_outbox_pending` / `supabackup_outbox_dead` | notification queue health (in-flight count has no metric — use the console delivery log) |
 | `supabackup_staging_bytes` | staging usage (a collector failure still emits a best-effort value AND sets scrape_errors) |
 | `supabackup_scrape_errors{collector=…}` | collector-fault signal: nonzero means some families of that scrape may be missing |
 
@@ -34,12 +34,17 @@ names) — never job IDs, hosts or credentials.
   historical rows may hold ciphertext sizes (old semantics), so the sum can be
   slightly high on upgraded instances.
 - **Average duration**: export-through-remote-commit wall time over succeeded
-  jobs; no samples renders `—`, never a fake 0.
+  jobs, positive samples only; no samples renders `—`, never a fake 0.
+- The **export rate** denominator covers terminal jobs only; running tasks do
+  not participate.
 
 ## Alerting suggestions
 
-1. `supabackup_last_success_timestamp` older than schedule + freshness
-   threshold → backups stalled.
+1. `time() - supabackup_last_success_timestamp` older than your configured
+   **freshness threshold** (the timestamp is the job's `started_at`, an
+   approximation of the success snapshot) → backups stalled. Databases that
+   never succeeded are absent from this family; cover them with
+   `supabackup_databases_protection{state="never"}`.
 2. `supabackup_outbox_dead > 0` → an alert never reached its webhook.
 3. `supabackup_staging_bytes` growing → destination outage or a long
    reclamation grace.

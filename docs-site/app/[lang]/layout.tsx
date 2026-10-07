@@ -10,7 +10,7 @@ export default async function LangLayout({
   children: ReactNode;
   params: Promise<{ lang: string }>;
 }) {
-  const { lang } = await params;
+  const { lang } = (await params) as { lang: "zh" | "en" };
   if (!(i18n.languages as string[]).includes(lang)) notFound();
   return (
     <div lang={lang}>

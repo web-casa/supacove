@@ -20,8 +20,12 @@ keeps a downloadable ciphertext copy in local staging.
     never as succeeded.
   </Card>
   <Card title="Restarts converge" icon={<RefreshCw className="size-4" />}>
-    Shutdown-interrupted jobs are recorded as interrupted; committed local
-    ciphertext is re-uploaded at the next startup.
+    Shutdown-interrupted jobs are recorded as interrupted (no false failure
+    alerts). **When the resume conditions hold** (interrupted + locally
+    committed ciphertext + recorded remote upload intent + usable
+    destination), startup re-uploads automatically; otherwise the job keeps an
+    explainable terminal state and the protection chain resumes with the next
+    scheduled run.
   </Card>
   <Card title="Backups restore standalone" icon={<LifeBuoy className="size-4" />}>
     Recovery needs exactly three things: the ciphertext, your offline age

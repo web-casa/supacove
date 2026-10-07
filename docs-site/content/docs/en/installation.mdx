@@ -12,7 +12,7 @@ One Go binary with the console embedded, plus three external dependencies:
 | Dependency | Purpose | Version |
 |---|---|---|
 | PostgreSQL client tools | `pg_dump` / `pg_restore` | 14–18 (in image) |
-| age | encryption/decryption | any recent (in image) |
+| age (library) | encryption/decryption | Go library `filippo.io/age` built in — **no** age CLI needed |
 | S3-compatible storage | remote commit (optional, recommended) | S3 / R2 / B2 / MinIO |
 
 ## Image
@@ -29,14 +29,22 @@ embedded PostgreSQL server. Production builds MUST pass `--target runtime`.
 ## Source
 
 ```bash
-# Go 1.26.6+ (matches go.mod; older toolchains refuse outright)
-make backend   # builds the console and embeds it into bin/supabackup
+# Needs Node 22 (console frontend) and Go 1.26.6+ (matches go.mod)
+make build     # = frontend + backend: builds the console, embeds it, emits bin/supabackup
 ```
+
+<Callout type="warn">
+`make backend` alone only compiles Go: without the frontend embedded via
+`make frontend`, the instance answers page requests with 503. Source
+deployments must use `make build`.
+</Callout>
 
 ## Directories and permissions
 
 - `SB_DATA_DIR` (default `./data`, `/app/data` in the image): master secret,
-  metadata database, staging. The process runs as UID 10001 and expects 0700.
+  metadata database, staging, expected 0700. **UID 10001 applies to the
+  container image only**; source/systemd deployments run as whatever user you
+  choose — give that user exclusive ownership of the data directory.
 - The master secret file is 0600 and symlink-refusing; the age identity does
   NOT belong in the data directory.
 
@@ -53,6 +61,7 @@ production, ensure:
 ## Upgrading
 
 Stop → replace binary/image → start. Schema migrations run at startup with
-per-version pre-migrate snapshots. A shutdown that lands on a running backup
-records `interrupted` (not failed) and resumes the remote commit at the next
+per-version pre-migrate snapshots. A shutdown that lands on a running backup records `interrupted` (not failed);
+ciphertext meeting the resume conditions (interrupted + locally committed +
+recorded remote intent + usable destination) is re-uploaded at the next
 startup.

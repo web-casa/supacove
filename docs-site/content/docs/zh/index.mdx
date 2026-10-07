@@ -18,7 +18,9 @@ supabackup 是一个自托管的 PostgreSQL 备份服务，面向 Supabase、Neo
     导出、加密、提交任何一步失败，任务都会落为 failed，绝不会标记 succeeded。
   </Card>
   <Card title="重启可收敛" icon={<RefreshCw className="size-4" />}>
-    停机中断的任务记为 interrupted；已提交的本地密文在下次启动自动续传。
+    停机中断的任务记为 interrupted（不产生假失败告警）。**满足续传条件时**
+    （interrupted + 本地密文已提交 + 已记录远端上传意图 + 目的地可用）启动自动
+    续传；不满足时任务保持可解释的终态，备份链由下一次计划运行恢复。
   </Card>
   <Card title="备份独立可恢复" icon={<LifeBuoy className="size-4" />}>
     恢复只需要三样东西：密文文件、离线保存的 age 私钥、恢复套件脚本。

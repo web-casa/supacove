@@ -17,18 +17,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `interrupted` | instance shutdown/crash; converges via startup resume |
 
 <Callout>
-`succeeded` does NOT mean "restore-verified". Verification has its own
-verifyStatus (`verified` / `failed` / `unsupported` / `not verified`) shown
-beside the task.
+`succeeded` does NOT mean "restore-verified". Verification has its own verifyStatus shown beside the task: `pending` /
+`running` / `verified` / `failed` / `unsupported` / `skipped` (the UI label
+"not verified" maps to skipped).
 </Callout>
 
 ## Error classes and first steps
 
-Seven classes: `network` (reachability/timeout), `auth` (credentials refused),
-`permission` (insufficient privileges), `client_version` (pg_dump older than
-the server), `disk` (local space/quota), `storage_upload` (remote upload or
-read-back failed; the local ciphertext is retained), `verification` (export
-integrity). Failed rows render the class's first troubleshooting step.
+Eight classes: `network` (reachability/timeout), `auth` (credentials refused),
+`permission` (insufficient privileges), `client_version` (no matching pg_dump
+found or clients missing), `disk` (local space/quota), `storage_upload`
+(remote upload or read-back failed; the local ciphertext is retained),
+`verification` (export integrity), `unknown` (fallback). Failed rows render the
+class's first troubleshooting step.
 
 ## Download forms
 
@@ -39,7 +40,7 @@ integrity). Failed rows render the class's first troubleshooting step.
 3. **Bucket object** (presigned URL, 15-minute TTL): only for remote-committed
    backups.
 
-All three require an authenticated session; anonymous requests get 401.
+The first two require an authenticated session (anonymous requests get 401). The third is a **bearer URL**: anyone holding it can download straight from the object store for 15 minutes without any supabackup session — treat it like a secret and never paste it into tickets or logs.
 
 ## Concurrency
 
