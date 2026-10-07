@@ -13,8 +13,13 @@ export default async function LangLayout({
   const { lang } = (await params) as { lang: "zh" | "en" };
   if (!(i18n.languages as string[]).includes(lang)) notFound();
   return (
-    <div lang={lang}>
-      <Providers locale={lang}>{children}</Providers>
-    </div>
+    // <html> belongs to the root layout, but the language attribute must
+    // follow the route: Next hoists this <html> into the document head for
+    // the segment (the root <html> carries no lang of its own).
+    <html lang={lang} suppressHydrationWarning>
+      <body className="flex flex-col min-h-screen">
+        <Providers locale={lang}>{children}</Providers>
+      </body>
+    </html>
   );
 }

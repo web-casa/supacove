@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## Runtime shape
 
-One Go binary with the console embedded, plus three external dependencies:
+One Go binary with the console embedded, plus two external runtime dependencies (age ships as a Go library):
 
 | Dependency | Purpose | Version |
 |---|---|---|
@@ -63,5 +63,5 @@ production, ensure:
 Stop → replace binary/image → start. Schema migrations run at startup with
 per-version pre-migrate snapshots. A shutdown that lands on a running backup records `interrupted` (not failed);
 ciphertext meeting the resume conditions (interrupted + locally committed +
-recorded remote intent + usable destination) is re-uploaded at the next
-startup.
+recorded remote intent + artifact and manifest readable + usable
+destination) is re-uploaded at the next startup.

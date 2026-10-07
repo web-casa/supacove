@@ -6,11 +6,15 @@ description: Three events, outbox retry semantics and the delivery log
 ## Events
 
 - `backup_failed`: a backup job failed.
-- `backup_expired`: a database's newest success passed the freshness threshold.
+- `backup_expired`: a database's protection went stale — both "newest success
+  older than the freshness threshold" and "never succeeded" (paused databases
+  stop generating new expiry events).
 - `verification_failed`: restore verification failed (the job itself is still
   succeeded).
 
-Each event is delivered to every matching webhook as one JSON POST with
+Each event is delivered to every matching webhook as one JSON POST each (a
+single outbox pass may POST to several targets, and a failed round re-visits
+targets that already succeeded in the previous round), with
 `X-Supabackup-Event` and `X-Supabackup-Event-ID` headers (a stable dedup key).
 
 ## Delivery semantics (outbox)

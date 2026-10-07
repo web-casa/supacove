@@ -6,10 +6,12 @@ description: 三种事件、outbox 重试语义与投递日志
 ## 事件
 
 - `backup_failed`：备份任务失败。
-- `backup_expired`：某库的最新成功备份超过新鲜度阈值。
+- `backup_expired`：某库的保护状态过期——包括“最新成功备份超过新鲜度阈值”和
+  “从未成功过”两类（暂停的库不再产生新的过期事件）。
 - `verification_failed`：恢复验证失败（任务本身仍为 succeeded）。
 
-每个事件向每个匹配的 webhook 发送一次 JSON POST，带
+每个事件向每个匹配的 webhook 各发送一次 JSON POST（一次轮询可能向多个目标 POST；
+失败重试时会再次访问上一轮已成功的目标），带
 `X-Supabackup-Event` 与 `X-Supabackup-Event-ID` 头（稳定去重键）。
 
 ## 投递语义（outbox）
