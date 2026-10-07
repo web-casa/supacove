@@ -63,12 +63,16 @@ recipient 指纹；桶内对象键使用的备份 UUID 记录在实例元数据�
 
 ## 与仓库灾备手册的场景对应
 
-命令级完整流程在仓库 `docs/disaster-recovery.md`（开发文档）。场景索引：
+命令级完整流程在仓库
+[docs/disaster-recovery.md](https://github.com/cloudfan/supabackup/blob/main/docs/disaster-recovery.md)
+（开发文档；仓库尚无 remote 时按本地路径 `docs/disaster-recovery.md` 打开）。场景索引：
 
-- 场景 1（SQLite 损坏/数据卷丢失）→ 手册的 pre-migrate 快照与 schema 重建；
-  备份密文不依赖元数据库，数据恢复路径同场景 3。
+- 场景 1（SQLite 损坏/数据卷丢失）→ 以空数据目录启动新实例、bootstrap、
+  （旧 age 私钥仍可用时）写回原 recipient、重新注册数据库/目的地与调度；
+  备份密文不依赖元数据库，历史数据恢复路径同场景 3。
 - 场景 2（主密钥不可用：缺失/损坏/被替换）→ 本页“密钥事故”前两步。
 - 场景 3（整台实例丢失，只剩桶内密文 + 离线 age 私钥）→ 本页“独立恢复”，
   对象键为 `<prefix>backups/<备份UUID>.dump.age`。
-- 场景 4（升级失败/迁移中断）→ 手册的回滚与快照步骤。
+- 场景 4（升级失败/迁移中断）→ pre-migrate 快照回滚、隔离旧 WAL/SHM、
+  启动旧版本二进制。
 

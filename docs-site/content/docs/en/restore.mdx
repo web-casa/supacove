@@ -76,17 +76,20 @@ prerequisite for recovery.
 
 ## Mapping to the repository playbook
 
-The command-level playbook lives in `docs/disaster-recovery.md` (developer
-documentation). Scenario index:
+The command-level playbook lives in
+[docs/disaster-recovery.md](https://github.com/cloudfan/supabackup/blob/main/docs/disaster-recovery.md)
+(developer documentation; until the repo has a remote, open the local path
+`docs/disaster-recovery.md`). Scenario index:
 
-- Scenario 1 (SQLite corruption / data-volume loss) → the playbook's
-  pre-migrate snapshot and schema rebuild; ciphertext never depends on the
-  metadata database, so data recovery follows scenario 3.
+- Scenario 1 (SQLite corruption / data-volume loss) → start a fresh instance
+  with an empty data dir, bootstrap, write the original recipient back (only
+  while the old age identity still works), re-register databases/destinations
+  and schedules; historical data recovery follows scenario 3.
 - Scenario 2 (master secret unavailable: missing / corrupted / replaced) →
   the first two key-incident steps above.
 - Scenario 3 (whole instance gone, only bucket ciphertext + offline age
   identity left) → "Standalone restore"; object keys are
   `<prefix>backups/<backup-uuid>.dump.age`.
-- Scenario 4 (failed upgrade / interrupted migration) → the playbook's
-  rollback and snapshot steps.
+- Scenario 4 (failed upgrade / interrupted migration) → pre-migrate snapshot
+  rollback, isolate the old WAL/SHM, boot the previous binary.
 

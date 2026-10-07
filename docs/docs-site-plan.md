@@ -59,7 +59,7 @@ docs-site/
 
 ## 验收与评审
 
-1. `next build` 绿；`next start` 冒烟：/ 、/zh/quickstart、/en/quickstart、搜索路由 200。
+1. `next build` 绿；`next start` 冒烟：/ 、/zh/docs/quickstart、/en/docs/quickstart、搜索路由 200。
 2. parity 脚本对故意缺页变红。
 3. Codex 评审：文档事实对照代码（环境变量默认值、CLI 子命令、端口、状态语义、
    平台注意事项）、Fumadocs 用法、计划一致性、两语内容对齐度；评审后修正收敛。

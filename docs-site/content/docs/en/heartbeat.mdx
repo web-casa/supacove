@@ -15,10 +15,12 @@ In the database's "Schedule & heartbeat" drawer:
 
 - **Heartbeat URL**: empty inherits the server-wide `SB_HEARTBEAT_URL`;
   `-` disables explicitly (no success and no fail pings).
-- **Expected period (hours)**: required when the URL is a real address; the
-  `-` (disable) marker is the exception and zeroes the period. When inheriting
-  the fallback URL, success pings still require a positive period. Your
-  external monitor alerts when pings stop for period+grace.
+- **Expected period (hours)**: required when the URL is a real address; with
+  `-` (disable) no positive period is demanded (while disabled neither success
+  nor fail pings are sent; a stored period value is NOT zeroed automatically
+  and keeps working once you switch back to a real or inherited URL). When
+  inheriting the fallback URL, success pings still require a positive period.
+  Your external monitor alerts when pings stop for period+grace.
 - **Grace (hours)**: extra tolerance on the period.
 
 ## When a success ping fires
