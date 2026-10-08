@@ -24,6 +24,7 @@ env:
   OAPI_CODEGEN_VERSION: v2.5.0
   OASDIFF_VERSION: v1.11.5
   GOVULNCHECK_VERSION: v1.8.0
+  GITLEAKS_VERSION: v8.30.1
   ACTIONLINT_VERSION: v1.7.7
 
 jobs:
@@ -35,6 +36,22 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # The M1 kernel-chain tests restore real PG18 containers: FindClient
+      # needs a pg_dump with major >= 18 (runner stock tops out below that).
+      # Same PGDG source as the release Dockerfile.
+      - name: Install PostgreSQL 18 client (PGDG)
+        run: |
+          # Same PGDG wiring as the release Dockerfile (runner stock client
+          # tops out below 18).
+          sudo install -d /usr/share/postgres-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgres-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgres-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          pg_dump --version
+          test -x /usr/lib/postgresql/18/bin/pg_dump
       - name: gofmt
         run: test -z "$(gofmt -l backend | grep -v api.gen.go)" || { gofmt -l backend; exit 1; }
       - name: golangci-lint (pinned)
@@ -83,6 +100,13 @@ jobs:
           set -euo pipefail
           # Release tags are the sanctioned baseline-refresh path.
           [ "$IS_TAG" = "true" ] && exit 0
+          # A brand-new branch (first push of main, or any new ref) reports
+          # the all-zero before-SHA: there is no previous state to protect,
+          # so there is nothing to compare against.
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "new branch: no base commit, baseline guard not applicable"
+            exit 0
+          fi
           # Fail CLOSED: an unusable base (missing object) is a guard
           # failure, not a pass; --no-renames closes the rename bypass.
           git cat-file -e "$BASE_SHA^{commit}"
@@ -107,14 +131,16 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@"${GOVULNCHECK_VERSION}"
           # x/vuln older than v1.8 declares go <1.26 and refuses the module
           "$(go env GOPATH)/bin/govulncheck" ./backend/...
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Org-owned repos need the free license secret; disabling comments
-          # avoids relying on write permissions.
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      # gitleaks-action v2 requires a paid license for organization repos;
+      # the CLI itself is free and is exactly what local pre-release scans
+      # use (docs/release-scan-evidence.md). Full history, redacted output.
+      - name: gitleaks (pinned CLI, full history)
+        run: |
+          # go.mod still declares the pre-rename path; the GitHub org redirect
+          # only applies to git fetches, not module resolution.
+          go install github.com/zricethezav/gitleaks/v8@"${GITLEAKS_VERSION}"
+          "$(go env GOPATH)/bin/gitleaks" detect \
+            --source . --log-opts="--all" --redact --exit-code 1
       - name: workflow lint
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@"${ACTIONLINT_VERSION}"
