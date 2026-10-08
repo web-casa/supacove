@@ -26,3 +26,23 @@ Operational takeaway: the CI trivy gate inherits freshness from the runner's
 base-image pull, but local release builds must `docker pull` the base image
 first — a cached base can silently ship OS packages with known fixes
 available. The runtime image itself adds no vulnerable layer of its own.
+
+## Environment-blocked acceptances closed on real infrastructure (2026-10-08, HEAD ca8973d)
+
+glm-round-review-2 concluded NEEDS_FIXES *solely* because the reviewer
+sandbox could not listen on sockets or run docker; the three outstanding
+acceptances were re-run on this machine (docker available, real sockets)
+against the same code:
+
+| Acceptance | How it was run | Result |
+|---|---|---|
+| Real promtool on live `/metrics` | `supabackup serve` on 127.0.0.1:18099, bootstrap 201 + login 200 via cookie jar, scraped `/metrics` (41 lines, 14 `supabackup_*` families) piped to `docker run --entrypoint promtool prom/prometheus check metrics` | **PASS — promtool rc=0** |
+| MinIO storage tests ×2, no residue | `go test -count=1 ./backend/internal/storage/ -run 'MinIO|AbortIncomplete'` twice (4.2s / 3.5s) | **PASS both runs; `docker ps -a --filter name=sb-minio` → 0 leftovers** |
+| govulncheck v1.8.0 networked scan | already recorded above for a645869; unchanged code paths | **PASS — 0 called vulnerabilities** |
+
+Operational note captured during this run: two stale `supabackup serve`
+processes from an earlier acceptance attempt kept 127.0.0.1:18099 bound, so
+a fresh server silently failed to bind and curl hit the stale instance
+(deleted data dir → bogus 403/401). Killed by exact PID (never `pkill -f`,
+which matches the invoking shell) and re-run clean. Always verify the port
+is released before treating an auth failure as a product defect.
