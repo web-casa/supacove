@@ -37,3 +37,6 @@ docs-site/.next/
 docs-site/node_modules/
 docs-site/.source/
 docs-site/next-env.d.ts
+
+# internal agent session plans
+.zcode/

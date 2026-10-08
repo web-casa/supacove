@@ -1,9 +1,7 @@
-# e2e
+# e2e（历史位置说明）
 
-Playwright 浏览器端到端流程。按 dev-plan，P5 起引入 Playwright 并覆盖：
-- bootstrap（一次性 token）→ 登录 → 登出
-- 添加数据库向导（P5 起）
-- 备份记录与恢复包下载（P3/P5 起）
+浏览器端到端测试已迁移到 **`frontend/e2e/`**（Playwright specs），运行入口为
+**`scripts/e2e-run.sh`**（`make e2e` / CI `e2e` job）：它构建嵌入前端的最终二进制、
+起一次性实例、用 CLI bootstrap 令牌完成初始化后对真实产物跑全部 specs。
 
-当前 P1 的端到端验证由后端集成测试（`backend/internal/server/server_test.go`，
-httptest 全栈）与真实二进制冒烟承担。
+本目录不再存放测试代码；保留仅为历史引用提供指向。
