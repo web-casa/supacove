@@ -19,6 +19,25 @@ All notable changes to supabackup.
 - docs-site: storage destinations page, Supabase backup guide, routing smoke
   test (`npm run smoke`, run in CI)
 
+### Changed
+- **BREAKING (metrics)**: gauge families dropped the illegal `_total` suffix
+  (promtool lint rejects `_total` on gauges): `supabackup_jobs_total` →
+  `supabackup_jobs`, `supabackup_verification_total` →
+  `supabackup_verification`, `supabackup_remote_commits_total` →
+  `supabackup_remote_commits`, `supabackup_remote_upload_failures_total` →
+  `supabackup_remote_upload_failures`. The deprecated `_total` aliases were
+  removed outright rather than kept, because an alias would still fail the
+  promtool gate; pre-beta there are no shipped dashboards to migrate. Label
+  values are now escaped with the Prometheus-legal set only (`\\`, `\"`,
+  newline) — Go's `%q` previously emitted `\t`/`\xNN`, which real scrapers
+  reject outright (GLM review round 5)
+- `AbortIncomplete` (leftover multipart cleanup) now lists without any
+  pagination marker and repeats to a fixed point: AWS treats a same-key
+  KeyMarker as strictly-greater (skipping every session of that key) and
+  MinIO invalidates both markers once earlier pages are aborted — marker
+  pagination was wrong on one provider or the other either way (4/4
+  observed MinIO runs left one of 101 sessions behind)
+
 ### Fixed
 - Deleting a destination that a database is still assigned to is refused
   (`409 in_use`); it used to succeed and fail every later backup of that
@@ -48,27 +67,6 @@ All notable changes to supabackup.
   wall-clock budget per backup job — a hung stage becomes a classified
   failure instead of silently stalling the single worker (overall review
   P1-K2) — and the reclamation grace window for dead artifacts
-
-### Changed
-- **BREAKING (metrics)**: gauge families dropped the illegal `_total` suffix
-  (promtool lint rejects `_total` on gauges): `supabackup_jobs_total` →
-  `supabackup_jobs`, `supabackup_verification_total` →
-  `supabackup_verification`, `supabackup_remote_commits_total` →
-  `supabackup_remote_commits`, `supabackup_remote_upload_failures_total` →
-  `supabackup_remote_upload_failures`. The deprecated `_total` aliases were
-  removed outright rather than kept, because an alias would still fail the
-  promtool gate; pre-beta there are no shipped dashboards to migrate. Label
-  values are now escaped with the Prometheus-legal set only (`\\`, `\"`,
-  newline) — Go's `%q` previously emitted `\t`/`\xNN`, which real scrapers
-  reject outright (GLM review round 5)
-- `AbortIncomplete` (leftover multipart cleanup) now lists without any
-  pagination marker and repeats to a fixed point: AWS treats a same-key
-  KeyMarker as strictly-greater (skipping every session of that key) and
-  MinIO invalidates both markers once earlier pages are aborted — marker
-  pagination was wrong on one provider or the other either way (4/4
-  observed MinIO runs left one of 101 sessions behind)
-
-### Fixed
 - Graceful shutdown (docker stop / upgrade) no longer lands a running backup
   as a false `failed` (with a false failure webhook and /fail heartbeat):
   shutdown-interrupted jobs are recorded as `interrupted` and their committed
