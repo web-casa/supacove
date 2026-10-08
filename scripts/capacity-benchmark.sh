@@ -21,7 +21,7 @@ docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD=cap -e POSTGRES_DB=capdb 
   -p 127.0.0.1::5432 "$PGIMAGE" >/dev/null
 PORT=$(docker port "$CONTAINER" 5432 | head -1 | awk -F: '{print $NF}')
 URI="postgresql://postgres:cap@127.0.0.1:${PORT}/capdb?sslmode=disable"
-for i in $(seq 60); do
+for _ in $(seq 60); do
   if pg_isready -h 127.0.0.1 -p "$PORT" >/dev/null 2>&1; then break; fi
   sleep 1
 done
@@ -37,19 +37,21 @@ docker exec "$CONTAINER" psql -U postgres -d capdb -v ON_ERROR_STOP=1 -c \
    CREATE TABLE bench (id bigserial PRIMARY KEY, payload text, created timestamptz DEFAULT now());
    INSERT INTO bench (payload) SELECT encode(gen_random_bytes($PAYLOAD), 'hex') FROM generate_series(1, $ROWS);" \
   > /dev/null || { echo "seed FAILED"; exit 1; }
-echo "seed=$(( ($(date +%s) - SEED_T0) ))s"
+echo "seed=$(( $(date +%s) - SEED_T0 ))s"
 
 # phase runs a pipeline stage, printing wall seconds and peak RSS (from
 # /proc/<pid>/status VmHWM — the same figure /usr/bin/time -v would report).
 # /usr/bin/time is NOT assumed (minimal containers lack it).
 phase() {
   local label="$1"; shift
-  local t0=$(date +%s%N)
+  local t0
+  t0=$(date +%s%N)
   "$@" >"$WORK/$label.out" 2>"$WORK/$label.err" &
   local pid=$!
   local peak=0
+  local kb
   while kill -0 "$pid" 2>/dev/null; do
-    local kb=$(awk '/VmHWM/{print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
+    kb=$(awk '/VmHWM/{print $2}' "/proc/$pid/status" 2>/dev/null || echo 0)
     [ "${kb:-0}" -gt "$peak" ] && peak=$kb
     sleep 0.2
   done

@@ -14,7 +14,7 @@ GOBIN_DIR := $(GOBIN_DIR)
 endif
 OAPI := $(GOBIN_DIR)/oapi-codegen
 
-.PHONY: help build backend frontend api-gen api-check api-breaking metrics-check e2e docs docs-build dev test lint check clean
+.PHONY: help build backend frontend image api-gen api-check api-breaking metrics-check e2e docs docs-build dev test lint check clean
 .NOTPARALLEL:
 
 help:
@@ -30,6 +30,14 @@ frontend: ## Build the SPA and copy it into the Go embed directory
 	touch backend/internal/web/dist/.gitkeep  # keep the committed embed marker
 
 build: frontend backend ## Build everything: SPA first, then the Go binary embedding it
+
+IMAGE ?= supabackup:local
+image: ## Build the release container image (runtime stage, non-root, embedded SPA)
+	docker build --target runtime \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg COMMIT=$(COMMIT) \
+		--build-arg BUILD_DATE=$(DATE) \
+		-t $(IMAGE) .
 
 api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0

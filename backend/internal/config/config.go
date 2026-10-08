@@ -1,7 +1,7 @@
 // Package config loads runtime configuration from the environment.
 //
 // All defaults are safe for local development; the container image sets
-// explicit values (see deploy/Dockerfile).
+// explicit values (see the Dockerfile at the repository root).
 package config
 
 import (

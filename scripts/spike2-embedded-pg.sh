@@ -5,7 +5,8 @@
 #
 # Usage: scripts/spike2-embedded-pg.sh [image]
 #   default image: supabackup:runtime-spike (built with
-#   `docker build --target runtime-spike -t supabackup:runtime-spike .`)
+#   `docker build --target runtime -t supabackup:runtime . &&
+#    docker build -f Dockerfile.spike -t supabackup:runtime-spike .`)
 #
 # Evidence (kept): $OUT holds the inner script, the truncated-archive stderr
 # and a summary. The canary (root-0600 unreadable by UID 10001) MUST pass;

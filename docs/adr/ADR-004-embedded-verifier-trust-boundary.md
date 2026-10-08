@@ -22,7 +22,7 @@ dev-plan P6 的差异化能力：自动恢复验证不要求挂载 Docker socket
 
 ## 实测二：发布形态复测（2026-10-03，评审 P1-19 要求）
 
-环境：本仓库 Dockerfile 的 `runtime-spike` target（Debian bookworm-slim + PGDG postgresql-18 服务端与客户端，UID 10001，无 socket、无特权），脚本 `scripts/spike2-embedded-pg.sh`。
+环境：本仓库 `Dockerfile.spike`（基于发布 `runtime` 镜像 + PGDG postgresql-18 服务端与客户端，UID 10001，无 socket、无特权），脚本 `scripts/spike2-embedded-pg.sh`。
 
 | 检查 | arm64（原生） | amd64（QEMU 模拟） |
 |---|---|---|
@@ -46,7 +46,7 @@ dev-plan P6 的差异化能力：自动恢复验证不要求挂载 Docker socket
 
 ## 后果
 
-- 镜像需包含 PG 服务端二进制（体积 +~50MB）。发布镜像 P1 仅含客户端；`runtime-spike` target（含服务端）用于本 ADR 的实测，P6 引入正式版时直接复用该 target 的软件清单。
+- 镜像需包含 PG 服务端二进制（体积 +~50MB）。发布镜像 P1 仅含客户端；`Dockerfile.spike`（含服务端）用于本 ADR 的实测，P6 引入正式版时直接复用该 target 的软件清单。
 - 不可信来源的验证需要独立受限环境（无共享 secrets/数据卷），v1 不承诺。
 - CI 中验证容器不得注入真实凭据（dev-plan P6 DoD）。
 - "恢复已验证"状态措辞固定为"在 profile X 上按选项 Y 恢复成功"，不等于平台完整恢复演练。

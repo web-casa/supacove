@@ -1,9 +1,11 @@
 # supabackup — single-container production image.
 # Multi-stage: build SPA → build Go binary with the SPA embedded → slim runtime.
-# Build (release = the `runtime` stage; ALWAYS pass --target when scripting):
-#   docker build --target runtime -t supabackup .
-# The file's last stage is runtime-spike (PG server binaries for ADR-004
-# experiments); compose and CI pin target: runtime and it must never ship.
+# Build (release = the `runtime` stage, the file's LAST and therefore default
+# stage — a plain `docker build` cannot pick up anything else):
+#   docker build -t supabackup .                    # defaults to runtime
+#   docker build --target runtime -t supabackup .   # explicit, for scripts
+# The ADR-004 experiment image (release runtime + PG server binaries) lives in
+# Dockerfile.spike and must never ship; compose and CI pin target: runtime.
 
 ARG GO_VERSION=1.26
 
@@ -75,17 +77,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
 ENTRYPOINT ["/app/supabackup"]
 CMD ["serve"]
 
-# Runtime-shape verification target for Spike 2 (ADR-004): the release runtime
-# plus PostgreSQL server binaries, same non-root UID 10001, for the
-# embedded-verifier feasibility experiment. compose/CI pin target: runtime;
-# this last stage must never be shipped by default.
-
-# Runtime-shape verification target for Spike 2 (ADR-004): the release runtime
-# plus PostgreSQL server binaries, same non-root UID 10001, for the
-# embedded-verifier feasibility experiment. Not used by releases.
-FROM runtime AS runtime-spike
-USER root
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-18 postgresql-client-18 procps \
-    && rm -rf /var/lib/apt/lists/*
-USER 10001:10001

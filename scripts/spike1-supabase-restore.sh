@@ -87,9 +87,11 @@ fi
 step "P-C: application-schemas-only dump (candidate 1)"
 dump_args=()
 while IFS= read -r -d '' arg; do dump_args+=("$arg"); done < <(schema_flags -n)
-pg_dump --dbname="$SOURCE_DB_URL" -Fc "${dump_args[@]}" -f "$OUT/app.dump" \
-  && echo "P-C dump: OK ($(du -h "$OUT/app.dump" | cut -f1))" \
-  || { echo "P-C dump: FAILED"; FAILED_CANDIDATES=$((FAILED_CANDIDATES+1)); }
+if pg_dump --dbname="$SOURCE_DB_URL" -Fc "${dump_args[@]}" -f "$OUT/app.dump"; then
+  echo "P-C dump: OK ($(du -h "$OUT/app.dump" | cut -f1))"
+else
+  echo "P-C dump: FAILED"; FAILED_CANDIDATES=$((FAILED_CANDIDATES+1))
+fi
 if restore_stderr="$OUT/restore-P-C.log" restore "$TARGET_DB_URL" "$OUT/app.dump" --no-owner; then
   echo "P-C RESULT: PASS"
   PASSED_CANDIDATES=$((PASSED_CANDIDATES+1))

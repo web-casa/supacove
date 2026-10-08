@@ -12,7 +12,7 @@
 > 下文的环境变量表自建 compose（cookie 需要 HTTPS 反代），不要原样上生产。
 
 ```bash
-git clone https://github.com/your-org/supabackup.git
+git clone https://github.com/cloudfan/supabackup.git
 cd supabackup
 docker compose up -d
 ```

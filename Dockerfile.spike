@@ -1,0 +1,18 @@
+# ADR-004 experiment image: the release `runtime` image plus PostgreSQL 18
+# SERVER binaries (the embedded restore-verifier feasibility spike). This is
+# NOT a release artifact — it must never be pushed to a registry or shipped.
+# Kept out of the main Dockerfile so that `runtime` stays the default stage
+# there (BuildKit has no forward stage references, so the spike stage cannot
+# sit before `runtime` and stay buildable).
+#
+# Build (two steps — the spike is based on the built release image):
+#   docker build --target runtime -t supabackup:runtime .
+#   docker build -f Dockerfile.spike -t supabackup:runtime-spike .
+# Run via scripts/spike2-embedded-pg.sh (same non-root UID 10001 as release).
+ARG BASE_IMAGE=supabackup:runtime
+FROM ${BASE_IMAGE}
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-18 postgresql-client-18 procps \
+    && rm -rf /var/lib/apt/lists/*
+USER 10001:10001
