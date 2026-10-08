@@ -32,11 +32,13 @@ func TestAbortIncompletePaginatesSameKey(t *testing.T) {
 		q := r.URL.Query()
 		switch {
 		case r.Method == http.MethodGet && q.Has("uploads"):
-			// Any marker in the request means the client fell back to
-			// pagination, which loses same-key sessions on the real
-			// providers (AWS: same-key KeyMarker = strictly greater;
-			// MinIO: markers invalidated after in-page aborts). The stub
-			// models that failure mode as an empty result set.
+			// REGRESSION STUB for the marker-free sweep ONLY: any marker in
+			// the request means the client fell back to pagination. On MinIO
+			// that loses same-key sessions after in-page aborts (observed);
+			// on AWS a same-key KeyMarker means strictly-greater (skips
+			// everything). This stub does NOT model a correct AWS two-phase
+			// list-then-abort client — if that algorithm is ever adopted,
+			// this stub must be replaced with provider-specific ones.
 			if q.Get("key-marker") != "" || q.Get("upload-id-marker") != "" {
 				w.Header().Set("Content-Type", "application/xml")
 				_, _ = fmt.Fprint(w, `<?xml version="1.0"?><ListMultipartUploadsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Bucket>b</Bucket><IsTruncated>false</IsTruncated></ListMultipartUploadsResult>`) // httptest writer; test stub

@@ -74,3 +74,5 @@ sh restore.sh 'postgresql://user@host:5432/restored?sslmode=require' backup-job2
 ```
 
 套件会先校验密文 SHA-256，再解密、`pg_restore` 到新库，并输出恢复的表数。
+
+用的是 Supabase？[备份 Supabase 数据库](/zh/docs/guides/supabase-backup)说明了该用哪个连接串，以及备份里包含什么。

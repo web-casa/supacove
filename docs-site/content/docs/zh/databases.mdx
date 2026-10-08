@@ -1,8 +1,9 @@
 ---
 title: 注册数据库
-description: 连接串规则、四平台注意事项、角色权限与 TLS 模式
+description: 连接串规则、各平台注意事项、角色权限与 TLS 模式
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 ## 注册流程
@@ -18,7 +19,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 <Tabs items={["Supabase", "Neon", "Railway", "自托管"]}>
   <Tab value="Supabase">
     使用 **Session pooler（端口 5432）** 或直连。直连仅 IPv6（除非购买 IPv4 附加组件）。
-    **不要用 Transaction pooler（6543）**：`pg_dump` 无法通过它运行。
+    **不要用 Transaction pooler（6543）**：`pg_dump` 无法通过它运行。完整流程见[备份 Supabase 数据库](/zh/docs/guides/supabase-backup)。
   </Tab>
   <Tab value="Neon">
     关闭连接池化后复制连接串（主机名不含 `-pooler`）。池化端点在**任何端口**都与
@@ -29,11 +30,29 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
     `DATABASE_URL` 的 `*.railway.internal` 主机只在 Railway 内部可解析。
   </Tab>
   <Tab value="自托管">
-    主机必须从 supabackup 容器可达：`localhost` 指容器自身，Docker 宿主机上的库
+    主机必须从 SupaCove 容器可达：`localhost` 指容器自身，Docker 宿主机上的库
     请用 `host.docker.internal` 或局域网地址。角色需能读取 `pg_dump` 导出的全部内容
     （库属主或 `pg_read_all_data` 成员，PostgreSQL 14+）。
   </Tab>
 </Tabs>
+
+## 其他托管 PostgreSQL
+
+下面这些平台提供标准 PostgreSQL，`pg_dump` 按理可以直接运行。**我们尚未逐一实测**，下表内容来自各平台自己的文档。控制台里没有它们的专用选项：注册时选“自托管/其他”，也就没有平台专属的连接预检提示，请按下表自行核对连接串。
+
+| 平台 | 连接串 | 注意 |
+|---|---|---|
+| Aiven | 服务概览页的 Service URI（主机以 `.aivencloud.com` 结尾，默认用户 `avnadmin`、库 `defaultdb`，自带 `sslmode=require`） | 端口不是 5432，以 Service URI 为准 |
+| Prisma Postgres | **直连（Direct TCP）连接串**，形如 `postgres://USER:PASSWORD@db.prisma.io:5432/?sslmode=require` | 基于 PostgreSQL 17；`prisma+postgres://` 形式的 Accelerate 连接串不能用于 `pg_dump` |
+| TigerData（Timescale） | 服务的连接串，加上 `sslmode=require` | **恢复有额外步骤**，见下方说明 |
+| Miget | 开启 Public Access 后给出的 External URL | 未开启时数据库只在 Miget 内部可达 |
+| Render | 数据库页面的 **External Database URL**，加上 `sslmode=require` | Internal URL 只在 Render 内部可达 |
+
+<Callout type="warn" title="TigerData / TimescaleDB 的恢复">
+含 TimescaleDB 扩展的备份恢复时，必须在 `pg_restore` 之前执行`SELECT timescaledb_pre_restore();`、之后执行 `SELECT timescaledb_post_restore();`，并且不能使用并行恢复（`-j`）。恢复套件不会替你执行这两步：请先解密，再按TigerData 的逻辑备份文档手工恢复。内嵌恢复验证使用不带该扩展的 PostgreSQL，不适用于这类数据库。
+</Callout>
+
+CockroachDB 不是 PostgreSQL：它只支持纯文本格式的仅结构导出，不支持 SupaCove依赖的 custom 格式数据导出，因此**不受支持**。
 
 ## TLS 模式（sslmode）
 

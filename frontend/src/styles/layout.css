@@ -411,6 +411,21 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.7fr) minmax(0, 1.3fr) 150px;
 }
 
+.table-dests :is(.thead, .trow) {
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1.3fr) 132px minmax(0, 1fr)
+    196px;
+}
+
+.table-targets :is(.thead, .trow) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr);
+}
+
+.panel-note {
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border);
+}
+
 .table-log :is(.thead, .trow) {
   grid-template-columns: 128px minmax(0, 1.2fr) minmax(0, 1fr) 84px 96px;
 }

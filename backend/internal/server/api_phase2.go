@@ -280,6 +280,7 @@ func (a *apiService) dbToAPI(d *jobs.Database, lang i18n.Lang) api.Database {
 		EnvTag:        d.EnvTag,
 		ServerVersion: d.ServerVersion,
 		SslMode:       d.SSLMode,
+		DestinationId: d.DestinationID,
 		CreatedAt:     d.CreatedAt,
 		UpdatedAt:     d.UpdatedAt,
 	}

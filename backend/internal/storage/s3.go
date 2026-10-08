@@ -278,7 +278,7 @@ func (s *Store) Presign(ctx context.Context, key string, ttl time.Duration) (str
 // DiagnosticTest writes a canary into the diagnostic namespace, reads it
 // back, verifies content, then deletes it — a live write/read/delete cycle
 // fully separate from the backup namespace (dev-plan Phase 3 task 2).
-func (s *Store) DiagnosticTest(ctx context.Context) error {
+func (s *Store) DiagnosticTest(ctx context.Context) (result error) {
 	key := s.cfg.DiagnosticKey()
 	body := fmt.Sprintf("supabackup diagnostic %d", time.Now().UnixNano())
 	if err := s.Put(ctx, key, strings.NewReader(body), int64(len(body))); err != nil {
@@ -287,12 +287,18 @@ func (s *Store) DiagnosticTest(ctx context.Context) error {
 	// Once written, the canary is ours: clean it up on EVERY exit path so a
 	// failed diagnostic never leaves billable objects behind (round-3 review
 	// P2-06).
-	var result error
+	// result is the NAMED return: a cleanup failure after a clean read-back
+	// must still fail the test (it used to be assigned to a local variable
+	// the function never returned).
 	defer func() {
 		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if derr := s.Delete(dctx, key); derr != nil && result == nil {
-			result = fmt.Errorf("%w; ALSO failed to clean up canary %s: %w", result, key, derr)
+		if derr := s.Delete(dctx, key); derr != nil {
+			if result == nil {
+				result = fmt.Errorf("diagnostic cleanup: could not delete the canary %s: %w", key, derr)
+			} else {
+				result = fmt.Errorf("%w; ALSO failed to clean up canary %s: %w", result, key, derr)
+			}
 		}
 	}()
 	rc, size, err := s.Get(ctx, key)

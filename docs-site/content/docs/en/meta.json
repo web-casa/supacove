@@ -6,12 +6,14 @@
     "installation",
     "configuration",
     "databases",
+    "destinations",
     "scheduling",
     "heartbeat",
     "notifications",
     "backups",
     "restore",
     "monitoring",
-    "troubleshooting"
+    "troubleshooting",
+    "guides"
   ]
 }

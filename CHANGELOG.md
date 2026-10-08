@@ -5,6 +5,33 @@ All notable changes to supabackup.
 ## [Unreleased]
 
 ### Added
+- Recovery kit `supabase` profile: Supabase backups restore with a kit that
+  checks the target first (superuser connection; every extension of the
+  archive installable — before anything is written) and restores from an
+  edited table of contents that leaves out the grant on
+  `graphql_public.graphql`, still under `pg_restore --exit-on-error`.
+  Drilled end to end on supabase/postgres 15.8. `SUPABACKUP_PROFILE`
+  overrides a kit's default. A database registered as a platform keeps that
+  platform's kit when its hostname is not recognizable (self-hosted Supabase)
+- Console "Storage" view: add / test / reconcile / remove storage
+  destinations and choose the destination per database (previously API only)
+- API: `Database.destinationId`
+- docs-site: storage destinations page, Supabase backup guide, routing smoke
+  test (`npm run smoke`, run in CI)
+
+### Fixed
+- Deleting a destination that a database is still assigned to is refused
+  (`409 in_use`); it used to succeed and fail every later backup of that
+  database
+- `GET /tasks/{id}/download-url` for a backup whose destination was deleted
+  answers `409 destination_removed` instead of an empty 500
+- `POST /destinations`: an omitted `verifyReadback` is stored as `true`, as
+  the contract says (was `false`); the response carries real
+  `createdAt`/`updatedAt` (was 0)
+- Destination diagnostic test: a canary that cannot be deleted now fails the
+  test (the cleanup error was dropped), so write-only credentials are no
+  longer accepted
+
 - Quality gates (adopted lightweight-toolchain plan): golangci-lint v2 curated
   config (lint-clean tree), stylelint, Vitest+RTL component layer, Playwright
   e2e against the embedded binary (scripts/e2e-run.sh), oasdiff breaking gate

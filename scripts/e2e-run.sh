@@ -7,7 +7,9 @@ cd "$(dirname "$0")/.."
 
 PORT="${SB_E2E_PORT:-36470}"
 DATA="$(mktemp -d /tmp/sb-e2e.XXXXXX)"
-trap 'kill "$PID" 2>/dev/null || true; rm -rf "$DATA"' EXIT
+PID=""   # bound BEFORE the trap: an early make failure must not hit an
+         # unbound variable inside the EXIT handler (fresh-review P2-2)
+trap 'kill "${PID:-}" 2>/dev/null || true; rm -rf "$DATA"' EXIT
 
 make frontend backend
 SB_DATA_DIR="$DATA" SB_ADDR="127.0.0.1:$PORT" ./bin/supabackup serve &
@@ -20,6 +22,9 @@ done
 [ "$READY" = 1 ] || { echo "server never became ready on :$PORT" >&2; exit 1; }
 # The CLI prints prose around the token; extract the indented token line.
 TOKEN="$(SB_DATA_DIR="$DATA" ./bin/supabackup bootstrap | awk 'NF==1 && length($0)>20 { sub(/^ +/, ""); sub(/ +$/, ""); print; exit }')"
+# P3-7: a CLI copy change would silently empty the token and misroute every
+# e2e case to the login branch; fail loud instead.
+[ -n "$TOKEN" ] || { echo "bootstrap token extraction failed — CLI output format changed?" >&2; exit 1; }
 
 cd frontend
 SB_E2E_BASE_URL="http://127.0.0.1:$PORT" \

@@ -199,12 +199,15 @@ type BootstrapRequest struct {
 
 // Database defines model for Database.
 type Database struct {
-	CreatedAt int64            `json:"createdAt"`
-	EnvTag    string           `json:"envTag"`
-	Id        int64            `json:"id"`
-	LastTask  *Task            `json:"lastTask,omitempty"`
-	Name      string           `json:"name"`
-	Platform  DatabasePlatform `json:"platform"`
+	CreatedAt int64 `json:"createdAt"`
+
+	// DestinationId The storage destination this database uploads to. Absent for local-only backups.
+	DestinationId *int64           `json:"destinationId,omitempty"`
+	EnvTag        string           `json:"envTag"`
+	Id            int64            `json:"id"`
+	LastTask      *Task            `json:"lastTask,omitempty"`
+	Name          string           `json:"name"`
+	Platform      DatabasePlatform `json:"platform"`
 
 	// PoolingWarning Registration-time warning when the endpoint looks like a pooled connection that pg_dump cannot use (Supabase transaction pooler, Neon '-pooler' endpoint). Present on the create response when detected; absent otherwise.
 	PoolingWarning *string `json:"poolingWarning,omitempty"`
@@ -682,7 +685,7 @@ type ServerInterface interface {
 	// Create a destination after a live diagnostic test.
 	// (POST /destinations)
 	CreateDestination(w http.ResponseWriter, r *http.Request)
-	// Soft-delete a destination (refused while an upload is in flight).
+	// Soft-delete a destination (refused while a database uses it or an upload is in flight).
 	// (DELETE /destinations/{id})
 	DeleteDestination(w http.ResponseWriter, r *http.Request, id int64)
 	// Read-only comparison of remote objects against job references.
@@ -841,7 +844,7 @@ func (_ Unimplemented) CreateDestination(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Soft-delete a destination (refused while an upload is in flight).
+// Soft-delete a destination (refused while a database uses it or an upload is in flight).
 // (DELETE /destinations/{id})
 func (_ Unimplemented) DeleteDestination(w http.ResponseWriter, r *http.Request, id int64) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -3501,7 +3504,7 @@ type StrictServerInterface interface {
 	// Create a destination after a live diagnostic test.
 	// (POST /destinations)
 	CreateDestination(ctx context.Context, request CreateDestinationRequestObject) (CreateDestinationResponseObject, error)
-	// Soft-delete a destination (refused while an upload is in flight).
+	// Soft-delete a destination (refused while a database uses it or an upload is in flight).
 	// (DELETE /destinations/{id})
 	DeleteDestination(ctx context.Context, request DeleteDestinationRequestObject) (DeleteDestinationResponseObject, error)
 	// Read-only comparison of remote objects against job references.

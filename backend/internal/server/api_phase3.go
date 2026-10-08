@@ -67,15 +67,16 @@ func (a *apiService) CreateDestination(ctx context.Context, request api.CreateDe
 		platform = string(*body.Platform)
 	}
 	in := jobs.Destination{
-		Name:           body.Name,
-		Platform:       platform,
-		Endpoint:       derefString(body.Endpoint),
-		Region:         derefString(body.Region),
-		Bucket:         body.Bucket,
-		Prefix:         derefString(body.Prefix),
-		AccessKey:      body.AccessKey,
-		SecretKey:      body.SecretKey,
-		VerifyReadback: derefBool(body.VerifyReadback),
+		Name:      body.Name,
+		Platform:  platform,
+		Endpoint:  derefString(body.Endpoint),
+		Region:    derefString(body.Region),
+		Bucket:    body.Bucket,
+		Prefix:    derefString(body.Prefix),
+		AccessKey: body.AccessKey,
+		SecretKey: body.SecretKey,
+		// The contract's default is true: an omitted field must not store false.
+		VerifyReadback: body.VerifyReadback == nil || *body.VerifyReadback,
 		KeepRemote:     derefInt(body.KeepRemote, 10),
 		KeepDays:       derefInt(body.KeepDays, 0),
 	}
@@ -114,6 +115,10 @@ func (a *apiService) DeleteDestination(ctx context.Context, request api.DeleteDe
 		return api.DeleteDestination204Response{}, nil
 	case errors.Is(err, jobs.ErrDestinationNotFound):
 		return api.DeleteDestination404JSONResponse{Code: "not_found", Message: i18n.T(ctx, "destination not found", "目的地不存在")}, nil
+	case errors.Is(err, jobs.ErrDestinationInUse):
+		return api.DeleteDestination409JSONResponse{Code: "in_use", Message: i18n.T(ctx,
+			"a database still uses this destination; assign it another one or none first",
+			"仍有数据库在使用这个目的地；请先为它改绑或解绑")}, nil
 	default:
 		return api.DeleteDestination409JSONResponse{Code: "upload_in_flight", Message: uploadInFlightMsg(ctx, err)}, nil
 	}
@@ -228,6 +233,12 @@ func (a *apiService) GetTaskDownloadURL(ctx context.Context, request api.GetTask
 			Message: i18n.T(ctx, "this backup is not committed to a remote destination", "这份备份尚未提交到远端目的地")}, nil
 	}
 	backend, err := a.srv.runner.BuildBackendByID(ctx, t.DestinationID)
+	if errors.Is(err, jobs.ErrDestinationNotFound) {
+		return api.GetTaskDownloadURL409JSONResponse{Code: "destination_removed",
+			Message: i18n.T(ctx,
+				"the destination this backup was uploaded to has been deleted; fetch the object from the bucket directly",
+				"这份备份所在的目的地已被删除；请直接从存储桶获取该对象")}, nil
+	}
 	if err != nil {
 		a.srv.log.Error("download backend", "err", err)
 		return api.GetTaskDownloadURL500JSONResponse{}, nil
@@ -310,10 +321,6 @@ func derefString(v *string) string {
 		return ""
 	}
 	return *v
-}
-
-func derefBool(v *bool) bool {
-	return v != nil && *v
 }
 
 func derefInt(v *int, def int) int {

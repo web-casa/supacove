@@ -1,4 +1,4 @@
-# supabackup 部署指南
+# SupaCove 部署指南
 
 ## 前提条件
 
@@ -39,7 +39,7 @@ docker compose exec app /app/supabackup bootstrap
 | `SB_STAGING_QUOTA_BYTES` | `0`（不限） | 暂存目录硬配额（字节） |
 | `SB_JOB_TIMEOUT` | `6h` | 单个备份任务的墙钟预算（dump+上传+回读）；超时任务按网络类失败落库。`0` 关闭预算 |
 | `SB_FAILED_ARTIFACT_TTL_HOURS` | `72` | failed/canceled/interrupted 任务的本地工件保留时长（小时）；到期自动回收暂存空间。`0` 永久保留 |
-| `SB_HEARTBEAT_URL` | （空） | **回退**死人开关心跳 URL（未单独配置心跳的库继承；共享回退端点意味着多库共同消除同一个 silence，不是每库独立监控）。单独配置某库心跳用 `PUT /api/databases/{id}/schedule`；显式禁用某库填 `"-"`。成功 ping 要求 `heartbeatPeriodHours > 0` 且快照年龄 ≤ period+grace；失败 ping 发送到 `URL/fail`。beta 无 start 信号（v1.0）。 |
+| `SB_HEARTBEAT_URL` | （空） | **回退**心跳监控 URL（未单独配置心跳的库继承；共享回退端点意味着多库共同消除同一个 silence，不是每库独立监控）。单独配置某库心跳用 `PUT /api/databases/{id}/schedule`；显式禁用某库填 `"-"`。成功 ping 要求 `heartbeatPeriodHours > 0` 且快照年龄 ≤ period+grace；失败 ping 发送到 `URL/fail`。beta 无 start 信号（v1.0）。 |
 | `SB_PUBLIC_ORIGIN` | （空） | 反代部署时的外部 origin |
 | `SB_TRUSTED_PROXIES` | （空） | 信任的代理 CIDR 列表 |
 | `SB_SECRET_FILE` | `<data>/secret.key` | 主密钥文件路径 |
@@ -49,7 +49,7 @@ docker compose exec app /app/supabackup bootstrap
 
 ## 恢复验证（可选，默认关闭）
 
-每次备份成功后，supabackup 可以把密文**解密并恢复进一个一次性的内嵌
+每次备份成功后，SupaCove 可以把密文**解密并恢复进一个一次性的内嵌
 PostgreSQL 实例**，比对 manifest 声明的表数量和扩展，从而证明"这份备份
 真的能恢复"。结果以状态机形式呈现在任务 API 中：
 `pending → running → verified / failed / unsupported`，无法执行时是带原因
@@ -57,7 +57,7 @@ PostgreSQL 实例**，比对 manifest 声明的表数量和扩展，从而证明
 
 **这是管理员显式决定才启用的功能**（ADR-004）：
 
-- 验证进程与 supabackup 同 UID 运行，**不是沙箱**。恢复的是备份内容本身，
+- 验证进程与 SupaCove 同 UID 运行，**不是沙箱**。恢复的是备份内容本身，
   它能读写应用可读的文件。只对您信任来源的备份启用。
 - 启用必须提供 age 私钥（`SB_VERIFY_IDENTITY_FILE`）。私钥进入实例内存 =
   该实例可以解密所有备份。请权衡：验证带来"可恢复性证明"，代价是私钥

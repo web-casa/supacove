@@ -1,21 +1,18 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
-import { BookOpen } from "lucide-react";
+import { Brand } from "@/components/logo";
+import { localePath } from "@/lib/site";
 
 const STRINGS = {
-  zh: { name: "supabackup 文档" },
-  en: { name: "supabackup docs" },
+  zh: { tag: "文档" },
+  en: { tag: "docs" },
 } as const;
 
-export function baseOptions(lang: string): BaseLayoutProps {
+export function baseOptions(lang: string, opts: { tag?: boolean } = {}): BaseLayoutProps {
   const s = STRINGS[lang as keyof typeof STRINGS] ?? STRINGS.en;
   return {
     nav: {
-      title: (
-        <>
-          <BookOpen className="size-4" aria-hidden />
-          <span>{s.name}</span>
-        </>
-      ),
+      title: <Brand tag={opts.tag === false ? undefined : s.tag} />,
+      url: localePath(lang),
     },
     links: [],
   };

@@ -1,0 +1,154 @@
+---
+title: 备份 Supabase 数据库
+description: 用 SupaCove 为 Supabase 的 Postgres 数据库做定时加密的 pg_dump 备份：包含什么、怎么配置、怎么恢复
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+用 SupaCove 备份 Supabase 数据库只需三步：注册项目的 **Session pooler** 连接串，设置 Cron 计划，把 age 私钥离线保存好。每次运行都是对 Postgres 数据库的一次完整 `pg_dump`，写到任何地方之前先用 age 加密。恢复时用恢复套件把它还原到一台带有 Supabase 扩展的 PostgreSQL 服务器上。
+
+<Callout type="warn" title="已在 Supabase 镜像上实测，尚未在托管项目上验证">
+备份和恢复于 2026-10-08 在 `supabase/postgres` Docker 镜像上实际执行过，“恢复”一节如实记录了结果。**我们还没有在 Supabase 托管项目上测试过。** 托管环境下未验证的内容：连接池与直连方式、托管项目的归档里除镜像默认内容之外还有什么，以及这类归档的恢复。
+</Callout>
+
+## Supabase 自带什么
+
+Supabase 官方文档写明：免费套餐（Free Plan）的项目没有自动备份，并建议定期导出数据、保留异地副本。付费套餐含每日备份：Pro 保留最近 7 天，Team 14 天，Enterprise 最长 30 天。
+
+来源：[Supabase — Database Backups](https://supabase.com/docs/guides/platform/backups)，核对于 2026-10-08。套餐政策会变，使用这些数字前请以原文为准。
+
+SupaCove 在这条线的两边角色不同：
+
+- **免费套餐**：补上套餐里没有的定时备份。
+- **付费套餐**：在平台之外多一份由你自己保管、只有你的密钥能解开的副本。
+
+## 备份里有什么
+
+每份备份是对 Postgres 数据库的一次完整 `pg_dump`（custom 格式）。
+
+| 包含 | 不包含 |
+|---|---|
+| 导出时存在的全部用户 schema | Storage 的文件内容（它们在对象存储里，不在数据库里） |
+| 托管的 `auth` schema：用户记录 | Edge Functions 代码 |
+| 托管的 `storage` schema：对象元数据 | Auth 与 Storage 的服务配置 |
+| | 平台层面的项目设置 |
+
+<Callout type="warn" title="这是数据库备份，不是整个项目的备份">
+恢复这样一份备份，拿回来的是数据库，不会重建一个 Supabase 项目。上传的文件、函数和项目设置需要另外备份。
+</Callout>
+
+## 开始之前
+
+- 一台运行中的 SupaCove 实例。[快速开始](/zh/docs/quickstart)会带你构建镜像、启动并创建管理员账号。
+- 已创建并离线保存的 age 私钥（快速开始第 4 步）。没有它，任何备份都无法解密。
+- Supabase 数据库密码。
+
+## 配置
+
+<Steps>
+  <Step>
+    ### 复制 Session pooler 连接串
+
+    在 Supabase 项目面板打开 **Connect**，进入 **Connection string** 标签页，类型选 **URI**。复制 **Session pooler**（端口 5432），把 `[YOUR-PASSWORD]` 换成数据库密码。
+
+    Session pooler 走 IPv4。直连也可以用，但除非项目购买了 IPv4 附加组件，否则只有 IPv6。
+
+    **不要用 Transaction pooler（端口 6543）。** `pg_dump` 无法通过它运行。
+  </Step>
+  <Step>
+    ### 注册数据库
+
+    在控制台点“添加数据库”，平台选 Supabase，粘贴连接串。预检会立即指出池化端点和缺失的 TLS 模式，保存前服务器还会做一次真实的连接测试。连接串加密存储，之后不再回显。
+
+    详见：[注册数据库](/zh/docs/databases)。
+  </Step>
+  <Step>
+    ### 做第一次备份
+
+    点该库一行的“立即备份”。任务会出现在“近期任务”里。`succeeded` 表示导出、加密和提交都已完成；其余情况会落为 `failed`，并附错误类和排查第一步。
+
+    详见：[备份与下载](/zh/docs/backups)。
+  </Step>
+  <Step>
+    ### 设置计划
+
+    打开该库的“计划与心跳”抽屉，填入 Cron 表达式（例如 `0 3 * * *` 表示每天 03:00）和 IANA 时区。再设一个新鲜度阈值（小时）：最新一次成功备份超过这个时长，该库会被标记为 EXPIRED，并向你配置的 webhook 发送 `backup_expired` 事件。
+
+    详见：[计划与保留](/zh/docs/scheduling)、[通知 Webhook](/zh/docs/notifications)。
+  </Step>
+</Steps>
+
+## 恢复一份备份
+
+Supabase 备份的恢复套件使用 **`supabase` 模式**恢复。完整的 Supabase 归档无法原样恢复成功，所以这个模式会先检查目标库，并跳过归档里已知会失败的条目。
+
+### 需要准备什么
+
+- **一台带有 Supabase 扩展和角色的 PostgreSQL 服务器**，例如 `supabase/postgres` 镜像。它的主版本按 manifest 来选：不能低于 `backup.toolVersions.clientMajor`，也就是写出归档的那个 `pg_dump` 的主版本。这通常就是你项目自己的主版本。
+- 这台服务器上**新建的一个空数据库**。不要用镜像自带的 `postgres` 库，那里面已经有 Supabase 的各个 schema。
+- **超级用户连接。** 在该镜像上是 `supabase_admin`；`postgres` 角色无法写入 vault 的表。
+- 执行套件的机器上装有 `age`、`pg_restore`、`psql` 和 `sha256sum`，其中 `pg_restore` 同样不能低于 `clientMajor`。
+
+### 运行套件
+
+下载该任务的恢复套件和密文，然后执行：
+
+```bash
+export PGPASSWORD='<超级用户密码>'
+psql 'postgresql://supabase_admin@host:5432/postgres' -c 'CREATE DATABASE restored'
+
+AGE_IDENTITY_FILE=/path/identity.txt \
+sh restore-job7.sh 'postgresql://supabase_admin@host:5432/restored' backup-job7.dump.age
+```
+
+和所有套件一样，它会先校验密文 SHA-256，并拒绝非空的目标库。在 `supabase` 模式下它还会：
+
+1. 在解密之前，拒绝不是超级用户的连接；
+2. 读出归档里的扩展列表，只要目标服务器有一个装不上，就在**写入任何内容之前**停下，并列出缺少的扩展；
+3. 跳过对 `graphql_public.graphql` 的授权。这个函数由 Supabase 的事件触发器创建，并不保存在归档里，所以这条授权找不到对象；
+4. 对其余内容执行 `pg_restore --exit-on-error`，因此任何其他错误仍会让恢复停下；
+5. 按 manifest 核对表的数量。
+
+它会输出跳过了多少个条目。
+
+### 我们实际测了什么
+
+2026-10-08，我们在 `supabase/postgres:15.8.1.085` 镜像上走完了整条路径：一个含有开启行级安全的表、对 `anon` 和 `authenticated` 的授权、`vector` 类型的列以及另一个 schema 的数据库，由 SupaCove 备份、上传到 S3 兼容存储、下载，再用它的套件恢复到另一台运行同一镜像的服务器上。
+
+| 运行方式 | 结果 |
+|---|---|
+| 套件，以 `postgres` 身份 | 被拒绝：不是超级用户。没有解密任何内容 |
+| 套件，以 `supabase_admin` 身份 | **完成。** 跳过 1 个条目，共 11 张表 |
+| 套件，目标为普通 PostgreSQL 16 | 被拒绝：那里装不上 `pg_graphql`、`pgjwt`、`supabase_vault` 和 `vector`。没有写入任何内容 |
+| 套件加 `SUPABACKUP_PROFILE=generic` | 在 `pg_restore` 中途中止，未经处理的 Supabase 归档就是这样 |
+
+恢复完成后，500 行测试数据与源库的校验和一致，行级安全及其策略都在，对 `anon`、`authenticated`、`service_role` 的授权已恢复，`auth` 的表和全部八个扩展也都在。
+
+托管项目的归档里可能有这个镜像不会产生的条目。如果套件停在其中某一条上，请阅读它输出的 `pg_restore` 错误：仍然可以用 `age --decrypt` 加上不带 `--exit-on-error` 的 `pg_restore --no-owner` 手动完成恢复，但要逐条看过报告的错误再信任结果。
+
+### 哪些备份会用这个模式
+
+主机是 Supabase 地址的数据库，以及注册时平台选了 Supabase 的数据库。自托管的 Supabase 请按 Supabase 注册，才能得到这个模式。在环境变量里设置 `SUPABACKUP_PROFILE=supabase` 或 `generic` 可以覆盖套件的默认值。
+
+<Callout type="warn" title="这不是恢复到新 Supabase 项目的方法">
+这里是把数据库恢复到你自己运行的服务器上。恢复到一个全新的 Supabase 项目会与它的托管 schema、系统角色和托管扩展冲突；项目之间的迁移请按 Supabase 官方指南操作。
+</Callout>
+
+详见：[恢复与灾备](/zh/docs/restore)。
+
+## 常见问题
+
+- **连接测试失败，或任务以 `network` 失败。** 检查连接串是 Session pooler 或直连，而不是 6543 端口的 Transaction pooler。
+- **直连地址解析不了。** 没有 IPv4 附加组件时它只有 IPv6，改用 Session pooler。
+- **任务以 `client_version` 失败。** 镜像里没有与服务器主版本匹配的 `pg_dump`。镜像内置 PostgreSQL 14 到 18 的客户端，换主机或端口没有用。
+- **套件提示目标服务器装不上某些扩展。** 请恢复到 `supabase/postgres` 镜像上，或先安装它列出的扩展。
+- **套件提示需要超级用户。** 在该镜像上请用 `supabase_admin` 连接，而不是 `postgres`。
+- **`pg_restore` 停在 `unrecognized configuration parameter`。** 目标服务器比写出归档的 `pg_dump` 旧。请使用不低于 `backup.toolVersions.clientMajor` 的服务器。
+
+更多：[故障排查](/zh/docs/troubleshooting)。
+
+## 它不能做什么
+
+- 它不能阻止项目被暂停，也无法备份一个已经连不上的数据库。
+- 软件本身免费；运行它的机器、对象存储和网络流量不免费。

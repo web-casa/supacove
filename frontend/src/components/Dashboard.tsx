@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef } from "react";
 import {
   Bell,
+  HardDriveUpload,
   History,
   LayoutDashboard,
   LogOut,
@@ -12,6 +13,8 @@ import { useI18n } from "../i18n";
 import { useHashView, type View } from "../lib/useHashView";
 import { Brand } from "./Brand";
 import { DeliveryLog } from "./DeliveryLog";
+import { DestinationsPanel } from "./DestinationsPanel";
+import { UploadTargetsPanel } from "./UploadTargetsPanel";
 import { HealthSummary } from "./HealthSummary";
 import { PipelinePanel } from "./PipelinePanel";
 import { ProtectionPanel } from "./ProtectionPanel";
@@ -23,6 +26,7 @@ import { LangSwitch } from "./ui/LangSwitch";
 const NAV: { view: View; key: string; icon: LucideIcon }[] = [
   { view: "overview", key: "nav.overview", icon: LayoutDashboard },
   { view: "backups", key: "nav.backups", icon: History },
+  { view: "storage", key: "nav.storage", icon: HardDriveUpload },
   { view: "notifications", key: "nav.notifications", icon: Bell },
 ];
 
@@ -102,6 +106,12 @@ export function Dashboard({ user }: { user: User }) {
           </>
         )}
         {view === "backups" && <RecentBackups />}
+        {view === "storage" && (
+          <>
+            <DestinationsPanel />
+            <UploadTargetsPanel />
+          </>
+        )}
         {view === "notifications" && (
           <>
             <WebhooksPanel />

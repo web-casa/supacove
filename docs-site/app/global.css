@@ -2,7 +2,580 @@
 @import "fumadocs-ui/css/neutral.css";
 @import "fumadocs-ui/css/preset.css";
 @source "../node_modules/fumadocs-ui/dist/**/*.js";
-@source "../node_modules/fumadocs-openapi/dist/**/*.js";
 @source "../app/**/*.tsx";
 @source "../components/**/*.tsx";
 @source "../content/**/*.mdx";
+
+/* Design tokens. The docs share the console's visual language
+   (frontend/src/styles/tokens.css): cool charcoal surfaces, hairline borders,
+   Geist, and ONE signature colour — the signal teal. Status colours are used
+   only by callouts, never as decoration. */
+@theme inline {
+  --font-sans:
+    var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  --font-mono:
+    var(--font-geist-mono), ui-monospace, "SF Mono", "JetBrains Mono", menlo,
+    consolas, "PingFang SC", "Noto Sans CJK SC", monospace;
+}
+
+@theme {
+  --color-fd-background: #f4f6f7;
+  --color-fd-foreground: #12161b;
+  --color-fd-muted: #e8ecef;
+  --color-fd-muted-foreground: #56606d;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #1a2027;
+  --color-fd-card: #fafbfc;
+  --color-fd-card-foreground: #12161b;
+  --color-fd-border: rgb(16 19 23 / 0.1);
+  --color-fd-primary: #08796a;
+  --color-fd-primary-foreground: #f2fffc;
+  --color-fd-secondary: #e8ecef;
+  --color-fd-secondary-foreground: #12161b;
+  --color-fd-accent: rgb(16 19 23 / 0.06);
+  --color-fd-accent-foreground: #12161b;
+  --color-fd-ring: #0a8f7c;
+  --color-fd-overlay: rgb(16 19 23 / 0.35);
+}
+
+.dark {
+  --color-fd-background: #101317;
+  --color-fd-foreground: #e6e9ee;
+  --color-fd-muted: #1a1f26;
+  --color-fd-muted-foreground: #939ba8;
+  --color-fd-popover: #171b21;
+  --color-fd-popover-foreground: #e6e9ee;
+  --color-fd-card: #15191e;
+  --color-fd-card-foreground: #e6e9ee;
+  --color-fd-border: rgb(255 255 255 / 0.08);
+  --color-fd-primary: #2fe6c8;
+  --color-fd-primary-foreground: #06211d;
+  --color-fd-secondary: #1a1f26;
+  --color-fd-secondary-foreground: #e6e9ee;
+  --color-fd-accent: rgb(255 255 255 / 0.06);
+  --color-fd-accent-foreground: #e6e9ee;
+  --color-fd-ring: #2fe6c8;
+  --color-fd-overlay: rgb(4 7 12 / 0.6);
+}
+
+@theme static {
+  --color-fd-info: #4f8cff;
+  --color-fd-warning: #d99a0b;
+  --color-fd-error: #e5484d;
+  --color-fd-success: #1f9d57;
+  --color-fd-idea: #d99a0b;
+}
+
+.dark {
+  --color-fd-warning: #fbbf24;
+  --color-fd-error: #ff6b6b;
+  --color-fd-success: #4ade80;
+  --color-fd-idea: #fbbf24;
+}
+
+:root {
+  --sb-signal: #0a8f7c;
+  --sb-signal-soft: color-mix(in srgb, var(--sb-signal) 11%, transparent);
+  --sb-hairline: rgb(16 19 23 / 0.1);
+  --sb-hairline-strong: rgb(16 19 23 / 0.18);
+  --sb-dot: rgb(16 19 23 / 0.09);
+  --sb-shadow: 0 1px 1px rgb(20 40 50 / 0.04), 0 10px 30px -12px rgb(20 40 50 / 0.16);
+  --sb-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --sb-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dark {
+  --sb-signal: #2fe6c8;
+  --sb-signal-soft: color-mix(in srgb, var(--sb-signal) 13%, transparent);
+  --sb-hairline: rgb(255 255 255 / 0.08);
+  --sb-hairline-strong: rgb(255 255 255 / 0.15);
+  --sb-dot: rgb(255 255 255 / 0.06);
+  --sb-shadow: 0 0 0 1px rgb(255 255 255 / 0.04), 0 16px 40px -16px rgb(2 6 10 / 0.8);
+}
+
+/* ---- Base --------------------------------------------------------------- */
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizelegibility;
+}
+
+body {
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Ambient backdrop, same recipe as the console: a dot grid that fades out
+   below the fold, with a faint signal glow behind it. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60rem 24rem at 70% -6rem, var(--sb-signal-soft), transparent 70%),
+    radial-gradient(circle, var(--sb-dot) 1px, transparent 1.5px) 50% 0 / 26px 26px;
+  mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, #000, transparent);
+  pointer-events: none;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--sb-signal) 28%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--sb-signal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-hairline-strong) transparent;
+}
+
+.sb-skip {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  padding: 0.5rem 0.875rem;
+  border-radius: 8px;
+  background: var(--color-fd-foreground);
+  color: var(--color-fd-background);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transform: translateY(-200%);
+  transition: transform 0.2s var(--sb-ease-out);
+}
+
+.sb-skip:focus-visible {
+  transform: none;
+}
+
+/* ---- Brand mark ---------------------------------------------------------- */
+
+.sb-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.sb-mark {
+  flex: none;
+  color: var(--sb-signal);
+}
+
+/* The middle ring of the cylinder "beats" once when the brand is hovered. */
+.sb-mark .sb-mark-ring {
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
+  transition: transform 0.5s var(--sb-ease-out);
+}
+
+a:hover .sb-mark .sb-mark-ring {
+  transform: translateY(1.5px);
+}
+
+.sb-brand-tag {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--sb-hairline-strong);
+  border-radius: 5px;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Docs chrome --------------------------------------------------------- */
+
+#nd-sidebar {
+  background: color-mix(in srgb, var(--color-fd-card) 70%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+/* Top-level sidebar entries are numbered in reading order; the active one
+   gets a signal tick instead of a filled pill. Links inside a folder (the
+   guides) keep the stock treatment: `[data-state]` is the folder's panel. */
+#nd-sidebar [data-radix-scroll-area-viewport] {
+  counter-reset: sb-nav;
+}
+
+#nd-sidebar a:not([data-state] a)[data-active] {
+  counter-increment: sb-nav;
+  gap: 0.75rem;
+  border-radius: 7px;
+  transition:
+    color 0.2s var(--sb-ease),
+    background-color 0.2s var(--sb-ease),
+    transform 0.2s var(--sb-ease);
+}
+
+#nd-sidebar a:not([data-state] a)[data-active]::before {
+  content: counter(sb-nav, decimal-leading-zero);
+  flex: none;
+  width: 1.25rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+  transition:
+    color 0.2s var(--sb-ease),
+    opacity 0.2s var(--sb-ease);
+}
+
+#nd-sidebar a:not([data-state] a)[data-active]:hover {
+  color: var(--color-fd-foreground);
+}
+
+#nd-sidebar a:not([data-state] a)[data-active]:active {
+  transform: scale(0.985);
+}
+
+#nd-sidebar a:not([data-state] a)[data-active="true"] {
+  background: var(--sb-signal-soft);
+  color: var(--color-fd-foreground);
+  font-weight: 500;
+}
+
+#nd-sidebar a:not([data-state] a)[data-active="true"]::before {
+  color: var(--sb-signal);
+  opacity: 1;
+}
+
+#nd-sidebar a:not([data-state] a)[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0.55rem;
+  inset-inline-start: -1px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--sb-signal);
+}
+
+/* ---- Docs page ----------------------------------------------------------- */
+
+.sb-page-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.sb-page-eyebrow b {
+  color: var(--sb-signal);
+  font-weight: 500;
+}
+
+.sb-page-eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--sb-hairline-strong), transparent);
+}
+
+article#nd-page h1 {
+  font-size: clamp(1.9rem, 1.4rem + 1.6vw, 2.6rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.sb-page-updated {
+  margin-top: 3rem;
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.sb-page-lede {
+  max-width: 46rem;
+  margin: 0 0 0.5rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+/* The article enters as one staggered block on every navigation. */
+@keyframes sb-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+article#nd-page > * {
+  animation: sb-rise 0.6s var(--sb-ease-out) backwards;
+}
+
+article#nd-page > :nth-child(2) {
+  animation-delay: 50ms;
+}
+
+article#nd-page > :nth-child(3) {
+  animation-delay: 100ms;
+}
+
+article#nd-page > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+
+/* div.prose: Fumadocs also puts .prose on TOC links, which must keep their size. */
+div.prose {
+  --tw-prose-body: color-mix(in srgb, var(--color-fd-foreground) 86%, transparent);
+  font-size: 0.975rem;
+  line-height: 1.8;
+}
+
+.prose :where(p, li) {
+  text-wrap: pretty;
+}
+
+.prose :where(h2) {
+  margin-top: 3.25rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid var(--sb-hairline);
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.prose > :where(h2:first-child) {
+  margin-top: 2rem;
+}
+
+.fd-step > :where(h3:first-child) {
+  margin-top: 0;
+}
+
+.fd-step::before {
+  border: 1px solid var(--sb-hairline-strong);
+  background: var(--color-fd-background);
+  color: var(--sb-signal);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose :where(h3) {
+  font-size: 1.1rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.prose :where(strong) {
+  font-weight: 600;
+}
+
+.prose :where(a):not([data-card], .not-prose a) {
+  text-decoration-color: color-mix(in srgb, var(--sb-signal) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  transition:
+    color 0.2s var(--sb-ease),
+    text-decoration-color 0.2s var(--sb-ease);
+}
+
+.prose :where(a):not([data-card], .not-prose a):hover {
+  color: var(--color-fd-primary);
+  text-decoration-color: currentcolor;
+}
+
+.prose :where(:not(pre) > code) {
+  border-color: var(--sb-hairline);
+  border-radius: 5px;
+  background: var(--color-fd-muted);
+  font-size: 0.84em;
+  font-weight: 450;
+}
+
+.prose :where(ul > li)::marker {
+  color: var(--sb-signal);
+}
+
+.prose :where(ol > li)::marker {
+  color: var(--color-fd-muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Code blocks: a quiet instrument panel. */
+.prose figure.shiki {
+  border-color: var(--sb-hairline);
+  border-radius: 12px;
+  background: var(--color-fd-card);
+  box-shadow: var(--sb-shadow);
+  transition: border-color 0.25s var(--sb-ease);
+}
+
+.prose figure.shiki:hover {
+  border-color: var(--sb-hairline-strong);
+}
+
+.prose figure.shiki pre {
+  font-size: 0.8125rem;
+  line-height: 1.75;
+}
+
+/* Tables: hairlines only, tabular figures, sticky-feeling header. */
+.prose table {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.prose :where(th) {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.prose :where(tbody tr) {
+  transition: background-color 0.15s var(--sb-ease);
+}
+
+.prose :where(tbody tr:hover) {
+  background: var(--sb-signal-soft);
+}
+
+/* Cards: lift a hair and light the edge. (Fumadocs also tags heading anchors
+   with data-card, hence the :not.) */
+.prose [data-card]:not(:is(h1, h2, h3, h4, h5, h6) > *) {
+  border-color: var(--sb-hairline);
+  border-radius: 14px;
+  background: var(--color-fd-card);
+  box-shadow: none;
+  transition:
+    border-color 0.3s var(--sb-ease),
+    transform 0.3s var(--sb-ease-out),
+    box-shadow 0.3s var(--sb-ease);
+}
+
+.prose [data-card]:not(:is(h1, h2, h3, h4, h5, h6) > *):hover {
+  border-color: color-mix(in srgb, var(--sb-signal) 45%, transparent);
+  background: var(--color-fd-card);
+  box-shadow: var(--sb-shadow);
+  transform: translateY(-2px);
+}
+
+.prose [data-card] > div:first-child {
+  border-color: var(--sb-hairline);
+  background: var(--sb-signal-soft);
+  color: var(--sb-signal);
+}
+
+/* Prev / next footer links. */
+#nd-page a[href]:has(> p) {
+  border-color: var(--sb-hairline);
+  border-radius: 12px;
+  transition:
+    border-color 0.25s var(--sb-ease),
+    background-color 0.25s var(--sb-ease),
+    transform 0.25s var(--sb-ease-out);
+}
+
+#nd-page a[href]:has(> p):hover {
+  border-color: color-mix(in srgb, var(--sb-signal) 45%, transparent);
+  background: var(--sb-signal-soft);
+}
+
+#nd-page a[href]:has(> p):active {
+  transform: scale(0.99);
+}
+
+/* ---- 404 ----------------------------------------------------------------- */
+
+.sb-404 {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: start;
+  gap: 1.25rem;
+  min-height: 100dvh;
+  padding: 2rem clamp(1.25rem, 5vw, 3.5rem);
+}
+
+.sb-404-code {
+  color: var(--sb-signal);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  letter-spacing: 0.04em;
+}
+
+.sb-404 h1 {
+  max-width: 16ch;
+  font-size: clamp(2.25rem, 7vw, 4.5rem);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.sb-404 p {
+  max-width: 34rem;
+  color: var(--color-fd-muted-foreground);
+  line-height: 1.7;
+}
+
+.sb-404 a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.7rem 1.1rem;
+  border-radius: 999px;
+  background: var(--color-fd-foreground);
+  color: var(--color-fd-background);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: transform 0.2s var(--sb-ease-out);
+}
+
+.sb-404 section {
+  display: grid;
+  justify-items: start;
+  gap: 1.25rem;
+}
+
+/* global-not-found.tsx ships both languages; its boot script names one. */
+[data-lang="en"] .sb-404 section[lang="zh"],
+[data-lang="zh"] .sb-404 section[lang="en"] {
+  display: none;
+}
+
+.sb-404 a:hover {
+  transform: translateY(-1px);
+}
+
+.sb-404 a:active {
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

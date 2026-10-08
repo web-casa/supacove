@@ -322,7 +322,8 @@ func (r *Runner) EnqueueTx(ctx context.Context, dbh dbExec, databaseID int64) (i
 // synchronously at startup, before the worker starts claiming new jobs.
 func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 	rows, err := r.authDB.QueryContext(ctx, `
-		SELECT id, database_id, artifact_path, artifact_sha256, artifact_size, manifest_path, destination_id
+		SELECT id, database_id, artifact_path, artifact_sha256, artifact_size, manifest_path, destination_id,
+		       COALESCE(started_at, 0)
 		FROM jobs
 		WHERE status = 'interrupted' AND artifact_state IN ('committed','committed_no_manifest')
 		  AND remote_state IN ('uploading','committed')`)
@@ -337,12 +338,13 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 		size         int64
 		manifestPath string
 		destID       sql.NullInt64
+		startedAt    int64 // original dump start: the heartbeat freshness anchor
 	}
 	var jobsList []job
 	for rows.Next() {
 		var j job
 		var d sql.NullInt64
-		if err := rows.Scan(&j.id, &j.dbID, &j.artifactPath, &j.sha256, &j.size, &j.manifestPath, &d); err != nil {
+		if err := rows.Scan(&j.id, &j.dbID, &j.artifactPath, &j.sha256, &j.size, &j.manifestPath, &d, &j.startedAt); err != nil {
 			rows.Close() //nolint:sqlclosecheck // rows are fully consumed and closed BEFORE the write loop (round-2 P2-02): holding a read cursor across writes is the hazard this rule misses
 			r.log.Error("resume scan", "err", err)
 			return
@@ -432,22 +434,80 @@ func (r *Runner) ResumeRemotePhase(ctx context.Context) {
 		// sweep (ResumePendingVerifications) once the worker is running.
 		verifyStatus, verifyDetail := r.initialVerifyState()
 		detected := platformpkg.Generic
-		if _, _, _, connEnc, lerr := r.loadDatabase(ctx, j.dbID); lerr == nil {
+		if _, registered, _, connEnc, lerr := r.loadDatabase(ctx, j.dbID); lerr == nil {
 			if plainPlain, derr := crypto.Decrypt(r.key, connEnc); derr == nil {
 				if ci, perr := pgclient.ParseURI(string(plainPlain)); perr == nil {
-					detected = platformpkg.Detect(ci.Host)
+					detected = platformpkg.Resolve(ci.Host, registered)
 				}
 			}
 		}
+		// A resumed commit is a completed backup: it must carry the same
+		// success side effects as runJob's terminal write (fresh-review
+		// P2-01/P3-01: the resume success path previously skipped all of
+		// them). The recovery annotation is cleared — the job no longer
+		// needs manual recovery. duration_secs stays unknown: the dump and
+		// the upload happened in different runs separated by downtime, so
+		// no single wall-clock measurement is meaningful (the AVG query
+		// excludes zeros).
+		resumedAt := time.Now().UTC()
 		if _, uerr := r.authDB.Exec(`
 			UPDATE jobs SET status = 'succeeded', finished_at = strftime('%s','now'),
-			  manifest_path = ?, platform = ?, verify_status = ?, verify_detail = ?
+			  manifest_path = ?, platform = ?, verify_status = ?, verify_detail = ?,
+			  error_message = ''
 			WHERE id = ? AND status = 'running' AND cancel_requested = 0`,
 			j.manifestPath, string(detected), verifyStatus, verifyDetail, j.id); uerr != nil {
 			r.log.Error("resume: success update failed", "job", j.id, "err", uerr)
-		} else {
-			r.log.Info("resumed remote commit completed", "job", j.id)
+			continue
 		}
+		r.log.Info("resumed remote commit completed", "job", j.id)
+
+		// Volume metric 1 and the stats row need a live look at the source
+		// database; when it is unreachable the backup is still committed —
+		// record what is known and skip the rest.
+		dbName := ""
+		var sourceBytes int64
+		if name, _, _, connEnc, lerr := r.loadDatabase(ctx, j.dbID); lerr == nil {
+			dbName = name
+			if plainPlain, derr := crypto.Decrypt(r.key, connEnc); derr == nil {
+				if ci, perr := pgclient.ParseURI(string(plainPlain)); perr == nil {
+					if deps, derr2 := pgclient.CollectDependencies(ctx, ci); derr2 == nil {
+						sourceBytes = deps.SourceDBBytes
+					}
+				}
+			}
+		} else {
+			r.log.Warn("resume: database row unavailable; stats skipped", "job", j.id, "err", lerr)
+		}
+		if sourceBytes > 0 {
+			if _, uerr := r.authDB.Exec(`UPDATE jobs SET source_db_bytes = ? WHERE id = ?`, sourceBytes, j.id); uerr != nil {
+				r.log.Error("resume: source bytes update failed", "job", j.id, "err", uerr)
+			}
+		}
+		if dbName != "" && r.statsRecorder != nil {
+			if serr := r.statsRecorder.Record(ctx, stats.Entry{
+				JobID:           j.id,
+				DatabaseName:    dbName,
+				SourceDBBytes:   sourceBytes,
+				DumpSize:        0, // archive size unknown after a resume; excluded from the recorded-samples subtotal
+				ArtifactSize:    j.size,
+				DurationSecs:    0, // unknown: split across runs
+				VerifyStatus:    verifyStatus,
+				RemoteCommitted: true,
+			}); serr != nil {
+				// stats are best-effort (same contract as runJob): a failed
+				// write must not undo a completed remote commit.
+				r.log.Error("resume: stats record failed", "job", j.id, "err", serr)
+			}
+		}
+		// Dead-man switch: the protected snapshot's age is the ORIGINAL dump
+		// start (started_at), mirroring runJob's dumpStart gate — a backup
+		// resumed after a long outage must not claim freshness it lacks.
+		dumpStart := resumedAt
+		if j.startedAt > 0 {
+			dumpStart = time.Unix(j.startedAt, 0).UTC()
+		}
+		dec := r.heartbeatFor(j.dbID, dumpStart, true, j.destID.Valid)
+		r.pingSuccess(j.dbID, dec)
 	}
 }
 
@@ -771,10 +831,11 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		return
 	}
 	knownSecrets = append(knownSecrets, ci.Password)
-	// Platform detection is host-characteristic only (never re-detected from
-	// untrusted input later); it drives the recovery kit and is persisted on
-	// the job so API consumers see the same classification the kit used.
-	detectedPlatform := platformpkg.Detect(ci.Host)
+	// The platform comes from the host when it is recognizable, else from
+	// the registration (a self-hosted Supabase has an arbitrary hostname).
+	// It drives the recovery kit and is persisted on the job so API
+	// consumers see the same classification the kit used.
+	detectedPlatform := platformpkg.Resolve(ci.Host, platform)
 	if hint := platformpkg.PoolingHint(ci.Host, ci.Port); !hint.Empty() {
 		r.log.Warn("pooling hint", "job", jobID, "database", name, "hint", hint.En)
 	}
@@ -1117,8 +1178,8 @@ func (r *Runner) settleCtxGone(ctx context.Context, jobID int64) bool {
 		r.interruptForShutdown(jobID)
 		return true
 	}
-	r.fail(jobID, ClassNetwork,
-		fmt.Sprintf("backup exceeded its execution budget (SB_JOB_TIMEOUT=%s); a stage hung past the deadline and the job was terminated", r.jobTimeout))
+	r.fail(jobID, ClassUnknown,
+		fmt.Sprintf("backup exceeded its execution budget (SB_JOB_TIMEOUT=%s); a stage hung past the deadline and the job was terminated — the hung stage is not identified, so the generic troubleshooting applies", r.jobTimeout))
 	return true
 }
 

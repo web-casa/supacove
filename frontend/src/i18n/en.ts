@@ -196,7 +196,7 @@ const raw = {
   "providers.neon.s2":
     "Switch Connection pooling off, so the host has no “-pooler” in it.",
   "providers.neon.s3":
-    "Copy the string as-is. The channel_binding parameter Neon adds is removed here because supabackup does not accept it.",
+    "Copy the string as-is. The channel_binding parameter Neon adds is removed here because SupaCove does not accept it.",
   "providers.neon.s4":
     "An idle compute takes a few seconds to wake, so the first test can be slow.",
   "providers.railway.tagline": "Public TCP proxy URL",
@@ -210,7 +210,7 @@ const raw = {
   "providers.generic.label": "Self-hosted / other",
   "providers.generic.tagline": "Any PostgreSQL server",
   "providers.generic.s1":
-    "The host must be reachable from the supabackup container. localhost means the container itself; for the Docker host use host.docker.internal or its LAN address.",
+    "The host must be reachable from the SupaCove container. localhost means the container itself; for the Docker host use host.docker.internal or its LAN address.",
   "providers.generic.s2":
     "Use a role that can read everything pg_dump exports: the database owner, or a member of pg_read_all_data (PostgreSQL 14+).",
   "providers.generic.s3":
@@ -245,15 +245,15 @@ const raw = {
   "conn.warn.neonPort":
     "Port 6543 is Neon’s pooled port. pg_dump cannot run through it.",
   "conn.warn.railwayInternal":
-    "*.railway.internal only resolves inside Railway’s private network. Unless supabackup runs there too, use DATABASE_PUBLIC_URL (the *.proxy.rlwy.net TCP proxy).",
+    "*.railway.internal only resolves inside Railway’s private network. Unless SupaCove runs there too, use DATABASE_PUBLIC_URL (the *.proxy.rlwy.net TCP proxy).",
   "conn.warn.sslDisable":
     "sslmode=disable sends the password and every dumped row unencrypted. Use it only on a private network you trust.",
   "conn.info.sbDirect":
     "This is the direct connection, which is IPv6-only unless the project has the IPv4 add-on. If the test cannot connect, use the Session pooler string instead.",
   "conn.info.localhost":
-    "localhost is the supabackup container itself, not the machine running Docker. For a database on the Docker host use host.docker.internal or the host’s LAN address.",
+    "localhost is the SupaCove container itself, not the machine running Docker. For a database on the Docker host use host.docker.internal or the host’s LAN address.",
   "conn.info.droppedParams":
-    "Removing {params} — supabackup only accepts sslmode, connect_timeout and application_name.",
+    "Removing {params} — SupaCove only accepts sslmode, connect_timeout and application_name.",
   "conn.info.addSsl":
     "The string sets no TLS mode; adding sslmode={mode} (chosen below).",
   "conn.ok.compatible":
@@ -396,6 +396,91 @@ const raw = {
   // ---- formatting helpers ----------------------------------------------------------------
   "ui.loading": "Loading",
   "fmt.requestFailed": "Request failed",
+
+  // ---- Storage view ----
+  "nav.storage": "Storage",
+  "dest.title": "Storage destinations",
+  "dest.desc":
+    "Your own S3, Cloudflare R2 or Backblaze B2 buckets. A database with a destination uploads every encrypted backup there; without one, backups stay on this instance.",
+  "dest.aria": "Storage destinations",
+  "dest.unavailable": "Destinations unavailable: {msg}",
+  "dest.add": "Add destination",
+  "dest.addSubmit": "Test and add",
+  "dest.testing": "Testing the bucket…",
+  "dest.empty.title": "No storage destination yet",
+  "dest.empty.cta": "Add your first destination",
+  "dest.empty.body":
+    "Backups are kept on this instance only. Add a bucket to keep a copy somewhere this machine cannot take down with it.",
+  "dest.col.name": "Name",
+  "dest.col.location": "Bucket / prefix",
+  "dest.col.retention": "Retention",
+  "dest.col.usedBy": "Used by",
+  "dest.unused": "No database",
+  "dest.keep.copies": "{n} copies",
+  "dest.keep.both": "{n} copies, {days} days",
+  "dest.test": "Test",
+  "dest.test.ok": "Wrote, read back and deleted a test object.",
+  "dest.test.failed": "Test failed: {msg}",
+  "dest.reconcileTip": "Compare the bucket with the records",
+  "dest.reconcile.result":
+    "{remote} objects in the bucket, {matched} matched. Orphaned: {orphaned}, missing: {missing}, uncommitted: {uncommitted}.",
+  "dest.removeTip": "Remove destination",
+  "dest.removePrompt": "Remove “{name}”? Objects in the bucket are kept.",
+  "dest.toast.added": "Destination “{name}” added.",
+  "dest.toast.removed": "Removed destination “{name}”.",
+  "dest.addForm.aria": "Add storage destination",
+  "dest.addForm.desc":
+    "The bucket must already exist. Before saving, a test object is written, read back and deleted; nothing is saved if that fails. A destination cannot be edited later: add a new one and switch the databases over.",
+  "dest.field.name": "Name",
+  "dest.field.platform": "Platform",
+  "dest.platform.s3": "Amazon S3 / S3-compatible",
+  "dest.platform.r2": "Cloudflare R2",
+  "dest.platform.b2": "Backblaze B2",
+  "dest.field.region": "Region",
+  "dest.hint.region.s3": "Empty means us-east-1.",
+  "dest.hint.region.r2": "Empty means auto.",
+  "dest.hint.region.b2": "Required, e.g. us-west-004.",
+  "dest.field.endpoint": "Endpoint",
+  "dest.hint.endpoint": "Required: https://host[:port], no path.",
+  "dest.hint.endpointS3":
+    "Leave empty for Amazon S3. Set it for an S3-compatible service.",
+  "dest.field.bucket": "Bucket",
+  "dest.hint.bucket": "Must already exist.",
+  "dest.field.prefix": "Prefix (optional)",
+  "dest.hint.prefix":
+    "A folder inside the bucket. Empty means the bucket root.",
+  "dest.field.accessKey": "Access key ID",
+  "dest.field.secretKey": "Secret access key",
+  "dest.hint.secretKey": "Stored encrypted and never shown again.",
+  "dest.field.keepRemote": "Copies to keep",
+  "dest.hint.keepRemote": "Per database, at least 1.",
+  "dest.field.keepDays": "Days to keep",
+  "dest.hint.keepDays": "0 turns the age limit off.",
+  "dest.error.name": "Name this destination.",
+  "dest.error.endpointRequired": "This platform needs an endpoint.",
+  "dest.error.endpoint": "Must be http(s)://host[:port] without a path.",
+  "dest.error.region": "Backblaze B2 needs the region of its S3 endpoint.",
+  "dest.error.bucket":
+    "3–63 characters: lowercase letters, digits, dots and dashes.",
+  "dest.error.prefix":
+    "Letters, digits, slash, dot, underscore and dash only; no “..”.",
+  "dest.error.accessKey": "Enter the access key ID.",
+  "dest.error.secretKey": "Enter the secret access key.",
+  "dest.error.keepRemote": "A whole number, 1 or more.",
+  "dest.error.keepDays": "A whole number, 0 or more.",
+  "target.title": "Where each database uploads",
+  "target.desc":
+    "Pick a destination per database. The change applies from the next backup, and is refused while a backup of that database is running.",
+  "target.aria": "Upload destination per database",
+  "target.col.destination": "Destination",
+  "target.col.effect": "Effect",
+  "target.localOnly": "None — keep backups on this instance",
+  "target.note.local": "Local only. Lost if this machine is lost.",
+  "target.note.remote": "Succeeds only once committed to the bucket.",
+  "target.unresolved": "Destination #{id}",
+  "target.empty": "No database registered yet. Add one on the Overview.",
+  "target.toast.assigned": "“{db}” now uploads to “{dest}”.",
+  "target.toast.cleared": "“{db}” now keeps backups on this instance only.",
 };
 
 /** Every locale must translate exactly these keys. */

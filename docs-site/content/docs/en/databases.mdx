@@ -3,6 +3,7 @@ title: Registering databases
 description: Connection-string rules, per-platform gotchas, roles and TLS modes
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 ## Flow
@@ -22,7 +23,8 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
   <Tab value="Supabase">
     Use the **session pooler (port 5432)** or the direct connection (IPv6-only
     without the IPv4 add-on). **Never the transaction pooler (6543)**:
-    `pg_dump` cannot run through it.
+    `pg_dump` cannot run through it. Full walkthrough:
+    [Back up a Supabase database](/docs/guides/supabase-backup).
   </Tab>
   <Tab value="Neon">
     Turn connection pooling off and copy the string (host without `-pooler`).
@@ -34,12 +36,43 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
     `DATABASE_URL` host (`*.railway.internal`) resolves only inside Railway.
   </Tab>
   <Tab value="Self-hosted">
-    The host must be reachable FROM the supabackup container: `localhost` is
+    The host must be reachable FROM the SupaCove container: `localhost` is
     the container itself; use `host.docker.internal` or a LAN address for a
     database on the Docker host. The role must be able to read everything
     `pg_dump` exports (owner, or `pg_read_all_data` on PostgreSQL 14+).
   </Tab>
 </Tabs>
+
+## Other managed PostgreSQL
+
+These platforms run standard PostgreSQL, so `pg_dump` is expected to work
+against them. **We have not tested them ourselves yet**: the notes below come
+from each platform's own documentation. The console has no dedicated option
+for them: register with
+"self-hosted/other", which also means no platform-specific pre-flight hints —
+check the connection string against this table yourself.
+
+| Platform | Connection string | Notes |
+|---|---|---|
+| Aiven | The Service URI from the service overview (host ends in `.aivencloud.com`, default user `avnadmin`, database `defaultdb`, ships with `sslmode=require`) | The port is not 5432; use the one in the Service URI |
+| Prisma Postgres | The **direct TCP connection string**, e.g. `postgres://USER:PASSWORD@db.prisma.io:5432/?sslmode=require` | Based on PostgreSQL 17; `prisma+postgres://` Accelerate strings do not work with `pg_dump` |
+| TigerData (Timescale) | The service connection string, with `sslmode=require` | **Restores need extra steps**, see below |
+| Miget | The External URL shown once Public Access is enabled | Without it the database is reachable only inside Miget |
+| Render | The **External Database URL** from the database page, with `sslmode=require` | The Internal URL resolves only inside Render |
+
+<Callout type="warn" title="Restoring TigerData / TimescaleDB">
+A backup that contains the TimescaleDB extension must be restored with
+`SELECT timescaledb_pre_restore();` before `pg_restore` and
+`SELECT timescaledb_post_restore();` after it, and never with parallel
+restore (`-j`). The recovery kit does not run these for you: decrypt first,
+then restore by hand following TigerData's logical backup guide. Embedded
+restore verification uses PostgreSQL without that extension and does not
+apply to these databases.
+</Callout>
+
+CockroachDB is not PostgreSQL: it supports schema-only dumps in plain format
+only, not the custom-format data dump SupaCove relies on, so it is **not
+supported**.
 
 ## TLS modes (sslmode)
 

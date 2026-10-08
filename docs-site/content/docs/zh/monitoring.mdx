@@ -37,4 +37,4 @@ description: /metrics 语义、面板口径与告警建议
 1. `time() - supabackup_last_success_timestamp` 超过你配置的**新鲜度阈值**（该值取自任务 `started_at`，是成功快照的近似起点）→ 备份停摆。从未成功过的库不会出现在该家族中，用 `supabackup_databases_protection{state="never"}` 覆盖。
 2. `supabackup_outbox_dead > 0` → 有告警未送达（检查 webhook 可达性）。
 3. `supabackup_staging_bytes` 持续增长 → 目的地故障或回收宽限过长。
-4. 死人开关静默（外部）→ 实例进程死亡或全库失败。
+4. 心跳监控收不到 ping（外部）→ 实例进程死亡或全库失败。

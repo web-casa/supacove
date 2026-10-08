@@ -26,6 +26,16 @@ export const webhooksQuery = queryOptions({
   queryFn: api.webhooks,
 });
 
+export const destinationsQuery = queryOptions({
+  queryKey: ["destinations"],
+  queryFn: api.destinations,
+});
+
+export const databasesQuery = queryOptions({
+  queryKey: ["databases"],
+  queryFn: api.databases,
+});
+
 export const notificationsQuery = queryOptions({
   queryKey: ["notifications"],
   queryFn: api.notifications,

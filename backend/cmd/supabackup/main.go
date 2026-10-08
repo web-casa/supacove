@@ -234,7 +234,7 @@ func runServe() error {
 	// precedence; set via PUT /api/databases/{id}/schedule).
 	if hb := os.Getenv("SB_HEARTBEAT_URL"); hb != "" {
 		runner.SetHeartbeatURL(hb)
-		log.Info("fallback heartbeat configured", "url_prefix", hb[:min(len(hb), 20)])
+		log.Info("fallback heartbeat configured", "enabled", true) // URL content stays out of logs (round-4 P1-04 remainder)
 	}
 	// Restore verification (ADR-004): OFF unless the administrator
 	// explicitly enabled it AND provided the age identity — a deliberate

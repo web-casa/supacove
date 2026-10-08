@@ -40,7 +40,6 @@ type fakeBackend struct {
 	failPutMidStream bool
 	parts            map[string]int // key -> parts uploaded before failure
 	onFirstPut       func()         // hook fired inside the first Put
-	abortCount       int
 	// losePutResponse stores the object but reports a transport error —
 	// the "object committed, response lost" fault-matrix row.
 	losePutResponse bool
@@ -55,13 +54,6 @@ func newFakeBackend(prefix string) *fakeBackend {
 		corrupt: map[string]bool{},
 		parts:   map[string]int{},
 	}
-}
-
-func (f *fakeBackend) AbortMultipart(key string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.parts, key)
-	f.abortCount++
 }
 
 func (f *fakeBackend) Put(ctx context.Context, key string, r io.Reader, size int64) error {
@@ -625,4 +617,97 @@ func backupUUIDOfT(t *testing.T, p *phase3Runner, jobID int64) string {
 		t.Fatal(err)
 	}
 	return uuid
+}
+
+// TestDeleteDestinationRefusedWhileAssigned: deleting a destination that a
+// database still points at used to succeed and break every later backup of
+// that database (drill of 2026-10-08). It is refused until unassigned.
+func TestDeleteDestinationRefusedWhileAssigned(t *testing.T) {
+	p := newPhase3Runner(t)
+	ctx := context.Background()
+	destID := p.addDestination(t, 3)
+	dbID := p.addDatabase(t, destID, "bound")
+
+	if err := p.DeleteDestination(ctx, destID); !errors.Is(err, ErrDestinationInUse) {
+		t.Fatalf("delete while assigned: got %v, want ErrDestinationInUse", err)
+	}
+	if _, err := p.GetDestination(ctx, destID); err != nil {
+		t.Fatalf("a refused delete must leave the destination intact: %v", err)
+	}
+	d, err := GetDatabase(p.store.DB, dbID)
+	if err != nil || d.DestinationID == nil || *d.DestinationID != destID {
+		t.Fatalf("database view must expose its destination: %+v err=%v", d, err)
+	}
+
+	if err := p.AssignDestination(ctx, dbID, 0); err != nil {
+		t.Fatalf("unassign: %v", err)
+	}
+	if d, _ := GetDatabase(p.store.DB, dbID); d.DestinationID != nil {
+		t.Fatalf("an unassigned database must report no destination, got %d", *d.DestinationID)
+	}
+	if err := p.DeleteDestination(ctx, destID); err != nil {
+		t.Fatalf("delete after unassign: %v", err)
+	}
+	if err := p.DeleteDestination(ctx, destID); !errors.Is(err, ErrDestinationNotFound) {
+		t.Fatalf("second delete: got %v, want ErrDestinationNotFound", err)
+	}
+}
+
+// TestGetDestinationCarriesTimestamps: the create response is built from
+// GetDestination and used to report createdAt/updatedAt as 0.
+func TestGetDestinationCarriesTimestamps(t *testing.T) {
+	p := newPhase3Runner(t)
+	d, err := p.GetDestination(context.Background(), p.addDestination(t, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := d.View(); v.CreatedAt == 0 || v.UpdatedAt == 0 {
+		t.Fatalf("timestamps missing from the view: %+v", v)
+	}
+}
+
+// TestAssignDestinationRequiresLiveDestination: the assignment UPDATE itself
+// carries the liveness condition, so a delete racing the pre-check cannot
+// leave a database bound to a deleted destination.
+func TestAssignDestinationRequiresLiveDestination(t *testing.T) {
+	p := newPhase3Runner(t)
+	ctx := context.Background()
+	live := p.addDestination(t, 3)
+	dbID := p.addDatabase(t, live, "db")
+	gone, err := p.CreateDestination(ctx, Destination{
+		Name: "gone", Platform: "s3", Region: "test", Bucket: "bucket",
+		AccessKey: "AK", SecretKey: "SK", KeepRemote: 1,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.AssignDestination(ctx, dbID, gone); err != nil {
+		t.Fatalf("assign to a live destination: %v", err)
+	}
+	// The interleaving: the destination disappears after the pre-check. The
+	// same UPDATE the runner issues must then match no row.
+	if _, err := p.store.DB.Exec(`UPDATE databases SET destination_id = ? WHERE id = ?`, live, dbID); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.DeleteDestination(ctx, gone); err != nil {
+		t.Fatalf("delete unassigned: %v", err)
+	}
+	res, err := p.store.DB.Exec(`
+		UPDATE databases SET destination_id = ?1
+		WHERE id = ?2 AND deleted_at IS NULL
+		  AND (?1 IS NULL OR EXISTS (SELECT 1 FROM destinations
+		                             WHERE destinations.id = ?1
+		                             AND destinations.deleted_at IS NULL))`, gone, dbID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := res.RowsAffected(); n != 0 {
+		t.Fatal("the guarded UPDATE bound a database to a deleted destination")
+	}
+	if err := p.AssignDestination(ctx, dbID, gone); !errors.Is(err, ErrDestinationNotFound) {
+		t.Fatalf("assign to a deleted destination: got %v, want ErrDestinationNotFound", err)
+	}
+	if d, _ := GetDatabase(p.store.DB, dbID); d.DestinationID == nil || *d.DestinationID != live {
+		t.Fatalf("the database must keep its live destination, got %v", d.DestinationID)
+	}
 }

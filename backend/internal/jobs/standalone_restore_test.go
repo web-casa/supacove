@@ -39,6 +39,23 @@ func TestStandaloneRestoreWithoutApplicationState(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ci0, perr := pgclient.ParseURI(uri)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	tr, terr := pgclient.Test(context.Background(), ci0)
+	if terr != nil {
+		t.Fatalf("probe server: %v", terr)
+	}
+	// Skip when the host cannot supply a pg_dump as new as the server —
+	// otherwise "environment gap" would surface as a code failure
+	// (fresh-review P2-1).
+	staging := t.TempDir()
+	cfg := dumper.Config{StagingDir: staging}
+	if _, _, _, cerr := cfg.FindClient(tr.ServerMajor); cerr != nil {
+		t.Skipf("no host pg_dump for server major %d: %v", tr.ServerMajor, cerr)
+	}
+
 	// --- the ONLY key material: generated and stored OUTSIDE any app state ---
 	identity, recipient, err := agekey.Generate()
 	if err != nil {
@@ -46,12 +63,10 @@ func TestStandaloneRestoreWithoutApplicationState(t *testing.T) {
 	}
 
 	// --- produce the artifact with the real dump kernel, no Runner/Store ---
-	staging := t.TempDir()
-	cfg := dumper.Config{StagingDir: staging}
 	res, rerr := cfg.Run(context.Background(), 9001, dumper.Target{
 		Conn:        ci,
 		Recipient:   recipient,
-		ServerMajor: 18, // matches the postgres:18-alpine test container (m1_test.go)
+		ServerMajor: tr.ServerMajor, // probed, exactly like the production path
 	})
 	if rerr != nil {
 		t.Fatalf("standalone dump: %v", rerr)

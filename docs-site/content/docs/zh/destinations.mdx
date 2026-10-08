@@ -1,0 +1,171 @@
+---
+title: 存储目的地
+description: 把加密备份上传到你自己的 S3、Cloudflare R2 或 Backblaze B2 存储桶，可在控制台或通过 API 配置
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+目的地是你自己的一个存储桶，SupaCove 会把每份加密备份上传到那里。没有配置目的地时，备份只保存在实例的本地磁盘上。
+
+目的地绑定到数据库之后，手动备份和定时备份都会自动使用它。目的地可以在控制台里配置，也可以通过 HTTP API 配置；没有命令行或环境变量的方式。
+
+两种方式都于 2026-10-08 在本地实例上实际执行过，使用 MinIO 作为 S3 兼容存储。Cloudflare R2 和 Backblaze B2 走的是同一套代码，但**我们还没有在真实服务上测试过**。
+
+## 在控制台里配置
+
+打开顶部导航的**存储**。
+
+1. **添加目的地。** 填写平台、存储桶和凭据（[字段](#字段)与 API 相同），点击“测试并添加”。保存之前会先测试存储桶；失败时显示存储服务商的错误信息，不会保存任何内容。
+2. **各数据库的上传位置。** 在第二个面板里为每个数据库选择目的地。选“无”表示备份只留在本实例。更改从下一次备份起生效；该数据库有备份正在运行时会被拒绝。
+
+每个目的地所在的行还有**测试**（写入、读回并删除一个测试对象）、把存储桶与实例记录做比较的**对账**按钮，以及**删除**。仍有数据库上传到该目的地时，删除会被拒绝。
+
+本页余下部分介绍如何通过 API 完成同样的操作。
+
+## 在命令行里登录
+
+API 使用和控制台相同的会话：一个会话 cookie，外加每个修改类请求都要带的 CSRF 令牌。
+
+```bash
+BASE=https://backup.example.com/api
+
+# 1. 登录，cookie 会写入 cookies.txt
+curl -s -c cookies.txt -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<你的密码>"}' \
+  "$BASE/auth/login"
+
+# 2. 从 cookie 文件里取出 CSRF 令牌
+CSRF=$(awk '$6 ~ /sb_csrf$/ {print $7}' cookies.txt)
+```
+
+之后：
+
+- **GET** 请求只需要 `-b cookies.txt`。
+- **POST、PUT、DELETE** 还要加 `-H "X-CSRF-Token: $CSRF"`；带请求体时再加 `-H 'Content-Type: application/json'`。
+
+这一步常见的错误：
+
+| 响应 | 原因 |
+|---|---|
+| `401 unauthenticated` | 没带会话 cookie，或会话已过期（7 天）。重新登录并重新读取 CSRF 令牌。 |
+| `403 csrf` | 缺少 `X-CSRF-Token` 请求头，或令牌属于另一个会话。 |
+| `403 cross_origin` | 请求带了与实例不一致的 `Origin` 请求头。curl 默认不发送，不要自己加。 |
+
+cookie 的名字是 `__Host-sb_session` 和 `__Host-sb_csrf`。只有以 `SB_INSECURE_COOKIE=1` 运行的实例（明文 HTTP 的开发环境）才没有 `__Host-` 前缀。上面的 `awk` 命令两种都能匹配。
+
+## 创建目的地
+
+存储桶必须事先存在，SupaCove 不会替你创建。
+
+```bash
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -d '{
+    "name": "offsite-s3",
+    "platform": "s3",
+    "region": "eu-central-1",
+    "bucket": "my-backups",
+    "prefix": "supacove",
+    "accessKey": "<access key id>",
+    "secretKey": "<secret access key>",
+    "verifyReadback": true,
+    "keepRemote": 10,
+    "keepDays": 0
+  }' \
+  "$BASE/destinations"
+```
+
+保存之前，服务端会往桶里写入一个很小的测试对象，读回来比对，再删除。其中任何一步失败都会返回 `422 diagnostic_test_failed` 并附上存储服务商的错误信息，不会保存任何内容。成功时返回 `201` 和目的地信息，其中包含 `id`。
+
+因此凭据也需要删除权限，保留策略清理本来也需要它。
+
+### 字段
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `name` | 是 | 去掉首尾空格后 1–100 个 UTF-8 字节（一个汉字占三个），不能重名 |
+| `platform` | 否 | `s3`（默认）、`r2` 或 `b2` |
+| `endpoint` | `r2`、`b2` 必填 | `http(s)://host[:port]`，不带路径。`s3` 可不填；对接 S3 兼容服务时填写 |
+| `region` | `b2` 必填 | `s3` 默认 `us-east-1`，`r2` 默认 `auto` |
+| `bucket` | 是 | 合法的 S3 桶名：3–63 个字符，小写字母、数字、点和短横线 |
+| `prefix` | 否 | 字母、数字、`/`、`.`、`_`、`-`；不允许出现 `..`。首尾的斜杠会被去掉，再在末尾补一个。留空表示桶的根目录 |
+| `accessKey`、`secretKey` | 是 | 需要能在该前缀下写入、读取、列出和删除对象 |
+| `keepRemote` | 否 | 每个数据库保留的份数，默认 10，最小 1 |
+| `keepDays` | 否 | 按天数保留的上限；`0`（默认）表示不启用 |
+| `verifyReadback` | 否 | 默认 `true`。会保存并原样返回，见下方说明 |
+
+`keepRemote` 与 `keepDays` 如何生效、哪些备份永远不会被清理，见[计划与保留](/zh/docs/scheduling)。
+
+<Callout title="读回校验无法关闭">
+每次上传后都会从桶里读回密文，并与密文的 SHA-256 比对。这项检查始终执行：`verifyReadback` 会被保存并原样返回，但把它设为 `false` 并不会跳过校验。
+</Callout>
+
+### 凭据如何保存
+
+`secretKey` 在写入数据库之前用实例的主密钥加密；`accessKey` 以明文保存。两者都不会出现在 API 的响应里。主密钥一旦更换，已保存的密钥就无法读取，目的地需要重新创建。
+
+## 绑定到数据库
+
+```bash
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -X PUT -d '{"destinationId": 1}' \
+  "$BASE/databases/1/destination"
+```
+
+用 `GET $BASE/databases` 和 `GET $BASE/destinations` 可以查到各自的 id。一个数据库最多绑定一个目的地。从下一次备份开始，只有密文和清单都提交到桶里之后，任务才算 `succeeded`，此时它的 `remoteState` 为 `committed`。
+
+每份备份在桶里是 `<prefix>backups/` 下的两个对象：密文（`….dump.age`）和清单（`….manifest.json`）。
+
+## 之后的检查
+
+```bash
+# 重新执行一次 写入 / 读取 / 删除 测试
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -X POST "$BASE/destinations/1/test"
+
+# 把桶里的内容和实例的记录做对账
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -X POST "$BASE/destinations/1/reconcile"
+```
+
+对账报告给出 `remoteObjects` 和 `matched` 两个计数，并列出 `orphaned`（桶里有、实例没有记录）、`missing`（有记录、桶里没有）和 `uncommitted` 的对象。它只做比较，不修复也不删除任何东西。
+
+## 下载远端备份
+
+```bash
+curl -s -b cookies.txt "$BASE/tasks/7/download-url"
+```
+
+响应里是密文的预签名地址，有效期 15 分钟。这个地址指向目的地自己的 endpoint，所以下载的机器必须能访问到它。
+
+## 修改目的地
+
+没有更新接口。新建一个目的地，把数据库改绑过去，再删除旧的。
+
+## 删除目的地
+
+先解绑，再删除：
+
+```bash
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -X PUT -d '{"destinationId": null}' \
+  "$BASE/databases/1/destination"
+
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -X DELETE "$BASE/destinations/1"
+```
+
+删除做了什么、没做什么：
+
+- 仍有数据库绑定该目的地时会被拒绝，返回 `409 in_use`；有上传正在进行时返回 `409 upload_in_flight`。
+- 它把目的地从实例里移除。**桶里的对象原样保留。**
+- 已经上传到那里的备份不能再通过 `download-url` 获取，该接口会返回 `409 destination_removed`。需要直接从桶里取。
+
+## 错误码
+
+| 状态码 | 错误码 | 含义 |
+|---|---|---|
+| 400 | `invalid_request` | 某个字段没通过校验，消息里会指明 |
+| 409 | `name_exists` | 已有同名的目的地 |
+| 422 | `diagnostic_test_failed` | 测试对象无法写入、读回或删除，附带服务商的错误信息 |
+| 409 | `not_assignable` | 绑定失败，例如目的地 id 不存在 |
+| 409 | `in_use` | 仍有数据库绑定该目的地，拒绝删除 |
+| 409 | `upload_in_flight` | 有上传在进行，拒绝删除 |
+| 409 | `destination_removed` | 对目的地已被删除的备份请求 `download-url` |
+| 404 | `not_found` | 目的地 id 不存在 |

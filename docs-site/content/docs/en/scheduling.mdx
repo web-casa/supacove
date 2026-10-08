@@ -28,7 +28,7 @@ successful backup and the newest restore-verified backup are always protected.
 Artifacts of failed/canceled/interrupted jobs are reclaimed after
 `SB_FAILED_ARTIFACT_TTL_HOURS`.
 
-**Remote**: per-destination days/copies, subject to the same two anchors:
+**Remote**: days/copies set per [destination](/docs/destinations), subject to the same two anchors:
 
 1. the newest committed backup (the anchor) is never auto-deleted;
 2. the newest restore-verified backup is never auto-deleted.

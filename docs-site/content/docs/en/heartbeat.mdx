@@ -5,7 +5,7 @@ description: "External monitoring integration: success ping, fail ping, age gate
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-supabackup integrates with dead-man switches such as healthchecks.io: after
+SupaCove integrates with dead-man switches such as healthchecks.io: after
 every successful AND fresh backup it pings your URL; production-path failures
 ping `<url>/fail`.
 
@@ -30,12 +30,12 @@ In the database's "Schedule & heartbeat" drawer:
 3. the time from THIS run's export start (dumpStart) to now is within
    period + grace — not the completion time, and not a poll of history: a
    very long successful run may legitimately not ping;
-4. with a remote destination configured: that backup must be remote-committed
+4. with a remote [destination](/docs/destinations) configured: that backup must be remote-committed
    (local-only deployments are exempt).
 
 Fail pings bypass the age gate (the failure IS the signal) but still respect
 `-`. Your external monitor's alerting period is configured on the monitor
-side; supabackup only pings.
+side; SupaCove only pings.
 
 <Callout>
 One URL expresses "this monitor is alive". With several databases sharing the

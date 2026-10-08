@@ -1,0 +1,230 @@
+---
+title: Back up a Supabase database
+description: Scheduled, encrypted pg_dump backups of a Supabase Postgres database with SupaCove, what they contain, and how to restore one
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+
+To back up a Supabase database with SupaCove, register the project's
+**session pooler** connection string, set a cron schedule, and keep the age
+identity offline. Each run is a full `pg_dump` of the Postgres database,
+encrypted with age before it is written anywhere. You restore it with the
+recovery kit onto a PostgreSQL server that has Supabase's extensions.
+
+<Callout type="warn" title="Tested on the Supabase image, not on a hosted project">
+Backup and restore were run on the `supabase/postgres` Docker image on
+2026-10-08, and the restore section reports exactly what happened. **We
+have not tested against a hosted Supabase project.** Unverified there: the
+pooler and direct connections, what a hosted project's archive contains
+beyond the image's defaults, and restoring such an archive.
+</Callout>
+
+## What Supabase gives you
+
+Supabase's own documentation states that Free Plan projects do not get
+automatic backups and recommends exporting the data regularly and keeping
+off-site copies. Paid plans include daily backups: the last 7 days on Pro,
+14 days on Team, and up to 30 days on Enterprise.
+
+Source: [Supabase — Database Backups](https://supabase.com/docs/guides/platform/backups),
+checked on 2026-10-08. Plans change; read the source before relying on these
+numbers.
+
+SupaCove fills a different role on each side of that line:
+
+- **Free Plan**: it is the scheduled backup the plan does not include.
+- **Paid plans**: it is an additional copy that you hold yourself, outside
+  the platform, encrypted with a key only you have.
+
+## What the backup contains
+
+Each backup is one full `pg_dump` of the Postgres database in custom format.
+
+| Included | Not included |
+|---|---|
+| Every user schema present at dump time | Storage file contents (they live in object storage, not in the database) |
+| The managed `auth` schema: auth user records | Edge Function code |
+| The managed `storage` schema: object metadata | Auth and Storage service configuration |
+| | Platform-level project settings |
+
+<Callout type="warn" title="This is a database backup, not a project backup">
+Restoring one of these backups gives you the database back. It does not
+recreate a Supabase project. Uploaded files, functions and project settings
+need their own backup.
+</Callout>
+
+## Before you start
+
+- A running SupaCove instance. The [Quickstart](/docs/quickstart) takes you
+  through building the image, starting it and creating the admin account.
+- The age identity created and stored offline (Quickstart, step 4). Without
+  it no backup can be decrypted.
+- The Supabase database password.
+
+## Set it up
+
+<Steps>
+  <Step>
+    ### Copy the session pooler connection string
+
+    In the Supabase project dashboard open **Connect**, then the
+    **Connection string** tab with type **URI**. Copy **Session pooler**
+    (port 5432) and replace `[YOUR-PASSWORD]` with the database password.
+
+    The session pooler works over IPv4. The direct connection also works,
+    but it is IPv6-only unless the project has the IPv4 add-on.
+
+    **Do not use the Transaction pooler (port 6543).** `pg_dump` cannot run
+    through it.
+  </Step>
+  <Step>
+    ### Register the database
+
+    In the console choose "Add database", pick Supabase and paste the
+    string. A pre-flight check flags pooled endpoints and a missing TLS mode
+    straight away, and the server runs a real connection test before it
+    saves anything. The string is stored encrypted and is never shown again.
+
+    Details: [Registering databases](/docs/databases).
+  </Step>
+  <Step>
+    ### Take the first backup
+
+    Press "Back up now" on the database row. The job appears under Recent
+    backups. `succeeded` means the dump, the encryption and the commit all
+    completed; anything else is reported as `failed` with an error class and
+    a first troubleshooting step.
+
+    Details: [Backups & downloads](/docs/backups).
+  </Step>
+  <Step>
+    ### Schedule it
+
+    Open the "Schedule & heartbeat" drawer for the database and enter a cron
+    expression, for example `0 3 * * *` for every day at 03:00, with an IANA
+    time zone. Set a freshness threshold in hours: once the newest successful
+    backup is older than that, the database is marked EXPIRED and a
+    `backup_expired` event is sent to your webhooks.
+
+    Details: [Schedules & retention](/docs/scheduling),
+    [Notification webhooks](/docs/notifications).
+  </Step>
+</Steps>
+
+## Restore a backup
+
+A Supabase backup's recovery kit restores with its **`supabase` profile**.
+A full Supabase archive does not restore cleanly as it is, so the profile
+checks the target first and leaves out the archive entries that are known
+to fail.
+
+### What you need
+
+- **A PostgreSQL server with Supabase's extensions and roles**, such as the
+  `supabase/postgres` image. Pick its major version from the manifest: at
+  least `backup.toolVersions.clientMajor`, the major version of the
+  `pg_dump` that wrote the archive. That is usually your project's own
+  major version.
+- **A new, empty database** on that server. Do not use the image's own
+  `postgres` database, which already holds the Supabase schemas.
+- **A superuser connection.** On the image that is `supabase_admin`. The
+  `postgres` role cannot write to the vault tables.
+- `age`, `pg_restore`, `psql` and `sha256sum` on the machine you run the
+  kit from, with `pg_restore` at least `clientMajor` too.
+
+### Run the kit
+
+Download the recovery kit and the ciphertext for the job, then:
+
+```bash
+export PGPASSWORD='<superuser password>'
+psql 'postgresql://supabase_admin@host:5432/postgres' -c 'CREATE DATABASE restored'
+
+AGE_IDENTITY_FILE=/path/identity.txt \
+sh restore-job7.sh 'postgresql://supabase_admin@host:5432/restored' backup-job7.dump.age
+```
+
+The kit verifies the ciphertext SHA-256 and refuses a non-empty target, as
+every kit does. With the `supabase` profile it also:
+
+1. refuses a connection that is not a superuser, before decrypting;
+2. reads the archive's extension list and stops, **before writing
+   anything**, if the target server cannot install one of them, naming the
+   missing ones;
+3. leaves out the grant on `graphql_public.graphql`. That function is
+   created by a Supabase event trigger and is not stored in the archive, so
+   the grant has nothing to attach to;
+4. runs `pg_restore --exit-on-error` on everything else, so any other error
+   still stops the restore;
+5. checks the table count against the manifest.
+
+It prints how many entries it left out.
+
+### What we tested
+
+On 2026-10-08 we ran the whole path on the `supabase/postgres:15.8.1.085`
+image: a database holding a table with row level security, grants to `anon`
+and `authenticated`, a `vector` column and a second schema was backed up by
+SupaCove, uploaded to S3-compatible storage, downloaded, and restored with
+its kit into a second server running the same image.
+
+| Run | Result |
+|---|---|
+| Kit, as `postgres` | Refused: not a superuser. Nothing decrypted |
+| Kit, as `supabase_admin` | **Completed.** One entry left out, 11 tables |
+| Kit, against plain PostgreSQL 16 | Refused: `pg_graphql`, `pgjwt`, `supabase_vault` and `vector` are not installable there. Nothing written |
+| Kit with `SUPABACKUP_PROFILE=generic` | Stopped inside `pg_restore`, as an unedited Supabase archive does |
+
+After the completed run the 500 test rows matched the source by checksum,
+row level security and its policy were in place, the grants to `anon`,
+`authenticated` and `service_role` were restored, and so were the `auth`
+tables and all eight extensions.
+
+A hosted project's archive may hold entries this image does not produce.
+If the kit stops on one, read the `pg_restore` error it prints: the restore
+can still be finished by hand with
+`age --decrypt` and `pg_restore --no-owner` without `--exit-on-error`,
+reading every reported error before you trust the result.
+
+### Which backups get this profile
+
+Databases whose host is a Supabase address, and databases you registered
+with the platform set to Supabase. Register a self-hosted Supabase as
+Supabase to get it. `SUPABACKUP_PROFILE=supabase` or `generic` in the
+environment overrides the kit's default.
+
+<Callout type="warn" title="Not a path back into a new Supabase project">
+This restores the database onto a server you run. Restoring into a fresh
+Supabase project conflicts with its managed schemas, system roles and
+hosted extensions; follow Supabase's own guide for moving between projects.
+</Callout>
+
+Details: [Restore & disaster recovery](/docs/restore).
+
+## Common problems
+
+- **The connection test fails or the job fails with `network`.** Check that
+  the string is the session pooler or the direct connection, not the
+  transaction pooler on port 6543.
+- **The direct connection does not resolve.** It is IPv6-only without the
+  IPv4 add-on. Use the session pooler instead.
+- **The job fails with `client_version`.** No bundled `pg_dump` matches the
+  server's major version. The image ships clients for PostgreSQL 14 to 18;
+  changing the host or port does not help.
+- **The kit says the target cannot install some extensions.** Restore onto
+  the `supabase/postgres` image, or install the named extensions first.
+- **The kit says it needs a superuser.** Connect as `supabase_admin` on the
+  image, not as `postgres`.
+- **`pg_restore` stops at `unrecognized configuration parameter`.** The
+  target server is older than the `pg_dump` that wrote the archive. Use a
+  server of at least `backup.toolVersions.clientMajor`.
+
+More: [Troubleshooting](/docs/troubleshooting).
+
+## What this does not do
+
+- It does not stop a project from being paused, and it cannot back up a
+  database it can no longer connect to.
+- The software is free. The machine that runs it, the object storage and the
+  network transfer are not.

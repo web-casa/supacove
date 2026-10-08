@@ -43,6 +43,16 @@ func requireMinIO(t *testing.T) *Store {
 			return
 		}
 		minioContainer = name
+		// Register reclamation NOW: a container that started but never
+		// became ready must not outlive the process (fresh-review P3-3 —
+		// the t.Cleanup below only registers after successful init).
+		containerName := name
+		defer func() {
+			if minioErr != nil || minioClient == nil {
+				_ = exec.Command("docker", "rm", "-f", containerName).Run()
+				minioContainer = ""
+			}
+		}()
 		portOut, err := exec.Command("docker", "port", name, "9000").Output()
 		if err != nil {
 			minioErr = fmt.Errorf("docker port: %w", err)
@@ -102,8 +112,6 @@ var (
 	minioContainer string
 	minioStopped   bool
 )
-
-//go:fix inline
 
 func TestMinIOEndToEnd(t *testing.T) {
 	s := requireMinIO(t)

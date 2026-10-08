@@ -178,6 +178,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # docs pages take their "last updated" date from git history
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -192,6 +194,9 @@ jobs:
       - name: build
         working-directory: docs-site
         run: npx next build
+      - name: smoke (routing, redirects, 404, share image)
+        working-directory: docs-site
+        run: node scripts/smoke.mjs
 
   image:
     runs-on: ubuntu-latest
@@ -259,7 +264,7 @@ jobs:
           docker stop -t 15 sb-ci >/dev/null
           test "$(docker inspect --format '{{.State.ExitCode}}' sb-ci)" = "0"
       - name: trivy image scan (CRITICAL/HIGH, unfixed ignored)
-        uses: aquasecurity/trivy-action@0.33.0
+        uses: aquasecurity/trivy-action@v0.33.0
         with:
           image-ref: supabackup:ci
           format: table

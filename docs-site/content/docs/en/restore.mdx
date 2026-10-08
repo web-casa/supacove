@@ -3,6 +3,7 @@ title: Restore & disaster recovery
 description: Recovery kits, standalone restores without the metadata database, and the three key incidents
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
 ## Routine restore: the recovery kit
@@ -20,6 +21,14 @@ EQUALITY and print it. A failed restore may leave partial writes: clean the
 target before retrying. Create the target database first (`createdb`). The
 manifest's `backupId` is the instance-local id (`job-N`), not the bucket object
 key (objects are keyed by the backup UUID).
+
+<Callout title="Supabase backups">
+Their kit restores with a `supabase` profile: it needs a server that has
+Supabase's extensions, a new empty database and a superuser connection, and
+it checks all three before writing anything. `SUPABACKUP_PROFILE=generic`
+or `supabase` overrides a kit's default. Walkthrough:
+[Back up a Supabase database](/docs/guides/supabase-backup#restore-a-backup).
+</Callout>
 
 ## Standalone restore: without this instance
 
@@ -41,20 +50,26 @@ prerequisite for recovery.
 ## Key incidents (four cases)
 
 <Steps>
-  <Step title="Master secret file missing, age identity intact">
+  <Step>
+    ### Master secret file missing, age identity intact
+
     Ciphertext stays decryptable. The instance **generates a fresh master
     secret** and keeps running — stored connection strings and destination
     credentials become unreadable and must be re-registered. Try to recover
     the original key from backups before rebuilding anything.
   </Step>
-  <Step title="Master secret corrupted / bad permissions / replaced">
+  <Step>
+    ### Master secret corrupted / bad permissions / replaced
+
     Corruption and permission problems refuse startup (fail closed): repair
     the file first. A key that was merely replaced (valid format, different
     value) lets the instance start, but every old credential fails to decrypt
     — equivalent to losing it; rebuilding then requires re-entering database
     connection strings and destination credentials and re-binding them.
   </Step>
-  <Step title="Age identity lost, master secret intact">
+  <Step>
+    ### Age identity lost, master secret intact
+
     Existing ciphertext is unrecoverable. The correct path for future
     protection: preserve the old data directory and recipient record **as
     audit evidence (do not reuse them)**, then on a NEW instance (empty
@@ -66,7 +81,9 @@ prerequisite for recovery.
     scenario-1 recipe, valid only while the old identity still works) would
     keep producing backups nobody can decrypt.
   </Step>
-  <Step title="Both lost">
+  <Step>
+    ### Both lost
+
     Existing backups are unrecoverable. Immediately: pause the old instance,
     preserve the data directory and bucket objects (for audit), then complete
     `age init` + destination credentials + database re-registration on a new

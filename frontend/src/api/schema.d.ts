@@ -277,7 +277,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Soft-delete a destination (refused while an upload is in flight). */
+        /** Soft-delete a destination (refused while a database uses it or an upload is in flight). */
         delete: operations["deleteDestination"];
         options?: never;
         head?: never;
@@ -832,6 +832,11 @@ export interface components {
             serverVersion: string;
             /** @description Persisted TLS mode for this target (round-1 review P1-09 —持续可见). */
             sslMode: string;
+            /**
+             * Format: int64
+             * @description The storage destination this database uploads to. Absent for local-only backups.
+             */
+            destinationId?: number;
             /** @description Registration-time warning when the endpoint looks like a pooled connection that pg_dump cannot use (Supabase transaction pooler, Neon '-pooler' endpoint). Present on the create response when detected; absent otherwise. */
             poolingWarning?: string;
             lastTask?: components["schemas"]["Task"];
@@ -1654,7 +1659,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Upload in flight. */
+            /** @description Still assigned to a database (`in_use`) or an upload is in flight (`upload_in_flight`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1804,7 +1809,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Not remotely committed. */
+            /** @description Not remotely committed (`not_remotely_committed`), or its destination was deleted (`destination_removed`). */
             409: {
                 headers: {
                     [name: string]: unknown;

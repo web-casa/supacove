@@ -479,7 +479,7 @@ paths:
   /destinations/{id}:
     delete:
       operationId: deleteDestination
-      summary: Soft-delete a destination (refused while an upload is in flight).
+      summary: Soft-delete a destination (refused while a database uses it or an upload is in flight).
       parameters:
         - name: id
           in: path
@@ -495,7 +495,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: Upload in flight.
+          description: Still assigned to a database (`in_use`) or an upload is in flight (`upload_in_flight`).
           content:
             application/json:
               schema:
@@ -609,7 +609,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: Not remotely committed.
+          description: Not remotely committed (`not_remotely_committed`), or its destination was deleted (`destination_removed`).
           content:
             application/json:
               schema:
@@ -1427,6 +1427,10 @@ components:
         sslMode:
           type: string
           description: Persisted TLS mode for this target (round-1 review P1-09 —持续可见).
+        destinationId:
+          type: integer
+          format: int64
+          description: The storage destination this database uploads to. Absent for local-only backups.
         poolingWarning:
           type: string
           description: >

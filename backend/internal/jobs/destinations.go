@@ -45,6 +45,8 @@ type Destination struct {
 	VerifyReadback bool
 	KeepRemote     int
 	KeepDays       int
+	CreatedAt      int64
+	UpdatedAt      int64
 }
 
 // View returns the API-safe projection.
@@ -53,7 +55,7 @@ func (d *Destination) View() *DestinationView {
 		ID: d.ID, Name: d.Name, Platform: d.Platform, Endpoint: d.Endpoint,
 		Region: d.Region, Bucket: d.Bucket, Prefix: d.Prefix,
 		VerifyReadback: d.VerifyReadback, KeepRemote: d.KeepRemote,
-		KeepDays: d.KeepDays,
+		KeepDays: d.KeepDays, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
 	}
 }
 
@@ -81,6 +83,10 @@ const destColumns = `id, name, platform, endpoint, region, bucket, prefix,
 
 var ErrDestinationNotFound = errors.New("destination not found")
 var ErrDestinationNameExists = errors.New("destination name already exists")
+
+// ErrDestinationInUse refuses deleting a destination that databases still
+// point at: their backups would fail from then on.
+var ErrDestinationInUse = errors.New("destination is still assigned to a database")
 
 // CreateDestination validates, live-tests, then stores a new destination.
 // The live diagnostic test runs BEFORE the INSERT: an unreachable or
@@ -132,11 +138,10 @@ func (r *Runner) GetDestination(ctx context.Context, id int64) (*Destination, er
 	var d Destination
 	var enc string
 	var verify int
-	var createdAt, updatedAt int64
 	err := r.authDB.QueryRowContext(ctx,
 		`SELECT `+destColumns+` FROM destinations WHERE id = ? AND deleted_at IS NULL`, id).
 		Scan(&d.ID, &d.Name, &d.Platform, &d.Endpoint, &d.Region, &d.Bucket, &d.Prefix,
-			&d.AccessKey, &enc, &verify, &d.KeepRemote, &d.KeepDays, &createdAt, &updatedAt)
+			&d.AccessKey, &enc, &verify, &d.KeepRemote, &d.KeepDays, &d.CreatedAt, &d.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDestinationNotFound
 	}
@@ -176,13 +181,18 @@ func (r *Runner) ListDestinations(ctx context.Context) ([]*DestinationView, erro
 }
 
 // DeleteDestination soft-deletes, refusing while an upload for this
-// destination is in flight (round-2 phase-2 review pattern: atomic guard).
+// destination is in flight (round-2 phase-2 review pattern: atomic guard)
+// or while a database is still assigned to it. Both guards sit in the same
+// UPDATE, so a concurrent assignment cannot slip in between.
 func (r *Runner) DeleteDestination(ctx context.Context, id int64) error {
 	res, err := r.authDB.ExecContext(ctx, `
 		UPDATE destinations SET
 		  name = name || ' (deleted #' || id || '-' || lower(hex(randomblob(6))) || ')',
 		  deleted_at = strftime('%s','now'), updated_at = strftime('%s','now')
 		WHERE id = ? AND deleted_at IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM databases
+		                  WHERE databases.destination_id = destinations.id
+		                  AND databases.deleted_at IS NULL)
 		  AND NOT EXISTS (SELECT 1 FROM jobs
 		                  WHERE jobs.destination_id = destinations.id
 		                  AND jobs.status IN ('pending','running'))`, id)
@@ -190,9 +200,14 @@ func (r *Runner) DeleteDestination(ctx context.Context, id int64) error {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		var live int
-		if err := r.authDB.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM destinations WHERE id = ? AND deleted_at IS NULL`, id).Scan(&live); err == nil && live == 1 {
+		var live, assigned int
+		if err := r.authDB.QueryRowContext(ctx, `
+			SELECT (SELECT COUNT(*) FROM destinations WHERE id = ? AND deleted_at IS NULL),
+			       (SELECT COUNT(*) FROM databases WHERE destination_id = ? AND deleted_at IS NULL)`,
+			id, id).Scan(&live, &assigned); err == nil && live == 1 {
+			if assigned > 0 {
+				return ErrDestinationInUse
+			}
 			return errors.New("an upload for this destination is in flight")
 		}
 		return ErrDestinationNotFound
@@ -275,9 +290,16 @@ func (r *Runner) AssignDestination(ctx context.Context, dbID, destID int64) erro
 	if destID != 0 {
 		destParam = destID
 	}
+	// The destination must still be live WHEN the row is written: the check
+	// above and this UPDATE are separate statements, and a delete landing
+	// between them would otherwise bind the database to a deleted
+	// destination. Clearing (NULL) needs no such condition.
 	res, err := r.authDB.ExecContext(ctx, `
-		UPDATE databases SET destination_id = ?, updated_at = strftime('%s','now')
-		WHERE id = ? AND deleted_at IS NULL
+		UPDATE databases SET destination_id = ?1, updated_at = strftime('%s','now')
+		WHERE id = ?2 AND deleted_at IS NULL
+		  AND (?1 IS NULL OR EXISTS (SELECT 1 FROM destinations
+		                             WHERE destinations.id = ?1
+		                             AND destinations.deleted_at IS NULL))
 		  AND NOT EXISTS (SELECT 1 FROM jobs
 		                  WHERE jobs.database_id = databases.id
 		                  AND jobs.status IN ('pending','running'))`, destParam, dbID)
@@ -285,6 +307,11 @@ func (r *Runner) AssignDestination(ctx context.Context, dbID, destID int64) erro
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
+		if destID != 0 {
+			if _, gerr := r.GetDestination(ctx, destID); gerr != nil {
+				return gerr // deleted in the meantime
+			}
+		}
 		return errors.New("database not found or a job is active")
 	}
 	return nil

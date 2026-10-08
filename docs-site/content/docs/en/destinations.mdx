@@ -1,0 +1,215 @@
+---
+title: Storage destinations
+description: Send encrypted backups to your own S3, Cloudflare R2 or Backblaze B2 bucket, from the console or through the API
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A destination is a bucket of yours that SupaCove uploads each encrypted
+backup to. Without one, backups stay on the instance's local disk only.
+
+Once a destination is bound to a database, manual and scheduled backups
+use it automatically. You configure destinations in the console or through
+the HTTP API; there is no CLI command or environment variable for them.
+
+Both were run against a local instance with MinIO as the S3-compatible
+store on 2026-10-08. Cloudflare R2 and Backblaze B2 use the same code path
+but **have not been tested by us against the real services**.
+
+## In the console
+
+Open **Storage** in the top bar.
+
+1. **Add destination.** Fill in the platform, bucket and credentials (the
+   [fields](#fields) are the same as in the API) and press "Test and add".
+   The bucket is tested before anything is saved; a failure shows the
+   storage provider's error and saves nothing.
+2. **Where each database uploads.** Pick a destination for each database
+   in the second panel. "None" keeps its backups on the instance only. The
+   change applies from the next backup and is refused while a backup of
+   that database is running.
+
+Each destination row also has **Test** (write, read back and delete a test
+object), a **reconcile** button that compares the bucket with what the
+instance has recorded, and **remove**. Removing is refused while a database
+still uploads there.
+
+The rest of this page describes the same operations through the API.
+
+## Sign in from the shell
+
+The API uses the same session as the console: a session cookie, plus a CSRF
+token on every request that changes something.
+
+```bash
+BASE=https://backup.example.com/api
+
+# 1. Sign in. The cookies land in cookies.txt.
+curl -s -c cookies.txt -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<your password>"}' \
+  "$BASE/auth/login"
+
+# 2. Read the CSRF token out of the cookie file.
+CSRF=$(awk '$6 ~ /sb_csrf$/ {print $7}' cookies.txt)
+```
+
+After that:
+
+- **GET** requests need only `-b cookies.txt`.
+- **POST, PUT and DELETE** also need `-H "X-CSRF-Token: $CSRF"`, and
+  `-H 'Content-Type: application/json'` when they carry a body.
+
+Things that go wrong here:
+
+| Response | Cause |
+|---|---|
+| `401 unauthenticated` | No session cookie, or the session expired (7 days). Sign in again and re-read the CSRF token. |
+| `403 csrf` | The `X-CSRF-Token` header is missing or belongs to another session. |
+| `403 cross_origin` | The request carried an `Origin` header that does not match the instance. curl sends none by default; do not add one. |
+
+The cookies are named `__Host-sb_session` and `__Host-sb_csrf`. Only an
+instance running with `SB_INSECURE_COOKIE=1` (plain-HTTP development) drops
+the `__Host-` prefix. The `awk` line above matches both.
+
+## Create a destination
+
+The bucket must already exist. SupaCove does not create buckets.
+
+```bash
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -d '{
+    "name": "offsite-s3",
+    "platform": "s3",
+    "region": "eu-central-1",
+    "bucket": "my-backups",
+    "prefix": "supacove",
+    "accessKey": "<access key id>",
+    "secretKey": "<secret access key>",
+    "verifyReadback": true,
+    "keepRemote": 10,
+    "keepDays": 0
+  }' \
+  "$BASE/destinations"
+```
+
+Before anything is saved, the server writes a small test object into the
+bucket, reads it back, compares it and deletes it. If any of those steps
+fails, the response is `422 diagnostic_test_failed` with the storage
+provider's error, and nothing is stored. A `201` returns the destination,
+including its `id`.
+
+The credentials therefore need delete permission too, which retention
+needs anyway.
+
+### Fields
+
+| Field | Required | Notes |
+|---|---|---|
+| `name` | yes | 1–100 bytes of UTF-8 after trimming spaces (a CJK character takes three), unique |
+| `platform` | no | `s3` (default), `r2` or `b2` |
+| `endpoint` | for `r2` and `b2` | `http(s)://host[:port]`, no path. Optional for `s3`: set it for an S3-compatible service |
+| `region` | for `b2` | Defaults to `us-east-1` on `s3` and `auto` on `r2` |
+| `bucket` | yes | A valid S3 bucket name: 3–63 characters, lowercase letters, digits, dots and dashes |
+| `prefix` | no | Letters, digits, `/`, `.`, `_` and `-`; `..` is rejected. Leading and trailing slashes are trimmed and one trailing slash is added. Empty means the bucket root |
+| `accessKey`, `secretKey` | yes | Credentials that can put, get, list and delete objects under the prefix |
+| `keepRemote` | no | Copies to keep per database, default 10, minimum 1 |
+| `keepDays` | no | Age limit in days; `0` (default) turns it off |
+| `verifyReadback` | no | Default `true`. Stored and returned; see the note below |
+
+How `keepRemote` and `keepDays` are applied, and which backups are never
+deleted: [Schedules & retention](/docs/scheduling).
+
+<Callout title="The read-back check cannot be switched off">
+Every upload is read back from the bucket and checked against the SHA-256
+of the ciphertext. That check always runs: `verifyReadback` is stored and
+returned, but setting it to `false` does not skip it.
+</Callout>
+
+### How credentials are kept
+
+`secretKey` is encrypted with the instance's master secret before it is
+written to the database. `accessKey` is stored as plain text. Neither is
+ever returned by the API. If the master secret changes, the stored secret
+can no longer be read and the destination has to be created again.
+
+## Bind it to a database
+
+```bash
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -X PUT -d '{"destinationId": 1}' \
+  "$BASE/databases/1/destination"
+```
+
+`GET $BASE/databases` and `GET $BASE/destinations` list the ids. A database
+has at most one destination. From the next backup on, a job counts as
+`succeeded` only after the ciphertext and its manifest are committed to the
+bucket; its `remoteState` is then `committed`.
+
+In the bucket each backup is two objects under `<prefix>backups/`: the
+ciphertext (`….dump.age`) and its manifest (`….manifest.json`).
+
+## Check it later
+
+```bash
+# Run the write / read / delete test again.
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -X POST "$BASE/destinations/1/test"
+
+# Compare the bucket with what the instance has recorded.
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -X POST "$BASE/destinations/1/reconcile"
+```
+
+The reconcile report counts `remoteObjects` and `matched`, and lists
+`orphaned` (in the bucket, unknown to the instance), `missing` (recorded,
+not in the bucket) and `uncommitted` objects. It only compares. It does not
+repair or delete anything.
+
+## Download a remote backup
+
+```bash
+curl -s -b cookies.txt "$BASE/tasks/7/download-url"
+```
+
+The response holds a presigned URL for the ciphertext, valid for 15
+minutes. The URL points at the destination's own endpoint, so it has to be
+reachable from the machine that downloads.
+
+## Change a destination
+
+There is no update call. Create a new destination, bind the database to
+it, then delete the old one.
+
+## Remove a destination
+
+Unbind first, then delete:
+
+```bash
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -X PUT -d '{"destinationId": null}' \
+  "$BASE/databases/1/destination"
+
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -X DELETE "$BASE/destinations/1"
+```
+
+What deletion does and does not do:
+
+- It is refused with `409 in_use` while a database is still bound to the
+  destination, and with `409 upload_in_flight` while an upload to it is
+  running.
+- It removes the destination from the instance. **The objects in the bucket
+  are left untouched.**
+- Backups already uploaded there can no longer be fetched through
+  `download-url`, which answers `409 destination_removed`. Get them from
+  the bucket directly.
+
+## Error codes
+
+| Status | Code | Meaning |
+|---|---|---|
+| 400 | `invalid_request` | A field failed validation; the message names it |
+| 409 | `name_exists` | Another destination has that name |
+| 422 | `diagnostic_test_failed` | The test object could not be written, read back or deleted; the provider's error is included |
+| 409 | `not_assignable` | Binding failed, for example because the destination id does not exist |
+| 409 | `in_use` | Delete refused while a database is bound to the destination |
+| 409 | `upload_in_flight` | Delete refused while an upload is running |
+| 409 | `destination_removed` | `download-url` for a backup whose destination was deleted |
+| 404 | `not_found` | Unknown destination id |

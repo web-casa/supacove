@@ -566,8 +566,8 @@ func TestStaticSPA(t *testing.T) {
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if _, err := webfsStat(); err == nil {
-		if resp.StatusCode != 200 || !strings.Contains(string(raw), "supabackup") {
-			t.Fatalf("GET /: status=%d built=%v", resp.StatusCode, strings.Contains(string(raw), "supabackup"))
+		if resp.StatusCode != 200 || !strings.Contains(string(raw), "SupaCove") {
+			t.Fatalf("GET /: status=%d built=%v", resp.StatusCode, strings.Contains(string(raw), "SupaCove"))
 		}
 	} else {
 		if resp.StatusCode != http.StatusServiceUnavailable {

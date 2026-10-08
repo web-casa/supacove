@@ -1,6 +1,6 @@
 # 灾难恢复场景（Phase 8 升级门禁 P0-08）
 
-> 每个场景给出：会发生什么、你能恢复什么、操作步骤。supabackup 的设计原则
+> 每个场景给出：会发生什么、你能恢复什么、操作步骤。SupaCove 的设计原则
 > 是**任何单点故障都不应让备份文件本身不可恢复**（协议 B：应用密钥与备份
 > 密钥彻底分离）。
 
@@ -11,7 +11,7 @@
 
 恢复步骤：
 
-1. 重新启动 supabackup（空数据目录），bootstrap 管理员。
+1. 重新启动 SupaCove（空数据目录），bootstrap 管理员。
 2. `supabackup age show` 会提示未配置——**不要**重新 `age init`（会生成新
    密钥对）；旧密文仍然只能用原 recipient 解密。把原 recipient 重新写回：
    `INSERT INTO settings (key,value) VALUES ('age_recipient','<原recipient>'),('age_key_id','<原指纹>');`
@@ -44,7 +44,7 @@
 
 ## 场景 3：整台实例丢失，只剩桶里的密文 + 离线 age 私钥
 
-**这是设计保证的最坏情况**——恢复完全不依赖 supabackup：
+**这是设计保证的最坏情况**——恢复完全不依赖 SupaCove：
 
 **优先使用恢复套件**（自动完成下列所有检查）：
 
@@ -81,7 +81,7 @@ psql "$TARGET" -c "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_c
 
 manifest.json 内含 dump 工具版本、服务端版本、依赖扩展/角色、表数量基线
 与源库物理体积，恢复前先读它。`restore.sh` 恢复套件把以上流程（含哈希
-校验、空目标检查、表数核对）自动化，可在**没有任何 supabackup 组件**的
+校验、空目标检查、表数核对）自动化，可在**没有任何 SupaCove 组件**的
 主机上用 sh + age + pg_restore 执行。
 
 ## 场景 4：升级失败（迁移中断/新版本起不来）
@@ -106,5 +106,5 @@ manifest.json 内含 dump 工具版本、服务端版本、依赖扩展/角色�
 ## 不做的（明确边界）
 
 - **PITR / WAL 归档**：不在产品范围。
-- **备份 supabackup 自己的 SQLite 到桶**：实例元数据以场景 1 的方式重建；
+- **备份 SupaCove 自己的 SQLite 到桶**：实例元数据以场景 1 的方式重建；
   备份文件本身从不依赖它。

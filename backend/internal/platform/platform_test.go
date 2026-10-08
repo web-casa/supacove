@@ -84,3 +84,25 @@ func TestRecoveryNotesScope(t *testing.T) {
 		}
 	}
 }
+
+// TestResolve: a recognizable host wins; otherwise the registered platform
+// stands (a self-hosted Supabase has an arbitrary hostname).
+func TestResolve(t *testing.T) {
+	cases := []struct {
+		host, registered string
+		want             Platform
+	}{
+		{"db.ref.supabase.co", "generic", Supabase},
+		{"ep-x.neon.tech", "supabase", Neon}, // the host is the stronger signal
+		{"10.0.0.5", "supabase", Supabase},
+		{"db.internal", "neon", Neon},
+		{"db.internal", "generic", Generic},
+		{"db.internal", "", Generic},
+		{"db.internal", "anything-else", Generic},
+	}
+	for _, c := range cases {
+		if got := Resolve(c.host, c.registered); got != c.want {
+			t.Errorf("Resolve(%q, %q) = %q, want %q", c.host, c.registered, got, c.want)
+		}
+	}
+}

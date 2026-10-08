@@ -149,7 +149,8 @@ type Database struct {
 	Platform      string `json:"platform"`
 	EnvTag        string `json:"envTag"`
 	ServerVersion string `json:"serverVersion"`
-	SSLMode       string `json:"sslMode"` // persisted TLS choice; visible status (round-1 P1-09)
+	SSLMode       string `json:"sslMode"`                 // persisted TLS choice; visible status (round-1 P1-09)
+	DestinationID *int64 `json:"destinationId,omitempty"` // nil: local-only backups
 	LastTask      *Task  `json:"lastTask,omitempty"`
 	CreatedAt     int64  `json:"createdAt"`
 	UpdatedAt     int64  `json:"updatedAt"`
@@ -158,9 +159,13 @@ type Database struct {
 // GetDatabase loads one database plus its latest job.
 func GetDatabase(dbh *sql.DB, id int64) (*Database, error) {
 	d := &Database{}
-	err := dbh.QueryRow(`SELECT id, name, platform, env_tag, server_version, sslmode, created_at, updated_at
+	var destID sql.NullInt64
+	err := dbh.QueryRow(`SELECT id, name, platform, env_tag, server_version, sslmode, destination_id, created_at, updated_at
 		FROM databases WHERE id = ? AND deleted_at IS NULL`, id).
-		Scan(&d.ID, &d.Name, &d.Platform, &d.EnvTag, &d.ServerVersion, &d.SSLMode, &d.CreatedAt, &d.UpdatedAt)
+		Scan(&d.ID, &d.Name, &d.Platform, &d.EnvTag, &d.ServerVersion, &d.SSLMode, &destID, &d.CreatedAt, &d.UpdatedAt)
+	if destID.Valid {
+		d.DestinationID = &destID.Int64
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -178,7 +183,7 @@ func GetDatabase(dbh *sql.DB, id int64) (*Database, error) {
 
 // ListDatabases returns all registrations, newest job attached.
 func ListDatabases(dbh *sql.DB) ([]*Database, error) {
-	rows, err := dbh.Query(`SELECT id, name, platform, env_tag, server_version, sslmode, created_at, updated_at
+	rows, err := dbh.Query(`SELECT id, name, platform, env_tag, server_version, sslmode, destination_id, created_at, updated_at
 		FROM databases WHERE deleted_at IS NULL ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -187,8 +192,12 @@ func ListDatabases(dbh *sql.DB) ([]*Database, error) {
 	var out []*Database
 	for rows.Next() {
 		d := &Database{}
-		if err := rows.Scan(&d.ID, &d.Name, &d.Platform, &d.EnvTag, &d.ServerVersion, &d.SSLMode, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		var destID sql.NullInt64
+		if err := rows.Scan(&d.ID, &d.Name, &d.Platform, &d.EnvTag, &d.ServerVersion, &d.SSLMode, &destID, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if destID.Valid {
+			d.DestinationID = &destID.Int64
 		}
 		out = append(out, d)
 	}

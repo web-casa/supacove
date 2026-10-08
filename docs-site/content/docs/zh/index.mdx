@@ -1,5 +1,5 @@
 ---
-title: supabackup 是什么
+title: SupaCove 是什么
 description: 自托管的 PostgreSQL 加密备份工具：BYOS、age 加密、可验证恢复
 ---
 
@@ -7,9 +7,11 @@ import { Card, Cards } from "fumadocs-ui/components/card";
 
 import { ShieldAlert, RefreshCw, LifeBuoy, Lock } from "lucide-react";
 
-supabackup 是一个自托管的 PostgreSQL 备份服务，面向 Supabase、Neon、Railway
-以及任意自托管 PostgreSQL。它把 `pg_dump` 的输出流式加密（age）后写入**你自己的**
+SupaCove 是一个自托管的 PostgreSQL 备份服务，面向 Supabase、Neon、Railway、
+Aiven、Prisma Postgres、TigerData、Miget、Render 以及任意自托管 PostgreSQL。它把 `pg_dump` 的输出流式加密（age）后写入**你自己的**
 对象存储（S3 / R2 / B2 / MinIO），并在本地暂存一份可下载的密文。
+
+二进制、容器镜像、指标名和 webhook 请求头目前仍沿用早期名称 `supabackup`。文档里的命令和标识符都按软件实际接受的写法给出。
 
 ## 四条保证
 

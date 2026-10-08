@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cloudfan/supabackup/backend/internal/stats"
 	"github.com/cloudfan/supabackup/backend/internal/storage"
 )
 
@@ -141,8 +144,8 @@ func TestExpiredBudgetLandsFailedWithReason(t *testing.T) {
 	if status != "failed" {
 		t.Fatalf("status = %q, want failed", status)
 	}
-	if class != ClassNetwork {
-		t.Errorf("class = %q, want %q", class, ClassNetwork)
+	if class != ClassUnknown {
+		t.Errorf("class = %q, want %q", class, ClassUnknown)
 	}
 	if !strings.Contains(msg, "execution budget") {
 		t.Errorf("message must name the budget: %q", msg)
@@ -276,8 +279,8 @@ func TestResumePhaseShutdownRestoresInterruptedSilently(t *testing.T) {
 	var jobID int64
 	if err := p.store.DB.QueryRow(`
 		INSERT INTO jobs (database_id, status, scheduled_at, created_at, destination_id,
-		                  artifact_state, artifact_path, manifest_path, remote_state, remote_object_key, remote_manifest_key)
-		VALUES (?, 'interrupted', 0, 0, ?, 'committed', 'PENDING', 'PENDING', 'uploading', 'PENDING', 'PENDING')
+		                  artifact_size, artifact_state, artifact_path, manifest_path, remote_state, remote_object_key, remote_manifest_key)
+		VALUES (?, 'interrupted', 0, 0, ?, 10, 'committed', 'PENDING', 'PENDING', 'uploading', 'PENDING', 'PENDING')
 		RETURNING id`, dbID, destID).Scan(&jobID); err != nil {
 		t.Fatal(err)
 	}
@@ -359,9 +362,14 @@ func TestPruneKeepsReferenceWhenUnlinkFails(t *testing.T) {
 		artifact, manifest, jobID); err != nil {
 		t.Fatal(err)
 	}
-	// Make the parent directory read-only so os.Remove fails.
+	// Make the parent directory read-only so os.Remove fails. Under root the
+	// permission bit does not restrict unlink, so skip explicitly
+	// (fresh-review P3-1: a chmod-result heuristic misreads root as "ok").
+	if os.Geteuid() == 0 {
+		t.Skip("chmod cannot restrict root; unlink-failure path untestable here")
+	}
 	if err := os.Chmod(staging, 0o500); err != nil {
-		t.Skipf("cannot restrict staging dir (running as root?): %v", err)
+		t.Skipf("cannot restrict staging dir: %v", err)
 	}
 	defer func() { _ = os.Chmod(staging, 0o700) }()
 
@@ -430,5 +438,106 @@ func TestPruneReclaimsCommittedNoManifest(t *testing.T) {
 	p.PruneExpiredArtifacts(context.Background())
 	if _, err := os.Stat(artifact); !os.IsNotExist(err) {
 		t.Errorf("committed_no_manifest artifact must be reclaimed, stat err = %v", err)
+	}
+}
+
+// Fresh-review P2-01/P3-01: a resumed remote commit is a COMPLETED backup —
+// it must ping the dead-man switch (anchored on the original dump start),
+// record a stats row, and clear the recovery annotation. Mutating any of the
+// three side effects away must turn this red.
+func TestResumeSuccessCarriesSuccessSideEffects(t *testing.T) {
+	p := newPhase3Runner(t)
+	destID := p.addDestination(t, 10)
+	dbID := p.addDatabase(t, destID, "resume-side-db")
+	// heartbeat config on the database: a positive period so a fresh enough
+	// snapshot pings; the original dump start is "now" so the age gate passes.
+	if _, err := p.store.DB.Exec(`
+		UPDATE databases SET heartbeat_url = '-', heartbeat_period_hours = 24 WHERE id = ?`, dbID); err != nil {
+		t.Fatal(err)
+	}
+	// '-' disables pings: use a real loopback receiver instead.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	if _, err := p.store.DB.Exec(`UPDATE databases SET heartbeat_url = ? WHERE id = ?`, srv.URL, dbID); err != nil {
+		t.Fatal(err)
+	}
+	p.SetStatsRecorder(stats.New(p.store.DB))
+
+	staging := filepath.Join(p.dataDir, "staging")
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var jobID int64
+	started := time.Now().Add(-time.Hour).Unix() // original dump start: age gate must see THIS
+	if err := p.store.DB.QueryRow(`
+		INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at,
+		                  artifact_size, artifact_sha256, artifact_state, artifact_path, manifest_path, remote_state,
+		                  remote_object_key, remote_manifest_key, destination_id,
+		                  error_message)
+		VALUES (?, 'interrupted', 0, 0, ?, 10, ?, 'committed', 'PENDING', 'PENDING', 'uploading', 'PENDING', 'PENDING', ?,
+		          ' [recovery: artifact committed before interruption — restore manually or re-run]')
+		RETURNING id`, dbID, started, sha256Of([]byte("CIPHERTEXT")), destID).Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(staging, fmt.Sprintf("backup-job%d.dump.age", jobID))
+	manifest := artifact + ".manifest.json"
+	if err := os.WriteFile(artifact, []byte("CIPHERTEXT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.store.DB.Exec(
+		`UPDATE jobs SET artifact_path = ?, manifest_path = ? WHERE id = ?`, artifact, manifest, jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	p.ResumeRemotePhase(context.Background())
+
+	var status, errMsg string
+	var finished int64
+	if err := p.store.DB.QueryRow(
+		`SELECT status, error_message, COALESCE(finished_at,0) FROM jobs WHERE id = ?`, jobID).
+		Scan(&status, &errMsg, &finished); err != nil {
+		t.Fatal(err)
+	}
+	if status != "succeeded" {
+		var cls, emsg string
+		_ = p.store.DB.QueryRow(`SELECT COALESCE(error_class,''), COALESCE(error_message,'') FROM jobs WHERE id = ?`, jobID).Scan(&cls, &emsg)
+		t.Fatalf("status = %q, want succeeded (class=%s msg=%s)", status, cls, emsg)
+	}
+	if errMsg != "" {
+		t.Errorf("recovery annotation survived a successful resume: %q", errMsg)
+	}
+
+	// stats row recorded (artifact size known, dump size unknown by design)
+	var dumpSize, artifactSize int64
+	if err := p.store.DB.QueryRow(
+		`SELECT dump_size, artifact_size FROM backup_stats WHERE job_id = ?`, jobID).
+		Scan(&dumpSize, &artifactSize); err != nil {
+		t.Fatalf("stats row missing after resumed success: %v", err)
+	}
+	if artifactSize != int64(len("CIPHERTEXT")) {
+		t.Errorf("stats artifact_size = %d, want %d", artifactSize, len("CIPHERTEXT"))
+	}
+
+	// dead-man switch pinged, anchored on the ORIGINAL dump start: the
+	// snapshot is 1h old, period 24h → fresh → success ping allowed. The
+	// ping is a detached goroutine, so poll briefly for the timestamp.
+	var hbAt int64
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := p.store.DB.QueryRow(`SELECT last_heartbeat_at FROM databases WHERE id = ?`, dbID).Scan(&hbAt); err != nil {
+			t.Fatal(err)
+		}
+		if hbAt != 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if hbAt == 0 {
+		t.Error("resume success did not ping the dead-man switch")
 	}
 }

@@ -6,7 +6,7 @@ export function Brand() {
       <span className="brand-mark">
         <DatabaseBackup size={15} aria-hidden />
       </span>
-      supabackup
+      SupaCove
     </span>
   );
 }

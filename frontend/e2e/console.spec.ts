@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-const base = process.env.SB_E2E_BASE_URL ?? "http://127.0.0.1:36360";
+// Must match playwright.config.ts default; the runner script always injects
+// SB_E2E_BASE_URL, these are fallbacks for manual runs only.
+const base = process.env.SB_E2E_BASE_URL ?? "http://127.0.0.1:36470";
 const token = process.env.SB_E2E_TOKEN ?? "";
 const admin = process.env.SB_E2E_ADMIN ?? "admin";
 const password = process.env.SB_E2E_PASSWORD ?? "E2e-Password-1234";

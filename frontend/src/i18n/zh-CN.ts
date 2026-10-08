@@ -127,7 +127,7 @@ export const zhCN: Dict = {
   "schedule.field.maxAge": "新鲜度阈值（小时）",
   "schedule.hint.maxAge": "超过即标记为已过期。0 = 关闭。",
   "schedule.field.hbUrl": "心跳 URL",
-  "schedule.hint.hbUrl": "死人开关，可选。留空继承服务器默认值；“-” 表示禁用。",
+  "schedule.hint.hbUrl": "心跳监控，可选。留空继承服务器默认值；“-” 表示禁用。",
   "schedule.field.period": "期望周期（小时）",
   "schedule.field.grace": "宽限期（小时）",
   "schedule.pause": "暂停计划备份",
@@ -186,7 +186,7 @@ export const zhCN: Dict = {
   "providers.neon.s1": "在 Neon 控制台打开项目并点击 Connect。",
   "providers.neon.s2": "关闭 Connection pooling，使主机名中不含“-pooler”。",
   "providers.neon.s3":
-    "原样复制连接串。Neon 附加的 channel_binding 参数会被移除，因为 supabackup 不接受它。",
+    "原样复制连接串。Neon 附加的 channel_binding 参数会被移除，因为 SupaCove 不接受它。",
   "providers.neon.s4": "闲置的计算节点需要几秒唤醒，首次测试可能较慢。",
   "providers.railway.tagline": "公共 TCP 代理 URL",
   "providers.railway.s1": "打开 Postgres 服务，再进入 Variables 标签。",
@@ -199,7 +199,7 @@ export const zhCN: Dict = {
   "providers.generic.label": "自托管 / 其他",
   "providers.generic.tagline": "任意 PostgreSQL 服务器",
   "providers.generic.s1":
-    "主机必须能从 supabackup 容器访问。localhost 指容器自身；要访问 Docker 宿主机上的数据库，请用 host.docker.internal 或其局域网地址。",
+    "主机必须能从 SupaCove 容器访问。localhost 指容器自身；要访问 Docker 宿主机上的数据库，请用 host.docker.internal 或其局域网地址。",
   "providers.generic.s2":
     "使用能读取 pg_dump 全部导出内容的角色：数据库属主，或 pg_read_all_data 的成员（PostgreSQL 14+）。",
   "providers.generic.s3":
@@ -234,15 +234,15 @@ export const zhCN: Dict = {
   "conn.warn.neonPort":
     "端口 6543 是 Neon 的池化端口。pg_dump 无法通过它运行。",
   "conn.warn.railwayInternal":
-    "*.railway.internal 只在 Railway 私有网络内可解析。除非 supabackup 也运行在其中，否则请使用 DATABASE_PUBLIC_URL（*.proxy.rlwy.net TCP 代理）。",
+    "*.railway.internal 只在 Railway 私有网络内可解析。除非 SupaCove 也运行在其中，否则请使用 DATABASE_PUBLIC_URL（*.proxy.rlwy.net TCP 代理）。",
   "conn.warn.sslDisable":
     "sslmode=disable 会明文发送密码和全部导出数据。仅在你信任的私有网络中使用。",
   "conn.info.sbDirect":
     "这是直连地址，除非项目购买了 IPv4 附加组件，否则只有 IPv6。如果测试无法连接，请改用 Session pooler 连接串。",
   "conn.info.localhost":
-    "localhost 指 supabackup 容器自身，而不是运行 Docker 的机器。要连接 Docker 宿主机上的数据库，请用 host.docker.internal 或宿主机局域网地址。",
+    "localhost 指 SupaCove 容器自身，而不是运行 Docker 的机器。要连接 Docker 宿主机上的数据库，请用 host.docker.internal 或宿主机局域网地址。",
   "conn.info.droppedParams":
-    "将移除 {params}——supabackup 只接受 sslmode、connect_timeout 和 application_name。",
+    "将移除 {params}——SupaCove 只接受 sslmode、connect_timeout 和 application_name。",
   "conn.info.addSsl":
     "连接串未设置 TLS 模式；将添加 sslmode={mode}（在下方选择）。",
   "conn.ok.compatible": "与 pg_dump 兼容。注册时会测试连接。",
@@ -380,4 +380,86 @@ export const zhCN: Dict = {
   // ---- formatting helpers ----------------------------------------------------------------
   "ui.loading": "加载中",
   "fmt.requestFailed": "请求失败",
+
+  // ---- Storage view ----
+  "nav.storage": "存储",
+  "dest.title": "存储目的地",
+  "dest.desc":
+    "你自己的 S3、Cloudflare R2 或 Backblaze B2 存储桶。绑定了目的地的数据库会把每份加密备份上传到那里；没有绑定时，备份只留在本实例上。",
+  "dest.aria": "存储目的地",
+  "dest.unavailable": "无法获取目的地：{msg}",
+  "dest.add": "添加目的地",
+  "dest.addSubmit": "测试并添加",
+  "dest.testing": "正在测试存储桶…",
+  "dest.empty.title": "还没有存储目的地",
+  "dest.empty.cta": "添加第一个目的地",
+  "dest.empty.body":
+    "备份目前只保存在本实例上。添加一个存储桶，在这台机器出事时还有一份副本留在别处。",
+  "dest.col.name": "名称",
+  "dest.col.location": "存储桶 / 前缀",
+  "dest.col.retention": "保留",
+  "dest.col.usedBy": "使用它的数据库",
+  "dest.unused": "暂无数据库",
+  "dest.keep.copies": "{n} 份",
+  "dest.keep.both": "{n} 份，{days} 天",
+  "dest.test": "测试",
+  "dest.test.ok": "已写入、读回并删除一个测试对象。",
+  "dest.test.failed": "测试失败：{msg}",
+  "dest.reconcileTip": "把存储桶与记录做对账",
+  "dest.reconcile.result":
+    "桶内 {remote} 个对象，匹配 {matched} 个。孤立：{orphaned}，缺失：{missing}，未提交：{uncommitted}。",
+  "dest.removeTip": "删除目的地",
+  "dest.removePrompt": "删除“{name}”？桶里的对象会保留。",
+  "dest.toast.added": "已添加目的地“{name}”。",
+  "dest.toast.removed": "已删除目的地“{name}”。",
+  "dest.addForm.aria": "添加存储目的地",
+  "dest.addForm.desc":
+    "存储桶必须事先存在。保存之前会写入、读回并删除一个测试对象；失败则不保存。目的地之后不能修改：需要调整时新建一个，再把数据库改绑过去。",
+  "dest.field.name": "名称",
+  "dest.field.platform": "平台",
+  "dest.platform.s3": "Amazon S3 / S3 兼容服务",
+  "dest.platform.r2": "Cloudflare R2",
+  "dest.platform.b2": "Backblaze B2",
+  "dest.field.region": "区域",
+  "dest.hint.region.s3": "留空为 us-east-1。",
+  "dest.hint.region.r2": "留空为 auto。",
+  "dest.hint.region.b2": "必填，例如 us-west-004。",
+  "dest.field.endpoint": "Endpoint",
+  "dest.hint.endpoint": "必填：https://host[:port]，不带路径。",
+  "dest.hint.endpointS3": "Amazon S3 留空；对接 S3 兼容服务时填写。",
+  "dest.field.bucket": "存储桶",
+  "dest.hint.bucket": "必须已经存在。",
+  "dest.field.prefix": "前缀（可选）",
+  "dest.hint.prefix": "桶内的一个目录。留空表示桶的根目录。",
+  "dest.field.accessKey": "Access key ID",
+  "dest.field.secretKey": "Secret access key",
+  "dest.hint.secretKey": "加密保存，之后不再显示。",
+  "dest.field.keepRemote": "保留份数",
+  "dest.hint.keepRemote": "按数据库计，至少 1。",
+  "dest.field.keepDays": "保留天数",
+  "dest.hint.keepDays": "0 表示不按天数清理。",
+  "dest.error.name": "请为目的地命名。",
+  "dest.error.endpointRequired": "这个平台必须填写 endpoint。",
+  "dest.error.endpoint": "格式须为 http(s)://host[:port]，不带路径。",
+  "dest.error.region": "Backblaze B2 需要填写其 S3 endpoint 的区域。",
+  "dest.error.bucket": "3–63 个字符：小写字母、数字、点和短横线。",
+  "dest.error.prefix":
+    "只能包含字母、数字、斜杠、点、下划线和短横线，且不能有“..”。",
+  "dest.error.accessKey": "请输入 Access key ID。",
+  "dest.error.secretKey": "请输入 Secret access key。",
+  "dest.error.keepRemote": "请输入不小于 1 的整数。",
+  "dest.error.keepDays": "请输入不小于 0 的整数。",
+  "target.title": "各数据库的上传位置",
+  "target.desc":
+    "为每个数据库选择目的地。更改从下一次备份起生效；该数据库有备份正在运行时会被拒绝。",
+  "target.aria": "各数据库的上传目的地",
+  "target.col.destination": "目的地",
+  "target.col.effect": "效果",
+  "target.localOnly": "无 — 备份只留在本实例",
+  "target.note.local": "仅本地。这台机器丢了，备份也就没了。",
+  "target.note.remote": "提交到存储桶之后才算成功。",
+  "target.unresolved": "目的地 #{id}",
+  "target.empty": "还没有注册数据库。请到“总览”添加。",
+  "target.toast.assigned": "“{db}”现在上传到“{dest}”。",
+  "target.toast.cleared": "“{db}”现在只把备份留在本实例。",
 };

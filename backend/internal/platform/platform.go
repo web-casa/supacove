@@ -52,6 +52,24 @@ func Detect(host string) Platform {
 	}
 }
 
+// Resolve picks the platform for a job: the host decides when it is
+// recognizable; otherwise the platform the administrator registered the
+// database with stands. That is how a self-hosted Supabase (any hostname)
+// still gets the Supabase recovery profile.
+func Resolve(host, registered string) Platform {
+	if p := Detect(host); p != Generic {
+		return p
+	}
+	switch p := Platform(registered); p {
+	case Supabase, Neon, Railway:
+		return p
+	case Generic:
+		return Generic
+	default: // anything else is not a platform we know
+		return Generic
+	}
+}
+
 // PoolingHint returns a human-readable warning if the host/port suggests a
 // pooled connection that is incompatible with pg_dump. Both languages are
 // returned so the caller picks: API responses localize via Accept-Language,
@@ -127,13 +145,25 @@ func RecoveryNotes(p Platform) []string {
 			"the database), Edge Function code, Auth/Storage service configuration,",
 			"and platform-level settings.",
 			"",
-			"IMPORTANT: this generic script does NOT implement a Supabase-to-",
-			"Supabase migration. Restoring into a new Supabase project conflicts",
-			"with its managed schemas, system roles and hosted extensions. Restore",
-			"into a plain PostgreSQL instance (any major >= the source), or follow",
-			"Supabase's official backup/restore guide for project-to-project moves.",
-			"By default the script refuses a non-empty target; an override exists",
-			"but does not resolve role/extension conflicts on its own.",
+			"This kit restores with the 'supabase' profile. It needs:",
+			"  - a NEW, empty database on a PostgreSQL server that has Supabase's",
+			"    extensions and roles, such as the supabase/postgres image, of a",
+			"    major version >= the pg_dump that wrote the archive (clientMajor",
+			"    in the manifest);",
+			"  - a SUPERUSER connection (supabase_admin on that image).",
+			"Before writing anything the kit checks that the target is empty, that",
+			"the connection is a superuser and that every extension of the archive",
+			"can be installed there. It does NOT check the server version or that",
+			"the roles the archive grants to exist: those are yours to provide.",
+			"It leaves out one archive entry known to fail on such a server (the",
+			"grant on graphql_public.graphql, a function Supabase creates itself).",
+			"Any other error stops the restore.",
+			"",
+			"It does NOT implement a Supabase-to-Supabase migration: restoring into",
+			"a new Supabase project conflicts with its managed schemas, system",
+			"roles and hosted extensions. Follow Supabase's official backup/restore",
+			"guide for project-to-project moves.",
+			"SUPABACKUP_PROFILE=generic restores the archive as is.",
 		}
 	case Neon:
 		return []string{

@@ -105,8 +105,12 @@ func Load() (*Config, error) {
 	failedTTLHours := 72
 	if v := os.Getenv("SB_FAILED_ARTIFACT_TTL_HOURS"); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("invalid SB_FAILED_ARTIFACT_TTL_HOURS %q: must be a non-negative integer", v)
+		// Upper bound guards Duration overflow: an absurd value would wrap
+		// time.Duration(n)*time.Hour negative or into minutes, silently
+		// turning "keep a long time" into aggressive reclamation
+		// (fresh-review P3-02). 100 years is far beyond any real intent.
+		if err != nil || n < 0 || n > 24*365*100 {
+			return nil, fmt.Errorf("invalid SB_FAILED_ARTIFACT_TTL_HOURS %q: must be an integer in [0, %d]", v, 24*365*100)
 		}
 		failedTTLHours = n
 	}

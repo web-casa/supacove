@@ -93,6 +93,13 @@ type StatsSummary =
   operations["getStats"]["responses"]["200"]["content"]["application/json"];
 type FailedTask =
   operations["getTask"]["responses"]["200"]["content"]["application/json"];
+type DestinationList =
+  operations["listDestinations"]["responses"]["200"]["content"]["application/json"];
+type Destination = DestinationList["destinations"][number];
+type DestinationCreate =
+  operations["createDestination"]["requestBody"]["content"]["application/json"];
+type ReconcileReport =
+  operations["reconcileDestination"]["responses"]["200"]["content"]["application/json"];
 
 export type {
   Overview,
@@ -109,6 +116,9 @@ export type {
   WebhookCreate,
   WebhookTest,
   NotificationList,
+  Destination,
+  DestinationCreate,
+  ReconcileReport,
 };
 
 export const api = {
@@ -172,6 +182,28 @@ export const api = {
       body: JSON.stringify(body),
     }),
   notifications: () => request<NotificationList>("/api/notifications"),
+  destinations: () => request<DestinationList>("/api/destinations"),
+  createDestination: (body: DestinationCreate) =>
+    request<Destination>("/api/destinations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteDestination: (id: number) =>
+    request<void>(`/api/destinations/${id}`, { method: "DELETE" }),
+  testDestination: (id: number) =>
+    request<{ status: string }>(`/api/destinations/${id}/test`, {
+      method: "POST",
+    }),
+  reconcileDestination: (id: number) =>
+    request<ReconcileReport>(`/api/destinations/${id}/reconcile`, {
+      method: "POST",
+    }),
+  /** null clears the assignment: backups stay on the instance. */
+  assignDestination: (databaseId: number, destinationId: number | null) =>
+    request<{ status: string }>(`/api/databases/${databaseId}/destination`, {
+      method: "PUT",
+      body: JSON.stringify({ destinationId }),
+    }),
   stats: () => request<StatsSummary>("/api/stats"),
 };
 
