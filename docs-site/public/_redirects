@@ -1,0 +1,5 @@
+# Canonical /en/* → unprefixed (the former proxy.ts rule; middleware does
+# not run in a static export). 308 keeps the method; Pages preserves the
+# query string through :splat rewrites.
+/en / 308
+/en/* /:splat 308

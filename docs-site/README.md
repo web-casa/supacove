@@ -3,22 +3,57 @@
 Fumadocs (Next.js) user documentation for SupaCove (https://supacove.com),
 bilingual. English is the default and is served unprefixed (`/`, `/docs/…`)
 from `app/(en)`; Chinese lives under `/zh` in `app/zh`. Both render the
-shared implementations in `routes/`. `proxy.ts` redirects `/en/…` to the
-unprefixed URL and sends Chinese browsers from `/` to `/zh`.
+shared implementations in `routes/`.
+
+The site is a **pure static export** (`output: "export"` in
+`next.config.mjs`) deployed to **Cloudflare Pages** — there is no Node
+server at runtime. That constrains a few things:
+
+- **No middleware.** The former `proxy.ts` (which redirected `/en/…` and
+  auto-sent Chinese browsers from `/` to `/zh`) cannot run in a static
+  export. `/en/…` canonicalization now lives in `public/_redirects`
+  (308 → unprefixed). **Language negotiation is intentionally dropped:**
+  `/` is English for every browser and Chinese users switch via the header
+  switcher, which remembers the choice in the `sc_lang` cookie. This is a
+  deliberate trade-off, asserted by the smoke test so it cannot silently
+  regress.
+- **Search is baked, not queried.** `app/api/search/route.ts` exports the
+  whole Orama index at build time (`staticGET`); the dialog uses the
+  `type: "static"` client (wired in `lib/providers.tsx`) that loads it once
+  and searches client-side.
+- **Response headers come from `public/_headers`**, since the extensionless
+  `/opengraph-image` (PNG) and `/api/search` (JSON, noindex) artifacts can't
+  set headers from a route handler in a static build.
 
 The product was first called supabackup: the binary, image, metric names and
 `SB_*` variables still use that name, and the docs show them as they are.
 
 ```bash
 npm ci
-npm run dev        # http://localhost:3000
-npm run build      # parity check + static build
+npm run dev        # http://localhost:3000 (next dev; middleware NOT emulated)
+npm run build      # parity check + static export into out/
 npm run check-parity   # both locales must ship the same slug set
-npm run smoke      # after a build: status codes, redirects, 404, share image
+npm run preview    # serve out/ with Cloudflare Pages' simulator (wrangler)
+npm run smoke      # after a build: boots wrangler, checks routing/headers/404
 ```
 
+### Deploying to Cloudflare Pages
+
+Point a Pages project at this repo with:
+
+| Setting | Value |
+|---|---|
+| Root directory | `docs-site` |
+| Build command | `npm run build` |
+| Build output directory | `out` |
+| Node version | 22 |
+
+`_redirects` and `_headers` in `out/` are honored by Pages automatically.
+For "last updated" dates the docs read git history, so give the build a deep
+enough clone (Pages' default shallow clone yields the commit date only).
+
 Two things the build alone does not prove, both covered by
-`scripts/smoke.mjs` (also run in CI):
+`scripts/smoke.mjs` (also run in CI, against `wrangler pages dev out`):
 
 - **The 404 page** is `app/global-not-found.tsx`, enabled by
   `experimental.globalNotFound` in `next.config.mjs`. With one root layout

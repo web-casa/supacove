@@ -1,0 +1,8 @@
+# Response headers the static export cannot set from route handlers.
+# Extensionless artifacts would otherwise be served as octet-stream.
+/opengraph-image
+  Content-Type: image/png
+
+/api/search
+  Content-Type: application/json
+  X-Robots-Tag: noindex

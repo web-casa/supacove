@@ -193,10 +193,10 @@ jobs:
       - name: locale parity
         working-directory: docs-site
         run: node scripts/check-parity.mjs
-      - name: build
+      - name: build (static export)
         working-directory: docs-site
         run: npx next build
-      - name: smoke (routing, redirects, 404, share image)
+      - name: "smoke (Pages simulator: status codes, _redirects, _headers, 404, search index)"
         working-directory: docs-site
         run: node scripts/smoke.mjs
 

@@ -14,13 +14,14 @@ export function Providers({ locale, children }: { locale: "zh" | "en"; children:
       i18n={{
         ...uiI18n.provider(locale),
         onLocaleChange: (v) => {
-          // Remember an explicit choice so proxy.ts stops negotiating at "/".
+          // Remember the explicit choice for future readers (e.g. a client-side
+          // "/" redirect); the static build itself never negotiates language.
           document.cookie = `sc_lang=${v}; path=/; max-age=31536000; samesite=lax`;
           const path = window.location.pathname.replace(/^\/zh(?=\/|$)/, "");
           router.replace(localePath(v, path === "/" ? "" : path));
         },
       }}
-      search={{ options: { api: "/api/search" } }}
+      search={{ options: { type: "static", api: "/api/search" } }}
     >
       {children}
     </RootProvider>

@@ -3,6 +3,9 @@ import { i18n } from "@/lib/i18n";
 import { absoluteUrl } from "@/lib/site";
 import { source } from "@/lib/source";
 
+/** Static export: generated once at build time. */
+export const dynamic = "force-static";
+
 /** Locale-independent path of a page URL: "/zh/docs/x" → "/docs/x". */
 const strip = (url: string) => url.replace(/^\/zh(?=\/|$)/, "");
 

@@ -1,12 +1,30 @@
-// Smoke test for the BUILT site: boots `next start` on a free port and checks
-// the routing contract that no unit of the build verifies on its own —
-// status codes, locale redirects, the server-rendered 404 (it depends on
-// experimental.globalNotFound) and absolute share-image URLs.
-// Usage: npx next build && node scripts/smoke.mjs
+// Smoke test for the BUILT site: boots Cloudflare Pages' own local simulator
+// (`wrangler pages dev out`) on a free port and checks the routing contract
+// that no unit of the build verifies on its own — real status codes, the
+// _redirects canonicalization (308), the _headers types on the extensionless
+// artifacts, the static 404 (it depends on experimental.globalNotFound) and
+// absolute share-image URLs. Using the actual Pages runtime means we assert
+// the deployed behavior, not a re-implementation of it.
+//
+// The static export deliberately has NO server-side language negotiation
+// (the former proxy.ts could not survive `output: "export"`): "/" is English
+// for every browser and Chinese users switch via the header switcher. This
+// script asserts that too, so the decision stays documented instead of
+// silently regressing.
+// Usage: npm run build && node scripts/smoke.mjs
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ORIGIN = "https://supacove.com";
+const OUT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "out");
+
+if (!existsSync(join(OUT, "index.html"))) {
+  console.error("smoke: out/ is missing or unbuilt — run `npm run build` first");
+  process.exit(1);
+}
 
 const port = await new Promise((resolve, reject) => {
   const probe = createServer();
@@ -18,7 +36,7 @@ const port = await new Promise((resolve, reject) => {
 });
 const base = `http://127.0.0.1:${port}`;
 
-const server = spawn("npx", ["next", "start", "-p", String(port), "-H", "127.0.0.1"], {
+const server = spawn("npx", ["wrangler", "pages", "dev", "out", "--port", String(port), "--ip", "127.0.0.1", "--compatibility-date=2025-05-05"], {
   stdio: ["ignore", "ignore", "inherit"],
   detached: true,
 });
@@ -31,16 +49,17 @@ const kill = (signal) => {
 process.on("exit", () => kill("SIGKILL"));
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(1));
 
-/** Stops the server (SIGTERM, then SIGKILL after 3 s) and exits. */
+/** Stops the simulator (SIGTERM, then SIGKILL after 3 s) and exits. */
 async function finish(code) {
   if (server.exitCode === null && server.signalCode === null) {
     const gone = new Promise((resolve) => server.once("exit", resolve));
     kill("SIGTERM");
-    await Promise.race([gone, new Promise((r) => setTimeout(r, 3000))]);
+    await Promise.race([gone, new Promise((r) => setTimeout(r, 5000))]);
   }
   process.exit(code);
 }
-// Nothing here should take long: a hung request must not hang CI.
+// wrangler can take a while on first boot (workerd spawn); a hung request
+// must still not hang CI.
 setTimeout(() => {
   console.error("smoke: timed out after 120 s");
   finish(1);
@@ -51,14 +70,14 @@ const get = (path, headers = {}) =>
   fetch(base + path, { redirect: "manual", headers, signal: AbortSignal.timeout(10_000) });
 
 let ready = false;
-for (let i = 0; i < 60 && !ready; i++) {
+for (let i = 0; i < 120 && !ready; i++) {
   try {
     ready = (await fetch(base + "/robots.txt", { signal: AbortSignal.timeout(2000) })).ok;
   } catch {}
   if (!ready) await new Promise((r) => setTimeout(r, 500));
 }
 if (!ready) {
-  console.error(`smoke: server never became ready on :${port}`);
+  console.error(`smoke: wrangler never became ready on :${port}`);
   await finish(1);
 }
 
@@ -69,13 +88,14 @@ function check(name, ok, detail = "") {
   if (!ok) failures.push(detail ? `${name} — ${detail}` : name);
 }
 
-// 200s
+// 200s (real pages and the metadata routes)
 for (const path of ["/", "/zh", "/docs", "/zh/docs", "/docs/guides/supabase-backup", "/zh/docs/guides/supabase-backup", "/sitemap.xml", "/robots.txt"]) {
   const res = await get(path);
   check(`${path} is 200`, res.status === 200, `got ${res.status}`);
 }
 
-// /en… → 308 to the unprefixed URL, remembering English
+// /en… → 308 to the unprefixed URL, via public/_redirects (Pages cannot set
+// cookies from _redirects, so the old sc_lang=en expectation is gone).
 for (const [path, target] of [
   ["/en", "/"],
   ["/en/docs", "/docs"],
@@ -85,23 +105,17 @@ for (const [path, target] of [
   const location = res.headers.get("location") ?? "";
   check(`${path} is 308`, res.status === 308, `got ${res.status}`);
   check(`${path} → ${target}`, location === target || location === base + target, `Location: ${location}`);
-  check(`${path} sets sc_lang=en`, (res.headers.get("set-cookie") ?? "").includes("sc_lang=en"));
 }
 
-// Language negotiation at "/"
+// "/" is English for EVERY browser: a static export has no server-side
+// Accept-Language negotiation (documented decision, see README).
 {
   const zh = { "accept-language": "zh-CN,zh;q=0.9,en;q=0.8" };
-  const res = await get("/?utm_source=x", zh);
-  const location = res.headers.get("location") ?? "";
-  check("zh browser at / is 307", res.status === 307, `got ${res.status}`);
-  check("redirect keeps the query", location.endsWith("/zh?utm_source=x"), `Location: ${location}`);
-  check("redirect varies on language and cookie", /accept-language/i.test(res.headers.get("vary") ?? ""));
-  check("sc_lang=en suppresses the redirect", (await get("/", { ...zh, cookie: "sc_lang=en" })).status === 200);
-  check("zh;q=0 is not a preference", (await get("/", { "accept-language": "zh;q=0, en" })).status === 200);
-  check("en browser at / is 200", (await get("/", { "accept-language": "en-US,en;q=0.9" })).status === 200);
+  check("zh browser at / is 200 (no negotiation)", (await get("/", zh)).status === 200);
+  check("zh browser at /?utm_source=x is 200", (await get("/?utm_source=x", zh)).status === 200);
 }
 
-// 404s: real status, server-rendered body, not indexable
+// 404s: real status, the static bilingual document, not indexable
 for (const path of ["/nope", "/zh/nope", "/docs/nope", "/zh/docs/nope"]) {
   const res = await get(path);
   const html = await res.text();
@@ -120,9 +134,22 @@ for (const path of ["/", "/zh", "/docs/quickstart", "/zh/docs/guides/supabase-ba
   }
   check(`${path} has no localhost URL`, !html.includes("localhost:3000"));
 }
+
+// public/_headers: extensionless artifacts need explicit types, and the
+// baked search index stays out of search engines.
 {
   const res = await get("/opengraph-image");
   check("/opengraph-image is a PNG", res.status === 200 && res.headers.get("content-type") === "image/png", `${res.status} ${res.headers.get("content-type")}`);
+}
+{
+  const res = await get("/api/search");
+  check("/api/search is JSON", res.headers.get("content-type") === "application/json", `got ${res.headers.get("content-type")}`);
+  check("/api/search is noindex", (res.headers.get("x-robots-tag") ?? "").includes("noindex"), `got ${res.headers.get("x-robots-tag")}`);
+  const body = await res.json().catch(() => null);
+  // orama export shape: {type:"advanced", i18n, index:{…}, docs:{docs:{…}, count}}
+  check("/api/search is the baked orama index",
+    body?.type === "advanced" && body?.i18n === true && body?.docs?.count > 0 && body?.index?.indexes,
+    `type=${body?.type} i18n=${body?.i18n} docs.count=${body?.docs?.count}`);
 }
 
 if (failures.length) {

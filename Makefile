@@ -14,7 +14,7 @@ GOBIN_DIR := $(GOBIN_DIR)
 endif
 OAPI := $(GOBIN_DIR)/oapi-codegen
 
-.PHONY: help build backend frontend image api-gen api-check api-breaking metrics-check e2e docs docs-build dev test lint check clean
+.PHONY: help build backend frontend image api-gen api-check api-breaking metrics-check e2e docs docs-build docs-preview dev test lint check clean
 .NOTPARALLEL:
 
 help:
@@ -63,8 +63,11 @@ metrics-check:
 docs: ## Run the Fumadocs documentation site in dev mode
 	cd docs-site && npm ci && npm run dev
 
-docs-build: ## Build the documentation site (parity check + next build)
+docs-build: ## Build the documentation site (static export into docs-site/out)
 	cd docs-site && npm ci && npm run build
+
+docs-preview: ## Serve the built docs site with Cloudflare Pages' local simulator
+	cd docs-site && npm run preview
 
 e2e: ## Playwright suite against the final embedded binary (scripts/e2e-run.sh)
 	cd frontend && npm ci && npx playwright install chromium
