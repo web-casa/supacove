@@ -57,27 +57,55 @@ func TestAdvisoryLockBlocksSecondInstance(t *testing.T) {
 // permanently stuck lock. The child re-executes this test binary.
 func TestAdvisoryLockAcrossProcesses(t *testing.T) {
 	if os.Getenv("SB_TEST_LOCK_CHILD") != "" {
-		// Child mode: hold the lock until killed.
-		s, err := Open(os.Getenv("SB_TEST_LOCK_CHILD"))
-		if err != nil {
-			os.Exit(3)
+		// Child mode: hold the lock until killed. The parent probes the
+		// lock in a tight loop, so a SINGLE Open attempt can collide with
+		// a probe and kill this child before it ever holds the lock
+		// (observed on CI: "child never acquired the lock" after 15s).
+		// Retry transient ErrLocked until acquired.
+		childDir := os.Getenv("SB_TEST_LOCK_CHILD")
+		retryUntil := time.Now().Add(60 * time.Second)
+		for {
+			s, err := Open(childDir)
+			if err == nil {
+				time.Sleep(60 * time.Second)
+				s.Close()
+				os.Exit(0)
+			}
+			if !errors.Is(err, ErrLocked) {
+				fmt.Fprintln(os.Stderr, "lock-child: open:", err)
+				os.Exit(3)
+			}
+			if time.Now().After(retryUntil) {
+				fmt.Fprintln(os.Stderr, "lock-child: lock never became free within 60s")
+				os.Exit(4)
+			}
+			time.Sleep(20 * time.Millisecond)
 		}
-		time.Sleep(60 * time.Second)
-		s.Close()
-		os.Exit(0)
 	}
 	dir := t.TempDir()
 	child := exec.Command(os.Args[0], "-test.run", "^TestAdvisoryLockAcrossProcesses$")
 	child.Env = append(os.Environ(), "SB_TEST_LOCK_CHILD="+dir)
+	child.Stderr = os.Stderr // surface the child's own failure reason
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
+	// Exactly one Wait: the goroutine reaps; the deferred Kill is enough
+	// (a second Wait would race the goroutine's).
+	childExited := make(chan error, 1)
+	go func() { childExited <- child.Wait() }()
+	defer func() { _ = child.Process.Kill() }()
 
 	// Wait for the child to hold the lock. A successful open here must be
 	// closed immediately — it is the parent leaking its own lock otherwise.
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
+		select {
+		case err := <-childExited:
+			// A dead child can never acquire the lock: fail NOW with the
+			// real reason instead of spinning out the deadline.
+			t.Fatalf("child exited before acquiring the lock: %v", err)
+		default:
+		}
 		held, err := Open(dir)
 		if errors.Is(err, ErrLocked) {
 			break
@@ -96,7 +124,7 @@ func TestAdvisoryLockAcrossProcesses(t *testing.T) {
 	if err := child.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = child.Process.Wait()
+	<-childExited // reap the killed child
 	if _, err := os.Stat(filepath.Join(dir, lockFileName)); err != nil {
 		t.Fatalf("stale lock file should remain after SIGKILL: %v", err)
 	}
