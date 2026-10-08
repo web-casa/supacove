@@ -266,7 +266,7 @@ jobs:
           docker stop -t 15 sb-ci >/dev/null
           test "$(docker inspect --format '{{.State.ExitCode}}' sb-ci)" = "0"
       - name: trivy image scan (CRITICAL/HIGH, unfixed ignored)
-        uses: aquasecurity/trivy-action@f9424c10c36e288d5fa79bd3dfd1aeb2d6eae808 # v0.33.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: supabackup:ci
           format: table
