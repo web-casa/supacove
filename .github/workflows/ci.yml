@@ -25,6 +25,7 @@ env:
   OASDIFF_VERSION: v1.11.5
   GOVULNCHECK_VERSION: v1.8.0
   GITLEAKS_VERSION: v8.30.1
+  TRIVY_VERSION: 0.66.0
   ACTIONLINT_VERSION: v1.7.7
 
 jobs:
@@ -291,14 +292,18 @@ jobs:
           test "$(docker inspect --format '{{.State.Health.Status}}' sb-ci)" = "healthy"
           docker stop -t 15 sb-ci >/dev/null
           test "$(docker inspect --format '{{.State.ExitCode}}' sb-ci)" = "0"
+      # Direct container run instead of trivy-action: the action's
+      # setup-trivy step downloads a release binary via install.sh and has
+      # been failing silently at that download (two consecutive runs died
+      # right after "found version 0.65.0"). This job already has docker,
+      # and the container invocation is exactly what the recorded
+      # pre-release scans use (docs/release-scan-evidence.md).
       - name: trivy image scan (CRITICAL/HIGH, unfixed ignored)
-        uses: aquasecurity/trivy-action@f9424c10c36e288d5fa79bd3dfd1aeb2d6eae808 # v0.33.0
-        with:
-          image-ref: supabackup:ci
-          format: table
-          exit-code: "1"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            "aquasec/trivy:${TRIVY_VERSION}" image \
+            --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+            --exit-code 1 --skip-version-check supabackup:ci
       - name: "Workflow file is valid YAML with valid Bash"
         run: |
           python3 -m pip install --quiet pyyaml
