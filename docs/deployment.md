@@ -4,7 +4,7 @@
 
 - Docker 和 Docker Compose（推荐）
 - 或者：发布页直接下载独立二进制（见下文「二进制发行版」）+ 本机 `pg_dump` 客户端
-- 或者：Go 1.26.6+ 从源码编译（与 go.mod 一致）+ PostgreSQL 客户端工具 14–18 + age 加密工具
+- 或者：Go 1.26.9+ 从源码编译（与 go.mod 一致）+ PostgreSQL 客户端工具 14–18 + age 加密工具
 
 ## Docker（GHCR 发布镜像）
 

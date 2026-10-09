@@ -52,7 +52,7 @@ docker build --target runtime -t supabackup:<tag> .
 ## 源码构建
 
 ```bash
-# 需要 Node 22（控制台前端）；Go 最终生效版本须 1.26.6+（与 go.mod 一致；
+# 需要 Node 22（控制台前端）；Go 最终生效版本须 1.26.9+（与 go.mod 一致；
 # 本地工具链更旧且允许自动下载时 GOTOOLCHAIN 会拉取满足版本，否则编译失败）
 make build     # = frontend + backend：先构建控制台并嵌入，再产出 bin/supabackup
 ```

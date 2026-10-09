@@ -26,7 +26,7 @@ webhook 请求头与 `SB_*` 环境变量目前仍沿用该名称，下文的命�
 - **通知**：事务性 outbox（重试/去重/投递状态可查），webhook 三类事件，
   心跳监控（成功 ping 绑定远端提交与快照年龄，失败即时 `/fail`）。
 - **可观测**：受认证保护的 `/metrics`（低基数标签），审计：govulncheck
-  0 漏洞（Go 1.26.6+）、gitleaks 无泄漏、secret canary 四出口回归测试。
+  0 漏洞（Go 1.26.9+）、gitleaks 无泄漏、secret canary 四出口回归测试。
 
 ## 快速开始
 
