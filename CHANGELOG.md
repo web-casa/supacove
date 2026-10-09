@@ -4,6 +4,8 @@ All notable changes to SupaCove (formerly supabackup).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-09 · 改名发布 supabackup → SupaCove
+
 ### Changed
 - **Product rename supabackup → SupaCove** across every artifact: the
   binary/CLI is `supacove` (release archives `supacove_<v>_<os>_<arch>`),
