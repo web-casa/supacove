@@ -2,9 +2,10 @@
 // source in, four kinds of object storage out. Styled by .hv-* in home.css.
 import { Fragment } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ArrowUpRight } from "lucide-react";
 import { Mark } from "@/components/logo";
 import { Rotator } from "@/components/rotator";
+import { GITHUB_URL } from "@/lib/site";
 import type { HomeCopy } from "@/lib/home-copy";
 
 // The platform named in the headline, swapped every two seconds.
@@ -65,6 +66,15 @@ export function Hero({ t, docs }: { t: HomeCopy; docs: string }) {
             <ArrowRight aria-hidden />
           </span>
         </Link>
+        <a
+          className="lp-link"
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+          <ArrowUpRight aria-hidden />
+        </a>
         <Link className="lp-link" href={`${docs}/restore`}>
           {t.secondary}
         </Link>

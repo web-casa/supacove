@@ -5,6 +5,9 @@ import { i18n, type Lang } from "@/lib/i18n";
 export const SITE_URL = "https://supacove.com";
 export const SITE_NAME = "SupaCove";
 
+/** The source repository: navbar link, hero action and JSON-LD sameAs. */
+export const GITHUB_URL = "https://github.com/web-casa/supacove";
+
 /**
  * The share image served by app/opengraph-image/route.tsx. Pages list it explicitly: a
  * page-level `openGraph` object replaces the inherited one, image included.

@@ -1,6 +1,6 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import { Brand } from "@/components/logo";
-import { localePath } from "@/lib/site";
+import { GITHUB_URL, localePath } from "@/lib/site";
 
 const STRINGS = {
   zh: { tag: "文档" },
@@ -14,6 +14,6 @@ export function baseOptions(lang: string, opts: { tag?: boolean } = {}): BaseLay
       title: <Brand tag={opts.tag === false ? undefined : s.tag} />,
       url: localePath(lang),
     },
-    links: [],
+    links: [{ text: "GitHub", url: GITHUB_URL, external: true }],
   };
 }
