@@ -495,3 +495,21 @@ jobs:
             "$image@${{ needs.publish-image.outputs.digest_amd64 }}" \
             "$image@${{ needs.publish-image.outputs.digest_arm64 }}"
           docker buildx imagetools inspect "$image:$ver"
+      # Rename transition (ONE release only): mirror the same manifest list
+      # under the pre-rename repository so users following
+      # ghcr.io/web-casa/supabackup:latest receive the rename release
+      # (GHCR does not redirect renamed packages). REMOVE this step after
+      # the first post-rename tag ships
+      # (docs/rename-supabackup-to-supacove-plan.md §4.4.6 — track removal
+      # in the same issue as the metric/webhook legacy aliases).
+      - name: Mirror tags under the legacy image name (one release only)
+        run: |
+          set -euo pipefail
+          image=ghcr.io/web-casa/supacove
+          legacy=ghcr.io/web-casa/supabackup
+          ver="${GITHUB_REF_NAME#v}"
+          docker buildx imagetools create \
+            -t "$legacy:$ver" \
+            -t "$legacy:latest" \
+            "$image@${{ needs.publish-image.outputs.digest_amd64 }}" \
+            "$image@${{ needs.publish-image.outputs.digest_arm64 }}"

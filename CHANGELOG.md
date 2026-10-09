@@ -8,8 +8,11 @@ All notable changes to SupaCove (formerly supabackup).
 - **Product rename supabackup → SupaCove** across every artifact: the
   binary/CLI is `supacove` (release archives `supacove_<v>_<os>_<arch>`),
   the Go module is `github.com/web-casa/supacove`, the image is
-  `ghcr.io/web-casa/supacove` (GHCR does not redirect — the old
-  repository/tags stay pullable but frozen), metrics are `supacove_*` and
+  `ghcr.io/web-casa/supacove` (GHCR does not redirect; the FIRST
+  post-rename release also mirrors the same image under the legacy
+  `ghcr.io/web-casa/supabackup` tags so `:latest` followers receive the
+  rename release — after that the legacy repository is frozen), metrics
+  are `supacove_*` and
   webhook headers `X-Supacove-Event(-ID)` with the pre-rename names served
   as equal-valued deprecated aliases for two tagged releases, recovery-kit
   env vars are `SUPACOVE_PROFILE`/`SUPACOVE_ALLOW_NONEMPTY` (legacy names

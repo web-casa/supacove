@@ -1,6 +1,6 @@
 # 开发方案：supabackup → SupaCove 全库重命名（v5 最终版）
 
-状态：v5 — 已吸收 codex review 四轮意见（R1×14、R2×6、R3×3、R4×2），待确认后执行
+状态：**已执行完毕**（2026-10-09，六步全部落地，各步均经 codex 评审后提交）
 日期：2026-10-09
 分支：`rename/supabackup-to-supacove`（每步一个提交，独立可构建）
 
@@ -196,6 +196,10 @@ gitignore；加 `--hidden` 含 `.github/`、`.golangci.yml` 等约 563 处）`su
    无存量消费者；发布说明显著标注"镜像地址已变更，旧地址不会重定向、旧 tag 不再
    更新"。**条件双发触发器**：实施期间若发现已有 tag 发布过镜像，则追加一个 push
    旧名 digest 的 CI job，双发**仅维持一个 tag 版本**后移除。
+   【执行时记录】终检发现 `v0.1.0` 已推送且确实发布过旧名镜像
+   （`ghcr.io/web-casa/supabackup:latest` 可公开拉取）——触发器生效：已在
+   ci.yml 的 `image-tags` job 追加 "Mirror tags under the legacy image name
+   (one release only)" 步骤，随首个改名 tag 双发后删除。
 
 ### Step 5 — 文档 / 品牌 / 元数据收尾
 - README（含 "formerly known as supabackup" 便于搜索）、CONTRIBUTING、SECURITY、
@@ -253,3 +257,40 @@ gitignore；加 `--hidden` 含 `.github/`、`.golangci.yml` 等约 563 处）`su
 | 13 | `.golangci.yml` FQN 漏改致 lint 豁免失效 | P2 | 并入 Step 1，跑 `make lint` 验证 |
 | 14 | kit 临时目录前缀与泄漏检测脱节 | P2 | 同提交成对修改 |
 | 15 | `SB_` 前缀 / MinIO 凭据被顺手改掉 | — | 负面清单 §3.4 / §3.5 |
+
+## 7. 执行记录（Step 6 终检时补记）
+
+| 步骤 | 提交 | 内容 |
+|---|---|---|
+| 方案 | `e98e56b` | 本文档（codex 四轮评审：14+6+3+2 条意见全部吸收） |
+| Step 1 | `906d92d` | Go 模块路径 + 142 处 import + .golangci.yml FQN |
+| Step 2 | `23e1bb1` | 二进制/CLI/构建/openapi CLI 文案（原子提交） |
+| Step 3 | `a525500` | 数据文件迁移协议（六文件状态机/双锁/WAL/SHM 先迁主库最后/逐次 fsync）+ 测试矩阵 |
+| Step 4 | `bb1024b` | 对外契约改名 + 兼容别名（指标/webhook 头/套件环境变量） |
+| Step 5 | `a23dbb0` | 文档/品牌/元数据收尾 + 升级须知 |
+| Step 6 | 本次 | 终检（无代码变更，仅本记录） |
+
+终检结果：`make check` 全绿（lint/api-check 无漂移/api-breaking 无破坏/race 测试/
+vitest 31/31/完整构建）；e2e 5/5；镜像构建 + 容器 version/bootstrap/healthcheck
+冒烟；`make release VERSION=v0.0.0-final` 四平台归档名/SHA256SUMS/版本输出正确；
+真实旧库（12 表 goose v15）升级终态复测数据一致；docs-site 构建 + 路由 smoke
+48 检查通过；终检扫描剩余旧名全部归入白名单（兼容别名及其测试、本方案文档、升级指引/过渡说明、CHANGELOG 历史、四处历史规划/证据文档、openapi-baseline、MinIO 凭据、formerly 行）。
+
+**与方案的两处偏差（如实记录）**：
+1. promtool 校验未并入 e2e 脚本，而是通过测试钩子 `SB_METRICS_DUMP` 抓取
+   带鉴权的真实 `/metrics` 后经 docker promtool 校验（Step 4 与终检各一次，
+   新旧双名版本均通过）——即 §4.4.1 允许的"单独起临时实例验证"路径；e2e
+   是临时 cookie 会话，shell 侧集成需额外鉴权编排，收益不成比例。
+2. 回滚演练的自动化测试以裸 sqlite 按旧文件名直开代替旧二进制
+   （`TestRollbackAndReupgradeCycle`）；终检另用 main 分支构建的真实旧二进制
+   完成完整 old→new→old→new 四阶段演练（记录见下），两者互为补充。
+
+**真实旧二进制演练记录**：从 main（a218d09，改名前）构建真实 `supabackup`
+二进制建库写数据 → 新 `supacove` 二进制启动自动迁移、数据完整 → 按回滚
+流程改名回旧名、旧二进制重新启动读写正常 → 再升级回新二进制数据仍完整。
+
+**发布时待办**（首个改名版本 tag 时执行）：
+1. 为四处兼容 shim（metrics 别名、webhook 旧头、套件旧环境变量回退、旧锁持有）
+   创建移除跟踪 issue（代码注释已标注"两个 tag 版本后移除"）；
+2. 刷新 `api/openapi-baseline.yaml`（按 Makefile 惯例随 release tag 人工刷新）；
+3. 发布说明置顶重命名变更与升级指引（CHANGELOG `[Unreleased]` 条目已备好）。

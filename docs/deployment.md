@@ -129,8 +129,10 @@ sudo -u supacove SB_DATA_DIR=/var/lib/supacove /usr/local/bin/supacove bootstrap
    会在新版本首次启动时自动完成（含 WAL/SHM，已提交数据不丢）。要换
    用户或目录，按 disaster-recovery 的停机迁移步骤操作。上方 unit
    示例同样面向新安装。
-4. **镜像地址已变更**：GHCR 不做重定向，`ghcr.io/web-casa/supabackup`
-   的旧 tag 仍可拉取但不再更新，请尽快改用新地址。
+4. **镜像地址已变更**：GHCR 不做重定向，请尽快把拉取地址改为
+   `ghcr.io/web-casa/supacove`。改名后的**第一个**发布版本会同时把同一
+   镜像镜像到旧地址 `ghcr.io/web-casa/supabackup`（让 `:latest` 跟随者
+   收到改名版本），之后旧地址永久冻结、不再更新。
 5. 数据文件名迁移遇到异常组合（如双主库并存）会**拒绝启动**并给出
    文件清单与处置指引；回滚步骤见 disaster-recovery.md（按目标版本
    选择恢复文件名，并隔离两组三件套）。
