@@ -8,7 +8,9 @@ on:
   workflow_dispatch:
   merge_group:
 
-# Least privilege: no job writes to the repository.
+# Least privilege: every job is read-only, except the tag-only distribution
+# jobs — `release` (job-scoped contents:write, draft GitHub release with the
+# binaries) and the GHCR publish jobs (job-scoped packages:write).
 permissions:
   contents: read
 
@@ -327,3 +329,159 @@ jobs:
                       failed = True
           sys.exit(1 if failed else 0)
           PYEOF
+
+  # Standalone-binary distribution (docs/deployment.md 二进制发行版): on v*
+  # tags only, after the full gate (image waits on every other job), build
+  # the cross-compile matrix via `make release`, smoke the artifacts the same
+  # way the container is smoked, and attach them to a DRAFT GitHub release —
+  # a human runs the pre-release scans (docs/release-scan-evidence.md) and
+  # publishes.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [image]
+    # Job-scoped exception to the workflow-wide read-only default: creating
+    # the draft release is the only repository write in CI.
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build release archives (frontend + cross-compile matrix)
+        run: make release VERSION="${GITHUB_REF_NAME}"
+      - name: "Smoke the artifacts: checksums, version stamp, serve, healthz, clean SIGTERM"
+        run: |
+          set -euo pipefail
+          dist=dist/release
+          test -s "$dist/SHA256SUMS"
+          ( cd "$dist" && sha256sum -c SHA256SUMS )
+          # The runner is linux/amd64: exercise that build as a bare process,
+          # with PATH pointed at an EMPTY directory — pg_dump is genuinely
+          # absent and the control plane must still boot (the client is only
+          # needed when a backup actually runs).
+          name="supabackup_${GITHUB_REF_NAME#v}_linux_amd64"
+          bin="$dist/$name/supabackup"
+          "$bin" version | grep -F "supabackup ${GITHUB_REF_NAME}"
+          data=$(mktemp -d)
+          emptybin=$(mktemp -d)
+          env -i PATH="$emptybin" HOME="$data" SB_DATA_DIR="$data" \
+            SB_ADDR=127.0.0.1:18081 "$bin" serve &
+          pid=$!
+          cleanup() { kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          # Boot may still be migrating: poll for readiness before asserting.
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:18081/api/healthz 2>/dev/null | grep -q '"status":"ok"' && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18081/api/healthz | grep -q '"status":"ok"'
+          kill -TERM "$pid"
+          wait "$pid" && rc=0 || rc=$?
+          test "$rc" -eq 0 || { echo "serve exited $rc after SIGTERM" >&2; exit 1; }
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            dist/release/supabackup_*.tar.gz dist/release/SHA256SUMS \
+            --draft --verify-tag \
+            --title "supabackup ${GITHUB_REF_NAME}" \
+            --notes "独立二进制发行：linux/amd64、linux/arm64、darwin/amd64、darwin/arm64（tar.gz + SHA256SUMS）。
+          安装与 pg_dump 前提：docs/deployment.md「二进制发行版」；归档内 README.md 同述。
+          这是草稿：按 docs/release-scan-evidence.md 完成发布前扫描后手动 publish。"
+
+  # Container distribution: publish the release image to GHCR on v* tags.
+  # Each architecture builds NATIVELY — public repos get free arm64 hosted
+  # runners, and emulating the PGDG apt install of the whole client matrix
+  # under QEMU would be slow and flaky. Each leg pushes an anonymous digest;
+  # `image-tags` below merges them into the versioned tags, and waits for the
+  # `release` job so binaries and image never diverge in success state.
+  publish-image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [image]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      packages: write  # push image manifests to GHCR
+      contents: read
+    outputs:
+      # Matrix legs write disjoint keys; GitHub merges them into one map.
+      digest_amd64: ${{ steps.digest.outputs.amd64 }}
+      digest_arm64: ${{ steps.digest.outputs.arm64 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          target: runtime
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp || 'unknown' }}
+          # OCI labels link the GHCR package back to this repository.
+          labels: |
+            org.opencontainers.image.title=supabackup
+            org.opencontainers.image.description=SupaCove: platform-independent logical backups (Supabase/Neon/Railway) into your own S3-compatible storage
+            org.opencontainers.image.url=https://github.com/web-casa/supacove
+            org.opencontainers.image.source=https://github.com/web-casa/supacove
+            org.opencontainers.image.licenses=AGPL-3.0
+          outputs: type=image,name=ghcr.io/web-casa/supabackup,push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        id: digest
+        run: 'echo "${{ matrix.arch }}=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"'
+
+  # Merge the per-architecture digests into the public tag set: X.Y.Z (the
+  # tag with the leading v stripped) and `latest`. Runs only when BOTH the
+  # binary release draft and both image legs succeeded.
+  image-tags:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish-image, release]
+    permissions:
+      packages: write  # tag the merged manifest list
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge digests into versioned tags
+        run: |
+          set -euo pipefail
+          image=ghcr.io/web-casa/supabackup
+          ver="${GITHUB_REF_NAME#v}"
+          docker buildx imagetools create \
+            -t "$image:$ver" \
+            -t "$image:latest" \
+            "$image@${{ needs.publish-image.outputs.digest_amd64 }}" \
+            "$image@${{ needs.publish-image.outputs.digest_arm64 }}"
+          docker buildx imagetools inspect "$image:$ver"

@@ -5,6 +5,20 @@ All notable changes to supabackup.
 ## [Unreleased]
 
 ### Added
+- GHCR container distribution: `v*` tags, after the full CI gate, publish
+  `ghcr.io/web-casa/supabackup` as a multi-arch image (linux/amd64 +
+  linux/arm64, each built natively — no QEMU) tagged `<version>` and
+  `latest`; the manifest tags go live only after the binary-release draft
+  job also succeeded. Docs describe both install paths (image needs no host
+  pg_dump; binaries need one)
+- Standalone-binary distribution: `v*` tags, after the full CI gate,
+  cross-compile linux/amd64, linux/arm64, darwin/amd64 and darwin/arm64
+  tar.gz archives plus `SHA256SUMS` and attach them to a draft GitHub
+  release (human review before publishing). `make release` reproduces the
+  same artifacts locally. The single file embeds the SPA, the SQLite
+  control plane and the scheduler; the only external runtime dependency is
+  a host `pg_dump` client (install matrix in docs/deployment.md
+  二进制发行版, shipped as README.md inside every archive)
 - Recovery kit `supabase` profile: Supabase backups restore with a kit that
   checks the target first (superuser connection; every extension of the
   archive installable — before anything is written) and restores from an

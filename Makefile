@@ -14,7 +14,7 @@ GOBIN_DIR := $(GOBIN_DIR)
 endif
 OAPI := $(GOBIN_DIR)/oapi-codegen
 
-.PHONY: help build backend frontend image api-gen api-check api-breaking metrics-check e2e docs docs-build docs-preview dev test lint check clean
+.PHONY: help build backend frontend image release api-gen api-check api-breaking metrics-check e2e docs docs-build docs-preview dev test lint check clean
 .NOTPARALLEL:
 
 help:
@@ -38,6 +38,30 @@ image: ## Build the release container image (runtime stage, non-root, embedded S
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg BUILD_DATE=$(DATE) \
 		-t $(IMAGE) .
+
+# Standalone-binary distribution: CGO is off (pure-Go SQLite) and the SPA is
+# embedded, so one host cross-compiles the whole matrix into dist/release —
+# one tar.gz per target plus a SHA256SUMS file. CI publishes these on v* tags
+# (draft GitHub release); the only runtime prerequisite on the target host is
+# a pg_dump client (see deploy/binary-README.md, shipped inside every archive).
+RELEASE_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+DIST_DIR := dist/release
+
+release: frontend ## Cross-compile standalone-binary archives into dist/release
+	rm -rf $(DIST_DIR)
+	set -e; for target in $(RELEASE_TARGETS); do \
+		os=$${target%/*}; arch=$${target#*/}; \
+		name=supabackup_$(VERSION:v%=%)_$${os}_$${arch}; \
+		mkdir -p $(DIST_DIR)/$${name}; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath \
+			-ldflags '$(LDFLAGS)' -o $(DIST_DIR)/$${name}/supabackup \
+			./backend/cmd/supabackup; \
+		cp LICENSE $(DIST_DIR)/$${name}/LICENSE; \
+		cp deploy/binary-README.md $(DIST_DIR)/$${name}/README.md; \
+		tar --owner=0 --group=0 -czf $(DIST_DIR)/$${name}.tar.gz \
+			-C $(DIST_DIR) $${name}; \
+	done
+	cd $(DIST_DIR) && sha256sum supabackup_*.tar.gz > SHA256SUMS
 
 api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0
@@ -102,4 +126,4 @@ check: lint frontend api-check api-breaking test ## Local gate: static checks + 
 	$(MAKE) build
 
 clean:
-	rm -rf bin frontend/dist frontend/node_modules
+	rm -rf bin dist frontend/dist frontend/node_modules
