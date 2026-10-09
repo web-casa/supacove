@@ -5,8 +5,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: supabackup version
-      description: Output of `supabackup version` or the image tag / commit
+      label: supacove version
+      description: Output of `supacove version` or the image tag / commit
     validations: { required: true }
   - type: dropdown
     id: surface

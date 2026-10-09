@@ -255,11 +255,11 @@ jobs:
             VERSION=ci
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.head_commit.timestamp || 'unknown' }}
-          tags: supabackup:ci
+          tags: supacove:ci
       - name: "Image smoke: non-root, healthz, takeover, healthcheck, assets, SIGTERM"
         run: |
           set -euo pipefail
-          docker run -d --name sb-ci -p 18080:8080 supabackup:ci
+          docker run -d --name sb-ci -p 18080:8080 supacove:ci
           cleanup() { docker rm -f sb-ci >/dev/null 2>&1 || true; }
           trap cleanup EXIT
           test "$(docker exec sb-ci id -u)" = "10001"
@@ -273,7 +273,7 @@ jobs:
           curl -fsS http://127.0.0.1:18080/api/healthz | grep -q '"status":"ok"'
           code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18080/api/auth/bootstrap -H 'Content-Type: application/json' -d '{"token":"x","username":"nope","password":"nope-pass-123"}')
           test "$code" -ge 400
-          docker exec sb-ci /app/supabackup bootstrap | grep -q "One-time bootstrap token"
+          docker exec sb-ci /app/supacove bootstrap | grep -q "One-time bootstrap token"
           # The embedded SPA's hashed assets must actually be served, not just
           # an index referencing missing files (round-5 R5-P1-01).
           # JS may be served as text/javascript or application/javascript
@@ -315,7 +315,7 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             "aquasec/trivy:${TRIVY_VERSION}" image \
             --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
-            --exit-code 1 --skip-version-check supabackup:ci
+            --exit-code 1 --skip-version-check supacove:ci
       - name: "Workflow file is valid YAML with valid Bash"
         run: |
           python3 -m pip install --quiet pyyaml
@@ -377,9 +377,9 @@ jobs:
           # with PATH pointed at an EMPTY directory — pg_dump is genuinely
           # absent and the control plane must still boot (the client is only
           # needed when a backup actually runs).
-          name="supabackup_${GITHUB_REF_NAME#v}_linux_amd64"
-          bin="$dist/$name/supabackup"
-          "$bin" version | grep -F "supabackup ${GITHUB_REF_NAME}"
+          name="supacove_${GITHUB_REF_NAME#v}_linux_amd64"
+          bin="$dist/$name/supacove"
+          "$bin" version | grep -F "supacove ${GITHUB_REF_NAME}"
           data=$(mktemp -d)
           emptybin=$(mktemp -d)
           env -i PATH="$emptybin" HOME="$data" SB_DATA_DIR="$data" \
@@ -402,9 +402,9 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" \
-            dist/release/supabackup_*.tar.gz dist/release/SHA256SUMS \
+            dist/release/supacove_*.tar.gz dist/release/SHA256SUMS \
             --draft --verify-tag \
-            --title "supabackup ${GITHUB_REF_NAME}" \
+            --title "supacove ${GITHUB_REF_NAME}" \
             --notes "独立二进制发行：linux/amd64、linux/arm64、darwin/amd64、darwin/arm64（tar.gz + SHA256SUMS）。
           安装与 pg_dump 前提：docs/deployment.md「二进制发行版」；归档内 README.md 同述。
           这是草稿：按 docs/release-scan-evidence.md 完成发布前扫描后手动 publish。"
@@ -457,12 +457,12 @@ jobs:
             BUILD_DATE=${{ github.event.head_commit.timestamp || 'unknown' }}
           # OCI labels link the GHCR package back to this repository.
           labels: |
-            org.opencontainers.image.title=supabackup
+            org.opencontainers.image.title=supacove
             org.opencontainers.image.description=SupaCove: platform-independent logical backups (Supabase/Neon/Railway) into your own S3-compatible storage
             org.opencontainers.image.url=https://github.com/web-casa/supacove
             org.opencontainers.image.source=https://github.com/web-casa/supacove
             org.opencontainers.image.licenses=AGPL-3.0
-          outputs: type=image,name=ghcr.io/web-casa/supabackup,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/web-casa/supacove,push-by-digest=true,name-canonical=true,push=true
       - name: Export digest
         id: digest
         run: 'echo "${{ matrix.arch }}=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"'
@@ -487,7 +487,7 @@ jobs:
       - name: Merge digests into versioned tags
         run: |
           set -euo pipefail
-          image=ghcr.io/web-casa/supabackup
+          image=ghcr.io/web-casa/supacove
           ver="${GITHUB_REF_NAME#v}"
           docker buildx imagetools create \
             -t "$image:$ver" \

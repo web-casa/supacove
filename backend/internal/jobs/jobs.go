@@ -865,7 +865,7 @@ func (r *Runner) runJob(ctx context.Context, jobID, dbID int64) {
 		return
 	}
 	if recipient == "" {
-		r.fail(jobID, ClassUnknown, redact("age recipient not configured; run `supabackup age init` first"))
+		r.fail(jobID, ClassUnknown, redact("age recipient not configured; run `supacove age init` first"))
 		return
 	}
 

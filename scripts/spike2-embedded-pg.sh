@@ -4,15 +4,15 @@
 # PostgreSQL for automatic restore verification?
 #
 # Usage: scripts/spike2-embedded-pg.sh [image]
-#   default image: supabackup:runtime-spike (built with
-#   `docker build --target runtime -t supabackup:runtime . &&
-#    docker build -f Dockerfile.spike -t supabackup:runtime-spike .`)
+#   default image: supacove:runtime-spike (built with
+#   `docker build --target runtime -t supacove:runtime . &&
+#    docker build -f Dockerfile.spike -t supacove:runtime-spike .`)
 #
 # Evidence (kept): $OUT holds the inner script, the truncated-archive stderr
 # and a summary. The canary (root-0600 unreadable by UID 10001) MUST pass;
 # otherwise the spike reports INCOMPLETE and exits non-zero.
 set -euo pipefail
-IMAGE="${1:-supabackup:runtime-spike}"
+IMAGE="${1:-supacove:runtime-spike}"
 ROWS="${ROWS:-100000}"
 OUT="${OUT:-$(mktemp -d)}"
 mkdir -p "$OUT"

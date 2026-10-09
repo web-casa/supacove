@@ -1,9 +1,9 @@
-# supabackup — single-container production image.
+# supacove — single-container production image.
 # Multi-stage: build SPA → build Go binary with the SPA embedded → slim runtime.
 # Build (release = the `runtime` stage, the file's LAST and therefore default
 # stage — a plain `docker build` cannot pick up anything else):
-#   docker build -t supabackup .                    # defaults to runtime
-#   docker build --target runtime -t supabackup .   # explicit, for scripts
+#   docker build -t supacove .                    # defaults to runtime
+#   docker build --target runtime -t supacove .   # explicit, for scripts
 # The ADR-004 experiment image (release runtime + PG server binaries) lives in
 # Dockerfile.spike and must never ship; compose and CI pin target: runtime.
 
@@ -28,7 +28,7 @@ COPY api/ ./api/
 COPY --from=frontend /src/dist ./backend/internal/web/dist
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
-    -o /out/supabackup ./backend/cmd/supabackup
+    -o /out/supacove ./backend/cmd/supacove
 
 
 FROM debian:bookworm-slim AS runtime
@@ -60,10 +60,10 @@ RUN apt-get update \
 # Non-root runtime user; the data volume must be writable by UID 10001.
 # Pre-create the volume mountpoint with the right owner: Docker creates
 # anonymous volumes as root:root, which the runtime user could not write.
-RUN useradd --uid 10001 --user-group --no-create-home supabackup \
+RUN useradd --uid 10001 --user-group --no-create-home supacove \
     && install -d -o 10001 -g 10001 -m 0700 /app/data
 WORKDIR /app
-COPY --from=backend /out/supabackup /app/supabackup
+COPY --from=backend /out/supacove /app/supacove
 
 ENV SB_DATA_DIR=/app/data \
     SB_ADDR=:8080
@@ -72,8 +72,8 @@ EXPOSE 8080
 USER 10001:10001
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-    CMD ["/app/supabackup", "healthcheck"]
+    CMD ["/app/supacove", "healthcheck"]
 
-ENTRYPOINT ["/app/supabackup"]
+ENTRYPOINT ["/app/supacove"]
 CMD ["serve"]
 

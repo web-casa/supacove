@@ -1,4 +1,4 @@
-BIN := bin/supabackup
+BIN := bin/supacove
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -21,7 +21,7 @@ help:
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 backend: ## Build the backend binary (embeds the current web dist)
-	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN) ./backend/cmd/supabackup
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN) ./backend/cmd/supacove
 
 frontend: ## Build the SPA and copy it into the Go embed directory
 	cd frontend && npm ci && npm run build
@@ -31,7 +31,7 @@ frontend: ## Build the SPA and copy it into the Go embed directory
 
 build: frontend backend ## Build everything: SPA first, then the Go binary embedding it
 
-IMAGE ?= supabackup:local
+IMAGE ?= supacove:local
 image: ## Build the release container image (runtime stage, non-root, embedded SPA)
 	docker build --target runtime \
 		--build-arg VERSION=$(VERSION) \
@@ -51,17 +51,17 @@ release: frontend ## Cross-compile standalone-binary archives into dist/release
 	rm -rf $(DIST_DIR)
 	set -e; for target in $(RELEASE_TARGETS); do \
 		os=$${target%/*}; arch=$${target#*/}; \
-		name=supabackup_$(VERSION:v%=%)_$${os}_$${arch}; \
+		name=supacove_$(VERSION:v%=%)_$${os}_$${arch}; \
 		mkdir -p $(DIST_DIR)/$${name}; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath \
-			-ldflags '$(LDFLAGS)' -o $(DIST_DIR)/$${name}/supabackup \
-			./backend/cmd/supabackup; \
+			-ldflags '$(LDFLAGS)' -o $(DIST_DIR)/$${name}/supacove \
+			./backend/cmd/supacove; \
 		cp LICENSE $(DIST_DIR)/$${name}/LICENSE; \
 		cp deploy/binary-README.md $(DIST_DIR)/$${name}/README.md; \
 		tar --owner=0 --group=0 -czf $(DIST_DIR)/$${name}.tar.gz \
 			-C $(DIST_DIR) $${name}; \
 	done
-	cd $(DIST_DIR) && sha256sum supabackup_*.tar.gz > SHA256SUMS
+	cd $(DIST_DIR) && sha256sum supacove_*.tar.gz > SHA256SUMS
 
 api-gen: ## Regenerate server + frontend API types from api/openapi.yaml
 	@test -x "$(OAPI)" || GOBIN="$(GOBIN_DIR)" go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0

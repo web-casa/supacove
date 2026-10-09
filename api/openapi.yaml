@@ -1,9 +1,9 @@
 openapi: 3.0.3
 info:
-  title: supabackup API
+  title: SupaCove API
   version: 0.1.0
   description: |
-    supabackup control-plane API (Phase 1 scope: health, bootstrap, auth).
+    SupaCove control-plane API (Phase 1 scope: health, bootstrap, auth).
 
     Contract-first: this file is the single source of truth. Server types are
     generated with oapi-codegen (strict server), frontend types with
@@ -1241,7 +1241,7 @@ components:
         token:
           type: string
           maxLength: 128
-          description: One-time token printed by `supabackup bootstrap`.
+          description: One-time token printed by `supacove bootstrap`.
         username:
           type: string
           minLength: 3

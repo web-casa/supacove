@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 // E2E runs against the FINAL embedded artifact: the helper in the Makefile
-// starts bin/supabackup on a free port with a throwaway data dir and exports
+// starts bin/supacove on a free port with a throwaway data dir and exports
 // SB_E2E_BASE_URL / SB_E2E_TOKEN / SB_E2E_ADMIN before invoking this config.
 export default defineConfig({
   testDir: "./e2e",

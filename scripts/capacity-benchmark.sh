@@ -13,7 +13,7 @@ WORK=$(mktemp -d /tmp/sb-capacity.XXXXXX)
 trap 'docker rm -f "$CONTAINER" >/dev/null 2>&1 || true' EXIT
 CONTAINER="sb-capacity-$(date +%s)"
 
-echo "== supabackup capacity benchmark =="
+echo "== supacove capacity benchmark =="
 echo "rows=$ROWS payload_bytes=$PAYLOAD workdir=$WORK"
 
 # 1) Throwaway PostgreSQL on a random loopback port.
