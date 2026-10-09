@@ -27,6 +27,11 @@ env:
   # Pinned tool versions: scan results must be reproducible per commit.
   # Third-party ACTIONS are pinned by commit SHA (immutable); versions below
   # are Go/CLI tools installed at run time.
+  # Go patch-day note: a brand-new patch can reach the module proxy hours
+  # before actions/go-versions carries it; if go-version-file fails to
+  # download, bridge temporarily with `go-version: "1.26"` + GOTOOLCHAIN=auto
+  # (setup-go v7 sets GOTOOLCHAIN=local and cannot bridge — stay on the
+  # exact-file pin there).
   GOLANGCI_VERSION: v2.14.0
   OAPI_CODEGEN_VERSION: v2.5.0
   OASDIFF_VERSION: v1.11.5
@@ -42,9 +47,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          # Minor only — GOTOOLCHAIN=auto upgrades to the exact go.mod patch
-          # via the module proxy (fresh patches lag in the manifest/CDN).
-          go-version: "1.26"
+          go-version-file: go.mod
           cache: true
       # The M1 kernel-chain tests restore real PG18 containers: FindClient
       # needs a pg_dump with major >= 18 (runner stock tops out below that).
@@ -89,9 +92,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          # Minor only — GOTOOLCHAIN=auto upgrades to the exact go.mod patch
-          # via the module proxy (fresh patches lag in the manifest/CDN).
-          go-version: "1.26"
+          go-version-file: go.mod
           cache: true
       - name: Install oapi-codegen
         run: "go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@\"${OAPI_CODEGEN_VERSION}\""
@@ -137,9 +138,7 @@ jobs:
           fetch-depth: 0  # gitleaks needs history for PR commit ranges
       - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          # Minor only — GOTOOLCHAIN=auto upgrades to the exact go.mod patch
-          # via the module proxy (fresh patches lag in the manifest/CDN).
-          go-version: "1.26"
+          go-version-file: go.mod
       - name: govulncheck (pinned)
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@"${GOVULNCHECK_VERSION}"
@@ -200,9 +199,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          # Minor only — GOTOOLCHAIN=auto upgrades to the exact go.mod patch
-          # via the module proxy (fresh patches lag in the manifest/CDN).
-          go-version: "1.26"
+          go-version-file: go.mod
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -361,9 +358,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
-          # Minor only — GOTOOLCHAIN=auto upgrades to the exact go.mod patch
-          # via the module proxy (fresh patches lag in the manifest/CDN).
-          go-version: "1.26"
+          go-version-file: go.mod
           cache: true
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
