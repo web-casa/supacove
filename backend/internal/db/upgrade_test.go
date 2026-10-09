@@ -53,7 +53,7 @@ func readEmbedded(t *testing.T, name string) string {
 // binary built it.
 func buildLegacyDB(t *testing.T, dir string, legacy legacyMigrations) {
 	t.Helper()
-	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supacove.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func buildLegacyDB(t *testing.T, dir string, legacy legacyMigrations) {
 // already migrated by newer code.
 func assertLegacyFixture(t *testing.T, dir string, wantColumn bool) {
 	t.Helper()
-	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supacove.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestUpgradedStoreStillWorks(t *testing.T) {
 	if err := s.Migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "supabackup.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "supacove.db")); err != nil {
 		t.Fatal(err)
 	}
 	if ready, err := s.SchemaReady(); err != nil || !ready {
@@ -274,7 +274,7 @@ func TestUpgradeFromOriginal0004(t *testing.T) {
 	buildLegacyDB(t, dir, legacy)
 
 	// Fixture sanity: the legacy jobs table must NOT have duration_secs.
-	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supacove.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestUpgradeWebhookVocabulary(t *testing.T) {
 	}
 	buildLegacyDB(t, dir, legacy)
 	// A Phase-4-era webhook row with the OLD default vocabulary.
-	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supacove.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestUpgradeWebhookVocabulary(t *testing.T) {
 // another Up must NOT double-convert ('expired' inside 'backup_expired').
 func TestWebhookVocabularyDownUpCycle(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "supabackup.db")
+	dbPath := filepath.Join(dir, "supacove.db")
 
 	// Legacy base at v9 (0001+0004+0009), one webhook with the old words.
 	legacy := legacyMigrations{
@@ -443,7 +443,7 @@ func TestLegacyDuplicateWebhookNamesSurvive(t *testing.T) {
 		"0009_scheduling.sql":    &fstest.MapFile{Data: []byte(readEmbedded(t, "0009_scheduling.sql"))},
 	}
 	buildLegacyDB(t, dir, legacy)
-	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supabackup.db"))
+	ro, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "supacove.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +515,7 @@ func TestWebhookVocabularyAllCombinationsCycle(t *testing.T) {
 		return strings.Join(parts, ",")
 	}
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "supabackup.db")
+	dbPath := filepath.Join(dir, "supacove.db")
 
 	legacy := legacyMigrations{
 		"0001_auth.sql":          &fstest.MapFile{Data: []byte(readEmbedded(t, "0001_auth.sql"))},

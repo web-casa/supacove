@@ -196,7 +196,7 @@ func TestOpenTightensDataDirPermissions(t *testing.T) {
 	if perm := st.Mode().Perm(); perm != 0o700 {
 		t.Fatalf("data dir must be tightened to 0700, got %04o", perm)
 	}
-	dbst, err := os.Stat(filepath.Join(loose, "supabackup.db"))
+	dbst, err := os.Stat(filepath.Join(loose, "supacove.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

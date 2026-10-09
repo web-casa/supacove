@@ -117,12 +117,23 @@ func mustLoadConfig(log *slog.Logger) *config.Config {
 func openStore(cfg *config.Config, log *slog.Logger) *db.Store {
 	store, err := db.Open(cfg.DataDir)
 	if err != nil {
-		if errors.Is(err, db.ErrLocked) {
+		switch {
+		case errors.Is(err, db.ErrLocked):
 			log.Error("another supacove instance holds the advisory lock on this data directory",
 				"data_dir", cfg.DataDir)
-			os.Exit(1)
+		case errors.Is(err, db.ErrLegacyInstance):
+			log.Error("a legacy supabackup instance is still running on this data directory; "+
+				"stop it (and any legacy CLI commands), then start supacove again — "+
+				"the data files migrate automatically on the first start",
+				"data_dir", cfg.DataDir)
+		case errors.Is(err, db.ErrInconsistentState):
+			log.Error("data directory mixes supabackup and supacove files in a way supacove will not auto-resolve; "+
+				"stop ALL processes (server and CLI, both generations) and follow the error's guidance",
+				"err", err, "data_dir", cfg.DataDir)
+		default:
+			fatal(log, err)
 		}
-		fatal(log, err)
+		os.Exit(1)
 	}
 	return store
 }
