@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.23.11
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.0
 	github.com/go-chi/chi/v5 v5.3.2
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/robfig/cron/v3 v3.0.1
