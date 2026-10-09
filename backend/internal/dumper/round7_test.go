@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/redact"
 )
 
 func TestRound7QuotedRedaction(t *testing.T) {

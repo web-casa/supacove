@@ -7,7 +7,7 @@ package platform
 import (
 	"strings"
 
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/i18n"
 )
 
 // Platform represents a known PostgreSQL hosting platform.
@@ -163,7 +163,7 @@ func RecoveryNotes(p Platform) []string {
 			"a new Supabase project conflicts with its managed schemas, system",
 			"roles and hosted extensions. Follow Supabase's official backup/restore",
 			"guide for project-to-project moves.",
-			"SUPABACKUP_PROFILE=generic restores the archive as is.",
+			"SUPACOVE_PROFILE=generic restores the archive as is.",
 		}
 	case Neon:
 		return []string{

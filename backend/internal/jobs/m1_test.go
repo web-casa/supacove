@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/crypto"
+	"github.com/web-casa/supacove/backend/internal/crypto"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
 )
 
 // TestMain stops the shared PostgreSQL container after all tests.
@@ -287,7 +287,7 @@ func TestM1_FullKernelChain(t *testing.T) {
 		t.Fatalf("success record incomplete: %+v", tk)
 	}
 
-	// --- the restore half: NO supabackup, ONLY artifact + offline identity + PG tools ---
+	// --- the restore half: NO supacove, ONLY artifact + offline identity + PG tools ---
 	artifact, err := os.ReadFile(filepath.Join(stagingDir, fmt.Sprintf("backup-job%d.dump.age", jobID)))
 	if err != nil {
 		t.Fatal(err)

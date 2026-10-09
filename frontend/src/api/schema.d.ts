@@ -733,7 +733,7 @@ export interface components {
             createdAt: number;
         };
         BootstrapRequest: {
-            /** @description One-time token printed by `supabackup bootstrap`. */
+            /** @description One-time token printed by `supacove bootstrap`. */
             token: string;
             username: string;
             /** Format: password */

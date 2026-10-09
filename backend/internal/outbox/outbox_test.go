@@ -14,7 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/cloudfan/supabackup/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/db"
 )
 
 func testEvent(id string) Event {
@@ -65,6 +65,23 @@ func TestDeliverySuccessAndRetry(t *testing.T) {
 		}
 		if payload["job_id"] == nil {
 			t.Error("payload missing job_id")
+		}
+		// The rename transition sends both header generations; the stable
+		// event id must be identical across them, and the values must be
+		// the actual event (not merely non-empty).
+		if r.Header.Get("X-Supacove-Event") != "backup_failed" {
+			t.Errorf("X-Supacove-Event = %q, want backup_failed", r.Header.Get("X-Supacove-Event"))
+		}
+		if r.Header.Get("X-Supacove-Event-ID") != "evt-ok" {
+			t.Errorf("X-Supacove-Event-ID = %q, want evt-ok", r.Header.Get("X-Supacove-Event-ID"))
+		}
+		if r.Header.Get("X-Supabackup-Event") != r.Header.Get("X-Supacove-Event") {
+			t.Errorf("legacy event header diverges: %q vs %q",
+				r.Header.Get("X-Supabackup-Event"), r.Header.Get("X-Supacove-Event"))
+		}
+		if r.Header.Get("X-Supabackup-Event-ID") != r.Header.Get("X-Supacove-Event-ID") {
+			t.Errorf("legacy event-id header diverges: %q vs %q",
+				r.Header.Get("X-Supabackup-Event-ID"), r.Header.Get("X-Supacove-Event-ID"))
 		}
 		w.WriteHeader(200)
 	}))

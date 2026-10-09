@@ -11,7 +11,7 @@ SupaCove 是一个自托管的 PostgreSQL 备份服务，面向 Supabase、Neon�
 Aiven、Prisma Postgres、TigerData、Miget、Render 以及任意自托管 PostgreSQL。它把 `pg_dump` 的输出流式加密（age）后写入**你自己的**
 对象存储（S3 / R2 / B2 / MinIO），并在本地暂存一份可下载的密文。
 
-二进制、容器镜像、指标名和 webhook 请求头目前仍沿用早期名称 `supabackup`。文档里的命令和标识符都按软件实际接受的写法给出。
+产品原名 `supabackup`：二进制、镜像、指标名和 webhook 请求头现已使用 `supacove` 新名（过渡期旧指标名与旧请求头作为等值别名并存），`SB_*` 环境变量前缀保持不变。文档里的命令和标识符都按软件实际接受的写法给出。
 
 ## 四条保证
 

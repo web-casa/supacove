@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/stats"
-	"github.com/cloudfan/supabackup/backend/internal/storage"
+	"github.com/web-casa/supacove/backend/internal/stats"
+	"github.com/web-casa/supacove/backend/internal/storage"
 )
 
 // Harness for the ctx-gone semantics tests: a runner whose lifeCtx we own,

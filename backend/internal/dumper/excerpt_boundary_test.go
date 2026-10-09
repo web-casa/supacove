@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/redact"
 )
 
 // TestExcerptComposedEscapeAtBoundary (round-14/15 review): the composed

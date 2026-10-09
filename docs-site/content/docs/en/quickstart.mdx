@@ -11,10 +11,12 @@ Use the published GHCR image (`linux/amd64` + `linux/arm64`; see
 [Installation](/docs/installation) for release binaries or a local build):
 
 ```bash
-docker run -d --name supabackup \
+# Fresh-install example — upgrading from a pre-rename supabackup deployment
+# must keep the ORIGINAL supabackup-data volume: see the installation page.
+docker run -d --name supacove \
   -p 127.0.0.1:8080:8080 \
-  -v supabackup-data:/app/data \
-  ghcr.io/web-casa/supabackup:latest
+  -v supacove-data:/app/data \
+  ghcr.io/web-casa/supacove:latest
 ```
 
 The image runs as non-root (UID 10001) and ships PostgreSQL clients 14–18
@@ -29,7 +31,7 @@ staged ciphertext — it is your most important asset besides the bucket.
 A fresh instance can only be claimed with a local one-time token:
 
 ```bash
-docker exec supabackup /app/supabackup bootstrap
+docker exec supacove /app/supacove bootstrap
 ```
 
 Open `http://127.0.0.1:8080` (plain-HTTP loopback works locally; production
@@ -41,7 +43,7 @@ characters. Tokens live 15 minutes and are single-use.
 ## 3. Create the age identity
 
 ```bash
-docker exec supabackup /app/supabackup age init > identity.txt
+docker exec supacove /app/supacove age init > identity.txt
 ```
 
 <Callout type="error" title="The private key is printed exactly once">

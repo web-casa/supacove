@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/manifest"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/verifier"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/manifest"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/verifier"
 )
 
 // requireHostPGServer skips unless a local PostgreSQL SERVER installation

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/outbox"
 )
 
 // promLabel renders a label value in the Prometheus text format: ONLY
@@ -34,7 +34,31 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	uptime := int64(time.Since(s.started).Seconds())
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	// Every family is emitted twice: under its current supacove_ name and
+	// as a DEPRECATED supabackup_-prefixed alias, so existing dashboards and
+	// alert rules keep firing across the rename — the same pattern the
+	// pre-Phase-7 shortcut gauges already use. Samples of one family stay
+	// grouped (HELP/TYPE then samples) because scrapers and the format gate
+	// reject interleaving. Remove the alias half two tagged releases after
+	// the rename ships (docs/rename-supabackup-to-supacove-plan.md §4.4 —
+	// file the removal issue when the first post-rename tag ships).
+	legacyName := func(name string) string {
+		return "supabackup_" + strings.TrimPrefix(name, "supacove_")
+	}
+	emitFamily := func(name, help string, samples func(yield func(labels string, value any))) {
+		l := legacyName(name)
+		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n", name, help, name)
+		samples(func(labels string, value any) { fmt.Fprintf(w, "%s%s %v\n", name, labels, value) })
+		fmt.Fprintf(w, "# HELP %s DEPRECATED alias of %s (legacy supabackup_ name).\n# TYPE %s gauge\n", l, name, l)
+		samples(func(labels string, value any) { fmt.Fprintf(w, "%s%s %v\n", l, labels, value) })
+	}
 	gauge := func(name, help string, value any) {
+		emitFamily(name, help, func(yield func(string, any)) { yield("", value) })
+	}
+	// plain writes a family without an alias — only for the two shortcut
+	// gauges that were deprecated long before the rename and are NOT
+	// re-prefixed.
+	plain := func(name, help string, value any) {
 		fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %v\n", name, help, name, name, value)
 	}
 	// Collector failures are exposed explicitly: a scrape must never render
@@ -42,9 +66,9 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	scrapeErrors := map[string]bool{}
 	failed := func(collector string) { scrapeErrors[collector] = true }
 
-	gauge("supabackup_uptime_seconds", "Uptime in seconds.", uptime)
-	gauge("supabackup_go_goroutines", "Number of goroutines.", runtime.NumGoroutine())
-	gauge("supabackup_heap_alloc_bytes", "Heap allocation in bytes.", ms.HeapAlloc)
+	gauge("supacove_uptime_seconds", "Uptime in seconds.", uptime)
+	gauge("supacove_go_goroutines", "Number of goroutines.", runtime.NumGoroutine())
+	gauge("supacove_heap_alloc_bytes", "Heap allocation in bytes.", ms.HeapAlloc)
 
 	// Job outcomes (Phase 7: 任务数 per status).
 	rows, err := s.store.DB.QueryContext(ctx, `SELECT status, COUNT(*) FROM jobs GROUP BY status`)
@@ -69,11 +93,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			failed("jobs")
 		}
 		rows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
-		fmt.Fprintf(w, "# HELP supabackup_jobs Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).\n")
-		fmt.Fprintf(w, "# TYPE supabackup_jobs gauge\n")
 		var succeeded, failed int64
 		for _, x := range kvs {
-			fmt.Fprintf(w, "supabackup_jobs{status=%s} %d\n", promLabel(x.status), x.n)
 			switch x.status {
 			case "succeeded":
 				succeeded = x.n
@@ -81,10 +102,16 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 				failed = x.n
 			}
 		}
-		// Legacy gauges (pre-Phase-7): kept so existing alert rules and
-		// dashboards keep firing across the upgrade; prefer supabackup_jobs.
-		gauge("supabackup_jobs_succeeded", "DEPRECATED alias of supabackup_jobs{status=\"succeeded\"}.", succeeded)
-		gauge("supabackup_jobs_failed", "DEPRECATED alias of supabackup_jobs{status=\"failed\"}.", failed)
+		emitFamily("supacove_jobs", "Backup jobs by terminal/active status (current state distribution, NOT a monotonic counter).",
+			func(yield func(string, any)) {
+				for _, x := range kvs {
+					yield(fmt.Sprintf("{status=%s}", promLabel(x.status)), x.n)
+				}
+			})
+		// Pre-Phase-7 shortcut gauges: deprecated long before the rename and
+		// kept under their legacy names only; prefer supacove_jobs.
+		plain("supabackup_jobs_succeeded", "DEPRECATED alias of supacove_jobs{status=\"succeeded\"}.", succeeded)
+		plain("supabackup_jobs_failed", "DEPRECATED alias of supacove_jobs{status=\"failed\"}.", failed)
 	}
 
 	// Remote commit inputs (protocol C success rate).
@@ -96,8 +123,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		 FROM jobs`).Scan(&committed, &uploadFailed); err != nil {
 		failed("remote") // omit the gauges: a query outage must not read as 0
 	} else {
-		gauge("supabackup_remote_commits", "Backups remotely committed (or deleted after a committed lifetime).", committed)
-		gauge("supabackup_remote_upload_failures", "Jobs failed in the storage_upload class.", uploadFailed)
+		gauge("supacove_remote_commits", "Backups remotely committed (or deleted after a committed lifetime).", committed)
+		gauge("supacove_remote_upload_failures", "Jobs failed in the storage_upload class.", uploadFailed)
 	}
 
 	// Verification status distribution over succeeded backups.
@@ -125,11 +152,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			failed("verification")
 		}
 		vrows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
-		fmt.Fprintf(w, "# HELP supabackup_verification Restore-verification states of succeeded backups.\n")
-		fmt.Fprintf(w, "# TYPE supabackup_verification gauge\n")
-		for _, x := range kvs {
-			fmt.Fprintf(w, "supabackup_verification{status=%s} %d\n", promLabel(x.status), x.n)
-		}
+		emitFamily("supacove_verification", "Restore-verification states of succeeded backups.",
+			func(yield func(string, any)) {
+				for _, x := range kvs {
+					yield(fmt.Sprintf("{status=%s}", promLabel(x.status)), x.n)
+				}
+			})
 	}
 
 	// Last successful snapshot per database (what the dead-man switch
@@ -160,16 +188,17 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			failed("last_success")
 		}
 		lrows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
-		fmt.Fprintf(w, "# HELP supabackup_last_success_timestamp Last successful backup snapshot per database (unix seconds).\n")
-		fmt.Fprintf(w, "# TYPE supabackup_last_success_timestamp gauge\n")
-		for _, x := range kvs {
-			fmt.Fprintf(w, "supabackup_last_success_timestamp{database=%s} %d\n", promLabel(x.name), x.at)
-		}
+		emitFamily("supacove_last_success_timestamp", "Last successful backup snapshot per database (unix seconds).",
+			func(yield func(string, any)) {
+				for _, x := range kvs {
+					yield(fmt.Sprintf("{database=%s}", promLabel(x.name)), x.at)
+				}
+			})
 	}
 
 	// Staging disk usage (bounded by retention; best-effort walk).
 	stagingBytes, stagingErr := s.stagingBytes()
-	gauge("supabackup_staging_bytes", "Bytes currently staged in the local staging directory.", stagingBytes)
+	gauge("supacove_staging_bytes", "Bytes currently staged in the local staging directory.", stagingBytes)
 	if stagingErr {
 		failed("staging")
 	}
@@ -179,8 +208,8 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		failed("outbox")
 	} else {
-		gauge("supabackup_outbox_pending", "Notification outbox entries awaiting delivery.", pending)
-		gauge("supabackup_outbox_dead", "Notification outbox entries that exhausted retries.", dead)
+		gauge("supacove_outbox_pending", "Notification outbox entries awaiting delivery.", pending)
+		gauge("supacove_outbox_dead", "Notification outbox entries that exhausted retries.", dead)
 	}
 
 	// Overview protection states (Phase 7 four-state view).
@@ -216,11 +245,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			failed("protection")
 		}
 		orows.Close() //nolint:sqlclosecheck // rows fully scanned then closed before emitting (same design as jobs/scheduler)
-		fmt.Fprintf(w, "# HELP supabackup_databases_protection Databases by protection state (fresh/expired/never).\n")
-		fmt.Fprintf(w, "# TYPE supabackup_databases_protection gauge\n")
-		for _, state := range []string{"fresh", "expired", "never"} {
-			fmt.Fprintf(w, "supabackup_databases_protection{state=%s} %d\n", promLabel(state), counts[state])
-		}
+		emitFamily("supacove_databases_protection", "Databases by protection state (fresh/expired/never).",
+			func(yield func(string, any)) {
+				for _, state := range []string{"fresh", "expired", "never"} {
+					yield(fmt.Sprintf("{state=%s}", promLabel(state)), counts[state])
+				}
+			})
 	}
 
 	// Surface collector failures explicitly (omit the metric when clean so
@@ -231,11 +261,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			names = append(names, c)
 		}
 		sort.Strings(names)
-		fmt.Fprintf(w, "# HELP supabackup_scrape_errors Collectors that failed during this scrape.\n")
-		fmt.Fprintf(w, "# TYPE supabackup_scrape_errors gauge\n")
-		for _, c := range names {
-			fmt.Fprintf(w, "supabackup_scrape_errors{collector=%s} 1\n", promLabel(c))
-		}
+		emitFamily("supacove_scrape_errors", "Collectors that failed during this scrape.",
+			func(yield func(string, any)) {
+				for _, c := range names {
+					yield(fmt.Sprintf("{collector=%s}", promLabel(c)), 1)
+				}
+			})
 	}
 }
 

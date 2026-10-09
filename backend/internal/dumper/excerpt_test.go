@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
 )
 
 // TestExcerptOfReviewFixtures (round-11 review R11-P1-01): the three leak

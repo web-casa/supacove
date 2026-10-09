@@ -10,16 +10,19 @@ description: /metrics 语义、面板口径与告警建议
 
 ## 指标家族
 
+过渡期内所有指标族同时以改名前的 `supabackup_*` 名称等值双发（deprecated 别名，改名后两个正式版本移除）；请尽快把抓取方切换到 `supacove_*`。例外：Phase 7 之前的快捷指标 `supabackup_jobs_succeeded` / `supabackup_jobs_failed` 只有旧名、没有新名——请改查 `supacove_jobs{status="succeeded"}` / `{status="failed"}`。
+
 | 指标 | 语义 |
 |---|---|
-| `supabackup_jobs{status=…}` | 当前各状态任务分布（gauge，非单调计数器；历史 `_total` 后缀族已改名） |
-| `supabackup_verification{status=…}` | 成功任务的验证状态分布 |
-| `supabackup_last_success_timestamp{database=…}` | 每库最近一次成功备份（unix 秒） |
-| `supabackup_databases_protection{state=…}` | 保护状态分布（fresh/expired/never） |
-| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | 当前远端已提交（含已删除）与上传失败任务数（gauge，查询自任务表，非独立计数器；不要按单调 counter 做 rate） |
-| `supabackup_outbox_pending` / `supabackup_outbox_dead` | 通知队列健康（投递中数量请看控制台“投递日志”，无对应指标） |
-| `supabackup_staging_bytes` | 暂存占用（采集失败时仍输出尽力值并置 scrape_errors） |
-| `supabackup_scrape_errors{collector=…}` | 采集器故障信号：非零时同次抓取的对应家族可能缺失 |
+| `supacove_jobs{status=…}` | 当前各状态任务分布（gauge，非单调计数器；历史 `_total` 后缀族已改名） |
+| `supacove_verification{status=…}` | 成功任务的验证状态分布 |
+| `supacove_last_success_timestamp{database=…}` | 每库最近一次成功备份（unix 秒） |
+| `supacove_databases_protection{state=…}` | 保护状态分布（fresh/expired/never） |
+| `supacove_remote_commits` / `supacove_remote_upload_failures` | 当前远端已提交（含已删除）与上传失败任务数（gauge，查询自任务表，非独立计数器；不要按单调 counter 做 rate） |
+| `supacove_outbox_pending` / `supacove_outbox_dead` | 通知队列健康（投递中数量请看控制台“投递日志”，无对应指标） |
+| `supacove_staging_bytes` | 暂存占用（采集失败时仍输出尽力值并置 scrape_errors） |
+| `supacove_uptime_seconds` / `supacove_go_goroutines` / `supacove_heap_alloc_bytes` | 进程健康：运行时长、goroutine 数、堆分配 |
+| `supacove_scrape_errors{collector=…}` | 采集器故障信号：非零时同次抓取的对应家族可能缺失 |
 
 标签只含低基数值（状态、库名、采集器名），不含任务 ID、主机或凭据。
 
@@ -34,7 +37,7 @@ description: /metrics 语义、面板口径与告警建议
 
 ## 告警建议
 
-1. `time() - supabackup_last_success_timestamp` 超过你配置的**新鲜度阈值**（该值取自任务 `started_at`，是成功快照的近似起点）→ 备份停摆。从未成功过的库不会出现在该家族中，用 `supabackup_databases_protection{state="never"}` 覆盖。
-2. `supabackup_outbox_dead > 0` → 有告警未送达（检查 webhook 可达性）。
-3. `supabackup_staging_bytes` 持续增长 → 目的地故障或回收宽限过长。
+1. `time() - supacove_last_success_timestamp` 超过你配置的**新鲜度阈值**（该值取自任务 `started_at`，是成功快照的近似起点）→ 备份停摆。从未成功过的库不会出现在该家族中，用 `supacove_databases_protection{state="never"}` 覆盖。
+2. `supacove_outbox_dead > 0` → 有告警未送达（检查 webhook 可达性）。
+3. `supacove_staging_bytes` 持续增长 → 目的地故障或回收宽限过长。
 4. 心跳监控收不到 ping（外部）→ 实例进程死亡或全库失败。

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/api"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
-	"github.com/cloudfan/supabackup/backend/internal/jobs"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/api"
+	"github.com/web-casa/supacove/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/jobs"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/redact"
 )
 
 // Phase 3 API surface: destinations (BYOS), reconciliation and downloads.

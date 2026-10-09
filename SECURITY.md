@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-supabackup is pre-1.0. Only the latest release tag (and, during beta, the tip
+SupaCove is pre-1.0. Only the latest release tag (and, during beta, the tip
 of `main`) receives security fixes. There is no long-term-support branch.
 
 ## Reporting a vulnerability

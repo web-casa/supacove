@@ -11,16 +11,19 @@ requests receive a 401 JSON error.
 
 ## Families
 
+All families are also served under their pre-rename `supabackup_*` names as equal-valued deprecated aliases during the transition (removed two tagged releases after the rename); switch scrapers to `supacove_*`. Exception: the pre-Phase-7 shortcut gauges `supabackup_jobs_succeeded` / `supabackup_jobs_failed` exist under their legacy names only — query `supacove_jobs{status="succeeded"}` / `{status="failed"}` instead.
+
 | Metric | Semantics |
 |---|---|
-| `supabackup_jobs{status=…}` | current distribution of task states (gauge, not a monotonic counter; the historical `_total`-suffixed families were renamed) |
-| `supabackup_verification{status=…}` | verification-state distribution over succeeded jobs |
-| `supabackup_last_success_timestamp{database=…}` | newest success per database (unix seconds) |
-| `supabackup_databases_protection{state=…}` | protection distribution (fresh/expired/never) |
-| `supabackup_remote_commits` / `supabackup_remote_upload_failures` | current counts of remote-committed (incl. deleted-after-commit) and upload-failed jobs — gauges queried from the jobs table, NOT standalone counters; never apply rate() |
-| `supabackup_outbox_pending` / `supabackup_outbox_dead` | notification queue health (in-flight count has no metric — use the console delivery log) |
-| `supabackup_staging_bytes` | staging usage (a collector failure still emits a best-effort value AND sets scrape_errors) |
-| `supabackup_scrape_errors{collector=…}` | collector-fault signal: nonzero means some families of that scrape may be missing |
+| `supacove_jobs{status=…}` | current distribution of task states (gauge, not a monotonic counter; the historical `_total`-suffixed families were renamed) |
+| `supacove_verification{status=…}` | verification-state distribution over succeeded jobs |
+| `supacove_last_success_timestamp{database=…}` | newest success per database (unix seconds) |
+| `supacove_databases_protection{state=…}` | protection distribution (fresh/expired/never) |
+| `supacove_remote_commits` / `supacove_remote_upload_failures` | current counts of remote-committed (incl. deleted-after-commit) and upload-failed jobs — gauges queried from the jobs table, NOT standalone counters; never apply rate() |
+| `supacove_outbox_pending` / `supacove_outbox_dead` | notification queue health (in-flight count has no metric — use the console delivery log) |
+| `supacove_staging_bytes` | staging usage (a collector failure still emits a best-effort value AND sets scrape_errors) |
+| `supacove_uptime_seconds` / `supacove_go_goroutines` / `supacove_heap_alloc_bytes` | process health: uptime, goroutine count, heap allocation |
+| `supacove_scrape_errors{collector=…}` | collector-fault signal: nonzero means some families of that scrape may be missing |
 
 Labels carry only low-cardinality values (states, database names, collector
 names) — never job IDs, hosts or credentials.
@@ -40,12 +43,12 @@ names) — never job IDs, hosts or credentials.
 
 ## Alerting suggestions
 
-1. `time() - supabackup_last_success_timestamp` older than your configured
+1. `time() - supacove_last_success_timestamp` older than your configured
    **freshness threshold** (the timestamp is the job's `started_at`, an
    approximation of the success snapshot) → backups stalled. Databases that
    never succeeded are absent from this family; cover them with
-   `supabackup_databases_protection{state="never"}`.
-2. `supabackup_outbox_dead > 0` → an alert never reached its webhook.
-3. `supabackup_staging_bytes` growing → destination outage or a long
+   `supacove_databases_protection{state="never"}`.
+2. `supacove_outbox_dead > 0` → an alert never reached its webhook.
+3. `supacove_staging_bytes` growing → destination outage or a long
    reclamation grace.
 4. Dead-man switch silence (external) → process death or fleet-wide failure.

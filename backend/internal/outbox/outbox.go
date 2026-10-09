@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/netguard"
+	"github.com/web-casa/supacove/backend/internal/netguard"
 )
 
 // Event types (also the webhook subscription keys in webhooks.events).
@@ -311,7 +311,8 @@ func (n *Notifier) deliver(ctx context.Context, e *entry) {
 
 // post sends one delivery carrying the event type and the STABLE event id
 // (round-1 review P2-01: receivers dedup retries/replays by event id; the
-// legacy X-Supabackup-Event header is preserved for existing receivers).
+// X-Supacove-Event headers carry them now, and the legacy X-Supabackup-Event
+// names are preserved for existing receivers during the rename transition).
 // The response body is drained with a hard cap (never trust a receiver to
 // be small).
 func (n *Notifier) post(ctx context.Context, t WebhookTarget, eventType, eventID, payload string) error {
@@ -320,6 +321,13 @@ func (n *Notifier) post(ctx context.Context, t WebhookTarget, eventType, eventID
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Supacove-Event", eventType)
+	req.Header.Set("X-Supacove-Event-ID", eventID)
+	// Legacy header names from before the supabackup->supacove rename: kept
+	// so existing receivers keep matching during the transition. Remove two
+	// tagged releases after the rename ships
+	// (docs/rename-supabackup-to-supacove-plan.md §4.4 — file the removal
+	// issue when the first post-rename tag ships).
 	req.Header.Set("X-Supabackup-Event", eventType)
 	req.Header.Set("X-Supabackup-Event-ID", eventID)
 	resp, err := n.client.Do(req)

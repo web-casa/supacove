@@ -6,10 +6,10 @@
 # sit before `runtime` and stay buildable).
 #
 # Build (two steps — the spike is based on the built release image):
-#   docker build --target runtime -t supabackup:runtime .
-#   docker build -f Dockerfile.spike -t supabackup:runtime-spike .
+#   docker build --target runtime -t supacove:runtime .
+#   docker build -f Dockerfile.spike -t supacove:runtime-spike .
 # Run via scripts/spike2-embedded-pg.sh (same non-root UID 10001 as release).
-ARG BASE_IMAGE=supabackup:runtime
+ARG BASE_IMAGE=supacove:runtime
 FROM ${BASE_IMAGE}
 USER root
 RUN apt-get update \

@@ -22,14 +22,14 @@ Two official channels, both published per `v*` tag after the full CI gate:
 **GHCR container image** (`linux/amd64` + `linux/arm64`, tags `<version>` and `latest`):
 
 ```bash
-docker run -d -p 8080:8080 -v supabackup-data:/app/data \
-  ghcr.io/web-casa/supabackup:latest
+docker run -d -p 8080:8080 -v supacove-data:/app/data \
+  ghcr.io/web-casa/supacove:latest
 ```
 
 The image ships the PostgreSQL client matrix 14–18 (no host pg_dump needed)
 and runs as non-root (UID 10001). For a production compose example and the
 environment variable table see the repository's
-[docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md).
+[docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md#upgrade-from-supabackup).
 
 **Release binaries** (linux/darwin × amd64/arm64, tar.gz + SHA256SUMS): the
 web console and the SQLite control plane are embedded — no Docker needed.
@@ -42,7 +42,7 @@ major). systemd example and upgrade steps: the standalone-binary section of
 ## Build the image locally (optional)
 
 ```bash
-docker build --target runtime -t supabackup:<tag> .
+docker build --target runtime -t supacove:<tag> .
 ```
 
 <Callout>
@@ -55,7 +55,7 @@ ADR-004 experiment image (embedded PostgreSQL server) lives in a separate
 
 ```bash
 # Needs Node 22 (console frontend) and Go 1.26.9+ (matches go.mod)
-make build     # = frontend + backend: builds the console, embeds it, emits bin/supabackup
+make build     # = frontend + backend: builds the console, embeds it, emits bin/supacove
 ```
 
 <Callout type="warn">
@@ -84,6 +84,14 @@ production, ensure:
 2. The data volume is backed up independently — it holds the master secret.
 
 ## Upgrading
+
+> The install commands on this page are **fresh-install examples** (hence
+> the `supacove-data` volume). Upgrading from a pre-rename `supabackup`
+> deployment is NOT just rerunning them: stop ALL legacy processes (server
+> and CLI) and keep the original `supabackup-data` volume / systemd
+> directories — the data files migrate automatically on first start. See the
+> rename upgrade notes in the repository's
+> [docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md).
 
 Stop → replace binary/image → start. Schema migrations run at startup with
 per-version pre-migrate snapshots. A shutdown that lands on a running backup records `interrupted` (not failed);

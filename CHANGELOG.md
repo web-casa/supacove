@@ -1,12 +1,32 @@
 # Changelog
 
-All notable changes to supabackup.
+All notable changes to SupaCove (formerly supabackup).
 
 ## [Unreleased]
 
+### Changed
+- **Product rename supabackup → SupaCove** across every artifact: the
+  binary/CLI is `supacove` (release archives `supacove_<v>_<os>_<arch>`),
+  the Go module is `github.com/web-casa/supacove`, the image is
+  `ghcr.io/web-casa/supacove` (GHCR does not redirect; the FIRST
+  post-rename release also mirrors the same image under the legacy
+  `ghcr.io/web-casa/supabackup` tags so `:latest` followers receive the
+  rename release — after that the legacy repository is frozen), metrics
+  are `supacove_*` and
+  webhook headers `X-Supacove-Event(-ID)` with the pre-rename names served
+  as equal-valued deprecated aliases for two tagged releases, recovery-kit
+  env vars are `SUPACOVE_PROFILE`/`SUPACOVE_ALLOW_NONEMPTY` (legacy names
+  still honored), pg `application_name` is `supacove`, and the data files
+  are `supacove.db`/`supacove.lock` — migrated automatically on the first
+  start after stopping ALL legacy processes (server and CLI). `SB_*`
+  environment variables keep their prefix. Docker upgrades must keep the
+  original `supabackup-data` volume; systemd upgrades must keep the old
+  `User`/`StateDirectory`/`SB_DATA_DIR` lines — see the upgrade notes in
+  docs/deployment.md and the rollback procedure in docs/disaster-recovery.md
+
 ### Added
 - GHCR container distribution: `v*` tags, after the full CI gate, publish
-  `ghcr.io/web-casa/supabackup` as a multi-arch image (linux/amd64 +
+  `ghcr.io/web-casa/supacove` as a multi-arch image (linux/amd64 +
   linux/arm64, each built natively — no QEMU) tagged `<version>` and
   `latest`; the manifest tags go live only after the binary-release draft
   job also succeeded. Docs describe both install paths (image needs no host
@@ -24,8 +44,8 @@ All notable changes to supabackup.
   archive installable — before anything is written) and restores from an
   edited table of contents that leaves out the grant on
   `graphql_public.graphql`, still under `pg_restore --exit-on-error`.
-  Drilled end to end on supabase/postgres 15.8. `SUPABACKUP_PROFILE`
-  overrides a kit's default. A database registered as a platform keeps that
+  Drilled end to end on supabase/postgres 15.8. `SUPACOVE_PROFILE`
+  overrides a kit's default (the pre-rename `SUPABACKUP_PROFILE` still works). A database registered as a platform keeps that
   platform's kit when its hostname is not recognizable (self-hosted Supabase)
 - Console "Storage" view: add / test / reconcile / remove storage
   destinations and choose the destination per database (previously API only)
@@ -35,11 +55,11 @@ All notable changes to supabackup.
 
 ### Changed
 - **BREAKING (metrics)**: gauge families dropped the illegal `_total` suffix
-  (promtool lint rejects `_total` on gauges): `supabackup_jobs_total` →
-  `supabackup_jobs`, `supabackup_verification_total` →
-  `supabackup_verification`, `supabackup_remote_commits_total` →
-  `supabackup_remote_commits`, `supabackup_remote_upload_failures_total` →
-  `supabackup_remote_upload_failures`. The deprecated `_total` aliases were
+  (promtool lint rejects `_total` on gauges); combined with the product
+  rename above the shipped families are `supacove_jobs`,
+  `supacove_verification`, `supacove_remote_commits`,
+  `supacove_remote_upload_failures` (with equal-valued `supabackup_*`
+  aliases during the transition). The deprecated `_total` aliases were
   removed outright rather than kept, because an alias would still fail the
   promtool gate; pre-beta there are no shipped dashboards to migrate. Label
   values are now escaped with the Prometheus-legal set only (`\\`, `\"`,

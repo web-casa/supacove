@@ -1,6 +1,6 @@
 # 遗留问题修复方案（v2，已按 Codex 评审修正）
 
-日期：2026-10-08。范围：上一轮评审后仍未解决的 5 件事。产品名 SupaCove，技术标识仍为 `supabackup`。
+日期：2026-10-08。范围：上一轮评审后仍未解决的 5 件事。产品名 SupaCove；撰写时技术标识仍为 `supabackup`（现已全量改名 `supacove`，`SUPABACKUP_PROFILE` 亦已更名并保留旧名回退）。
 
 ## 不在本轮范围
 
@@ -128,7 +128,7 @@ Supabase 托管项目、真实的 R2 / B2、由套件脚本本身执行的 Supab
 
 | 项 | 做法 | 验证 |
 |---|---|---|
-| 恢复套件 Supabase 模式 | 套件内含 `generic` / `supabase` 两条路径，默认值在生成时确定，`SUPABACKUP_PROFILE` 可覆盖。Supabase 路径：先查超级用户、再查归档里的扩展目标库能否安装（都在写入之前），然后按编辑过的目录恢复，只跳过 `graphql_public.graphql` 的授权，仍然带 `--exit-on-error` | 在 `supabase/postgres:15.8.1.085` 上由产品完成备份、上传、下载，再用套件恢复到另一台同镜像服务器：完成，数据校验和一致 |
+| 恢复套件 Supabase 模式 | 套件内含 `generic` / `supabase` 两条路径，默认值在生成时确定，`SUPACOVE_PROFILE` 可覆盖。Supabase 路径：先查超级用户、再查归档里的扩展目标库能否安装（都在写入之前），然后按编辑过的目录恢复，只跳过 `graphql_public.graphql` 的授权，仍然带 `--exit-on-error` | 在 `supabase/postgres:15.8.1.085` 上由产品完成备份、上传、下载，再用套件恢复到另一台同镜像服务器：完成，数据校验和一致 |
 | 平台判定 | 主机名可识别时以主机名为准，否则沿用注册时选择的平台（自托管 Supabase 也能拿到 Supabase 套件） | 单元测试 |
 | 删除仍被绑定的目的地 | 拒绝，返回 `409 in_use`；绑定语句自身带“目的地仍存在”的条件，堵住并发窗口 | 单元测试 + 实测 |
 | 下载地址接口 | 目的地已删除时返回 `409 destination_removed`，不再是空的 500 | 代码路径 |

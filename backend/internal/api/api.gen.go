@@ -192,7 +192,7 @@ type AgeStatus struct {
 type BootstrapRequest struct {
 	Password string `json:"password"`
 
-	// Token One-time token printed by `supabackup bootstrap`.
+	// Token One-time token printed by `supacove bootstrap`.
 	Token    string `json:"token"`
 	Username string `json:"username"`
 }

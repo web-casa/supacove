@@ -50,7 +50,7 @@ linters:
         - (*database/sql.Tx).Rollback
         - (*os.File).Close
         - (io.ReadCloser).Close
-        - (*github.com/cloudfan/supabackup/backend/internal/db.Store).Close
+        - (*github.com/web-casa/supacove/backend/internal/db.Store).Close
         # os.RemoveAll here is only the throwaway temp-dir teardown in the
         # verifier; os.Remove cleanup sites are explicitly `_ =` annotated
         # where the outcome truly cannot change the result.

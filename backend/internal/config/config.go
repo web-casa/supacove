@@ -20,7 +20,8 @@ import (
 
 // Config is the resolved runtime configuration.
 type Config struct {
-	// DataDir holds supabackup.db, the advisory lock file and pre-migration backups.
+	// DataDir holds supacove.db, the advisory lock file and pre-migration
+	// backups. A locked open migrates the pre-rename supabackup.db in place.
 	DataDir string
 	// Addr is the HTTP listen address.
 	Addr string

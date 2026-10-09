@@ -7,9 +7,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/cloudfan/supabackup/backend/internal/api"
-	"github.com/cloudfan/supabackup/backend/internal/auth"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/api"
+	"github.com/web-casa/supacove/backend/internal/auth"
+	"github.com/web-casa/supacove/backend/internal/i18n"
 )
 
 // errJSON builds a populated contract Error for the generated wrapper types.

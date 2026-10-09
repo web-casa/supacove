@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/outbox"
 )
 
 // seedHeartbeatDB registers a database with heartbeat configuration.

@@ -1,4 +1,4 @@
-module github.com/cloudfan/supabackup
+module github.com/web-casa/supacove
 
 go 1.26.9
 

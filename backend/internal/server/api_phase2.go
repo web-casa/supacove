@@ -7,14 +7,14 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/api"
-	"github.com/cloudfan/supabackup/backend/internal/crypto"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
-	"github.com/cloudfan/supabackup/backend/internal/jobs"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
-	"github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/api"
+	"github.com/web-casa/supacove/backend/internal/crypto"
+	"github.com/web-casa/supacove/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/jobs"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	platformpkg "github.com/web-casa/supacove/backend/internal/platform"
+	"github.com/web-casa/supacove/backend/internal/redact"
 )
 
 // Phase 2 API surface: age status/recipient, database registrations,

@@ -25,8 +25,10 @@ server at runtime. That constrains a few things:
   `/opengraph-image` (PNG) and `/api/search` (JSON, noindex) artifacts can't
   set headers from a route handler in a static build.
 
-The product was first called supabackup: the binary, image, metric names and
-`SB_*` variables still use that name, and the docs show them as they are.
+The product was first called supabackup; the binary, image, metric names
+and webhook headers now use the supacove name (pre-rename metric names and
+headers are served as equal-valued aliases during the transition), and
+`SB_*` variables keep their prefix.
 
 ```bash
 npm ci

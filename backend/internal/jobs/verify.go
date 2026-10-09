@@ -18,10 +18,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/manifest"
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/verifier"
+	"github.com/web-casa/supacove/backend/internal/manifest"
+	"github.com/web-casa/supacove/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/verifier"
 )
 
 // VerifyEngine is the runner-facing verification capability. An interface

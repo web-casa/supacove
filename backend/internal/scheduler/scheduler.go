@@ -17,8 +17,8 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/cloudfan/supabackup/backend/internal/jobs"
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/jobs"
+	"github.com/web-casa/supacove/backend/internal/outbox"
 )
 
 // Scheduler polls the databases table for due backups and enqueues jobs.

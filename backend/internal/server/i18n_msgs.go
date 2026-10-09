@@ -9,8 +9,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
-	"github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/redact"
 )
 
 // errJSONL is not needed — call sites use i18n.T directly inside errJSON.

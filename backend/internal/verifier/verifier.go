@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/agekey"
 )
 
 // Status represents the outcome of a verification run.

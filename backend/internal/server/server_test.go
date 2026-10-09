@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/auth"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/limiter"
-	"github.com/cloudfan/supabackup/backend/internal/web"
+	"github.com/web-casa/supacove/backend/internal/auth"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/limiter"
+	"github.com/web-casa/supacove/backend/internal/web"
 )
 
 // webfsStat reports whether the embedded SPA has a real index.html.
@@ -38,6 +38,7 @@ type testEnv struct {
 	client    *http.Client // cookie jar: acts as the browser
 	authStore *auth.Store
 	store     *db.Store
+	srv       *Server
 }
 
 func testConfig(t *testing.T) *config.Config {
@@ -64,7 +65,7 @@ func newTestEnvWithConfig(t *testing.T, cfg *config.Config) *testEnv {
 	srv := New(store, authStore, cfg, key, limiter.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), BuildInfo{Version: "test"})
 	ts := httptestServer(t, srv.Router())
 	jar, _ := cookiejar.New(nil)
-	return &testEnv{t: t, base: ts.URL, authStore: authStore, store: store, client: &http.Client{Jar: jar}}
+	return &testEnv{t: t, base: ts.URL, authStore: authStore, store: store, srv: srv, client: &http.Client{Jar: jar}}
 }
 
 func newTestEnv(t *testing.T) *testEnv {

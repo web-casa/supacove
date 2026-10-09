@@ -82,10 +82,10 @@
 
 | # | 问题 | 位置 |
 |---|---|---|
-| P1 | 首页 `<title>` 为“supabackup docs / supabackup 文档”，无关键词 | `app/[lang]/layout.tsx` |
+| P1 | 首页 `<title>` 为“supabackup docs / supabackup 文档”（当时的旧标题），无关键词 | `app/[lang]/layout.tsx` |
 | P2 | 无 `metadataBase`、canonical、hreflang、sitemap、robots | 同上 |
 | P3 | 文档页的 `generateMetadata` 只返回标题和描述，OG 标题继承自布局的通用值 | `app/[lang]/docs/[[...slug]]/page.tsx` |
-| P4 | 品牌是 SupaCove，站内全部写作 supabackup | 见 4.1 的清单 |
+| P4 | 品牌是 SupaCove，站内当时全部写作 supabackup | 见 4.1 的清单 |
 | P5 | 首页 H1 的可见默认信息只有一个平台名；其余平台名在隐藏的测量节点和 `aria-label` 里（HTML 里并非没有，初稿此处写错） | `components/rotator.tsx` |
 | P6 | 没有页面正面回答“怎么备份 Supabase 数据库” | `content/docs` |
 | P7 | 无社交分享图、无结构化数据 | — |
@@ -99,7 +99,7 @@
 
 | # | 决策 | 选项 | 建议 |
 |---|---|---|---|
-| D1 | **SupaCove 与 supabackup 的关系** | A. SupaCove 只是网站品牌：写作“SupaCove — supabackup 的文档”，产品描述和 `SoftwareApplication.name` 仍是 supabackup。B. SupaCove 是产品品牌：正文称 SupaCove，并说明可执行文件、镜像、环境变量、仓库标识仍为 `supabackup` / `SB_*` | 需负责人定。未确认前不写“原名 supabackup”，也不用 `alternateName` 暗示改名 |
+| D1 | **SupaCove 与 supabackup 的关系** | A. SupaCove 只是网站品牌：写作“SupaCove — supabackup 的文档”，产品描述和 `SoftwareApplication.name` 仍是 supabackup。B. SupaCove 是产品品牌：正文称 SupaCove，并说明可执行文件、镜像、环境变量、仓库标识仍为 `supabackup` / `SB_*`。（后续：2026-10-09 选定 B 并已全量改名 supacove，`SB_*` 前缀保留） | 需负责人定。未确认前不写“原名 supabackup”，也不用 `alternateName` 暗示改名 |
 | D2 | **部署形态** | A. Next 服务端 + 预渲染页面（现状：`next.config.mjs` 未设 `output: "export"`，且有依赖请求的 `/api/search`）。B. 纯静态导出 + 托管层重定向 + 静态或客户端搜索 | 两者不可互换，影响 D3、robots、llms 路由、OG 图的实现方式 |
 | D3 | **根路径 `/`** | A. 固定重定向到确认的默认语言（HTTP 重定向）。B. 仅在 `/` 做语言协商：服务端或边缘运行时、302/307、英文兜底、缓存按 `Accept-Language` 区分 | 建议 A 且默认英文。`/en`、`/zh` 始终各自预渲染，显式语言路径永不协商或跳转 |
 | D4 | **首选域名** | `supacove.com` 或 `www.supacove.com` | `supacove.com`，另一个 301 过来 |
@@ -109,7 +109,7 @@
 
 | # | 结论 |
 |---|---|
-| D1 | 产品名与品牌名都改为 **SupaCove**（supabackup.com 已被注册）。本轮只改站点和文档里的名称；二进制、镜像、指标名、请求头、`SB_*` 仍是 `supabackup`，后端改名另行安排 |
+| D1 | 产品名与品牌名都改为 **SupaCove**（supabackup.com 已被注册）。本轮只改站点和文档里的名称；当时的计划是二进制、镜像、指标名、请求头、`SB_*` 暂留 `supabackup`、后端改名另行安排（该改名现已完成，`SB_*` 前缀除外） |
 | D2 | Next 服务端 + 预渲染页面 |
 | D3 | 英文不带前缀（`/`、`/docs/…`），中文在 `/zh`；访问 `/` 时中文浏览器跳到 `/zh`，显式选过语言后不再跳；`/en/…` 308 到无前缀地址 |
 | D4 | `https://supacove.com`（不带 www） |
@@ -174,7 +174,7 @@ S3 指南暂缓：存储目的地目前只有 API（`/destinations`），控制�
    （Next 的元数据是浅合并，布局里的通用 OG 标题不会被页面标题自动替换）。
    描述要求：每页唯一、准确、已本地化；长度是编辑目标，不是 Google 的硬限制。
 4. **标题**（英文首页候选，按 D1 定稿）
-   - D1-A：`SupaCove — docs for supabackup, self-hosted Supabase & Postgres backups`
+   - D1-A：`SupaCove — docs for supabackup, self-hosted Supabase & Postgres backups`（当时的候选文案；改名后应写作 docs for supacove）
    - D1-B：`SupaCove — Self-hosted Supabase & Postgres backup to your own S3`
 5. **sitemap**（`app/sitemap.ts`）：两种语言的首页与全部文档页，带 `alternates.languages`。
    若 `/` 是重定向，则不列入。`/en` 与 `/en/docs` 是用途不同的两个页面，各自自指。

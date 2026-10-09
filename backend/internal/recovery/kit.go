@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
+	platformpkg "github.com/web-casa/supacove/backend/internal/platform"
 )
 
 // KitInput carries everything needed to generate a recovery kit.
@@ -64,13 +64,20 @@ func sanitizeMeta(s string) string {
 //   - Pre-flight: tool presence, ciphertext existence, SHA-256 of the
 //     ciphertext (error detection — not a signature), and target-emptiness
 //     (a generic restore refuses non-empty targets; override only via
-//     SUPABACKUP_ALLOW_NONEMPTY=1, e.g. for platform projects with managed
-//     schemas — that path is NOT covered by the automated drill).
+//     SUPACOVE_ALLOW_NONEMPTY=1 — the pre-rename SUPABACKUP_ALLOW_NONEMPTY
+//     still works during the rename transition (remove two tagged releases
+//     after the rename ships, docs/rename-supabackup-to-supacove-plan.md
+//     §4.4 — file the removal issue when the first post-rename tag ships)
+//     — that path is NOT covered by the automated drill).
 //   - The final psql count check is error-checked: a failed verification
 //     exits non-zero with a PARTIAL-WRITE warning; nothing is swallowed.
 //
 // Profiles. A kit carries both restore paths and a default chosen at
-// generation time (%[7]s); SUPABACKUP_PROFILE overrides it at run time.
+// generation time (%[7]s); SUPACOVE_PROFILE overrides it at run time (the
+// pre-rename SUPABACKUP_PROFILE still works as a fallback; remove that
+// fallback two tagged releases after the rename ships — see
+// docs/rename-supabackup-to-supacove-plan.md §4.4 (file the removal issue
+// when the first post-rename tag ships).
 //   - generic: the archive is restored as is.
 //   - supabase: a full Supabase archive never restores cleanly as is (drill
 //     of 2026-10-08, supabase/postgres 15.8), so this path checks up front
@@ -81,7 +88,7 @@ func sanitizeMeta(s string) string {
 //     the restore.
 const restoreScriptTemplate = `#!/bin/sh
 # ============================================================
-# supabackup recovery kit
+# supacove recovery kit
 # Backup UUID: %[1]s
 # Key ID:      %[2]s
 # SHA-256:     %[3]s
@@ -94,11 +101,12 @@ const restoreScriptTemplate = `#!/bin/sh
 umask 077
 
 # Restore profile: "generic" or "supabase". This kit defaults to the one
-# matching the backed-up database; SUPABACKUP_PROFILE overrides it.
-PROFILE="${SUPABACKUP_PROFILE:-%[7]s}"
+# matching the backed-up database; SUPACOVE_PROFILE overrides it (the
+# pre-rename SUPABACKUP_PROFILE is still honored).
+PROFILE="${SUPACOVE_PROFILE:-${SUPABACKUP_PROFILE:-%[7]s}}"
 case "$PROFILE" in
   generic|supabase) : ;;
-  *) echo "ERROR: SUPABACKUP_PROFILE must be 'generic' or 'supabase'." >&2; exit 2 ;;
+  *) echo "ERROR: SUPACOVE_PROFILE must be 'generic' or 'supabase'." >&2; exit 2 ;;
 esac
 
 usage() {
@@ -182,7 +190,7 @@ if [ "$HASH_HEX" != "%[3]s" ]; then
   exit 1
 fi
 
-WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/supabackup-restore.XXXXXX") || exit 3
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/supacove-restore.XXXXXX") || exit 3
 chmod 700 "$WORK_DIR"
 DUMP_FILE="$WORK_DIR/plaintext.dump"
 cleanup() { rm -rf "$WORK_DIR"; }
@@ -197,10 +205,10 @@ if [ -z "$PRE_TABLES" ]; then
   echo "ERROR: could not read the target database state (connection or permission problem)." >&2
   exit 1
 fi
-if [ "$PRE_TABLES" != "0" ] && [ "${SUPABACKUP_ALLOW_NONEMPTY:-0}" != "1" ]; then
+if [ "$PRE_TABLES" != "0" ] && [ "${SUPACOVE_ALLOW_NONEMPTY:-${SUPABACKUP_ALLOW_NONEMPTY:-0}}" != "1" ]; then
   echo "ERROR: target database is NOT empty ($PRE_TABLES user tables)." >&2
   echo "A failed restore into a non-empty target can leave it PARTIALLY written." >&2
-  echo "Restore into an empty database, or set SUPABACKUP_ALLOW_NONEMPTY=1" >&2
+  echo "Restore into an empty database, or set SUPACOVE_ALLOW_NONEMPTY=1" >&2
   echo "if you accept that risk (e.g. platform projects with managed schemas)." >&2
   exit 1
 fi

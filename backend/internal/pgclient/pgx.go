@@ -45,7 +45,7 @@ func pgxConfig(c *ConnInfo) (*pgx.ConnConfig, error) {
 	if cfg.RuntimeParams == nil {
 		cfg.RuntimeParams = map[string]string{}
 	}
-	cfg.RuntimeParams["application_name"] = "supabackup"
+	cfg.RuntimeParams["application_name"] = "supacove"
 	return cfg, nil
 }
 

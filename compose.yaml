@@ -1,4 +1,4 @@
-# Development environment: supabackup + a throwaway PostgreSQL target + MinIO (S3).
+# Development environment: supacove + a throwaway PostgreSQL target + MinIO (S3).
 # Usage: make dev   → app on http://localhost:8080
 #
 # All published ports are bound to the loopback interface only: this compose
@@ -24,7 +24,7 @@ services:
       - postgres
       - minio
 
-  # Throwaway target database for backup experiments (NOT supabackup's own store).
+  # Throwaway target database for backup experiments (NOT supacove's own store).
   # PG18 images keep the cluster under PGDATA=/var/lib/postgresql/18/docker, so
   # the tmpfs must cover /var/lib/postgresql, not .../data (review P1-17).
   postgres:

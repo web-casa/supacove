@@ -98,7 +98,7 @@ export function AuthScreen() {
               <div>
                 <p>{t("auth.bootstrap.runOnServer")}</p>
                 <code>
-                  docker exec &lt;container&gt; /app/supabackup bootstrap
+                  docker exec &lt;container&gt; /app/supacove bootstrap
                 </code>
                 <p className="muted">{t("auth.bootstrap.validFor")}</p>
               </div>

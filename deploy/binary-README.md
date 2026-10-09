@@ -1,16 +1,16 @@
-# supabackup（SupaCove）独立二进制
+# SupaCove（supacove）独立二进制
 
 单文件自包含：Web 控制台、SQLite 控制面数据库、迁移与调度器全部内嵌，
 无需 Docker。同一份发布标签还提供多架构容器镜像
-`ghcr.io/web-casa/supabackup`（自带 pg_dump 客户端矩阵 14–18，无需宿主机
+`ghcr.io/web-casa/supacove`（自带 pg_dump 客户端矩阵 14–18，无需宿主机
 安装）；两者功能一致，二进制方式才需要按下文准备本机 `pg_dump`。
 
 ## 运行
 
 ```bash
-./supabackup serve            # 监听 :8080，数据写入 ./data
-./supabackup bootstrap        # 打印一次性管理员初始化 token
-./supabackup version          # 构建信息
+./supacove serve            # 监听 :8080，数据写入 ./data
+./supacove bootstrap        # 打印一次性管理员初始化 token
+./supacove version          # 构建信息
 ```
 
 常用环境变量（完整表见项目文档 docs/deployment.md）：`SB_ADDR`、

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/i18n"
 )
 
 // Review R2-P2-01: the unreachable-fire-time message embeds a quoted

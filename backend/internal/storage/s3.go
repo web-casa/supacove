@@ -280,7 +280,7 @@ func (s *Store) Presign(ctx context.Context, key string, ttl time.Duration) (str
 // fully separate from the backup namespace (dev-plan Phase 3 task 2).
 func (s *Store) DiagnosticTest(ctx context.Context) (result error) {
 	key := s.cfg.DiagnosticKey()
-	body := fmt.Sprintf("supabackup diagnostic %d", time.Now().UnixNano())
+	body := fmt.Sprintf("supacove diagnostic %d", time.Now().UnixNano())
 	if err := s.Put(ctx, key, strings.NewReader(body), int64(len(body))); err != nil {
 		return fmt.Errorf("diagnostic write: %w", err)
 	}
