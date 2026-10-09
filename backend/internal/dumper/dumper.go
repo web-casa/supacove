@@ -240,11 +240,14 @@ func (c *Config) spaceCheck() (used int64, err error) {
 	if err := syscall.Statfs(c.StagingDir, &st); err != nil {
 		return 0, err
 	}
-	// statfs fields are uint64/int64 mixes; clamp on the (unrealistic)
-	// overflow instead of trusting the conversion (gosec G115).
+	// statfs fields are uint64/int64/uint32 mixes whose types differ per
+	// platform (Bsize is int64 on linux, uint32 on darwin): normalize to
+	// uint64 and clamp on the (unrealistic) overflow instead of trusting
+	// the conversion (gosec G115).
+	bsize := uint64(st.Bsize)
 	var avail int64 = math.MaxInt64
-	if st.Bsize > 0 && st.Bavail <= uint64(math.MaxInt64)/uint64(st.Bsize) {
-		avail = int64(st.Bavail) * st.Bsize //nolint:gosec // G115: bounds-checked by the condition above
+	if bsize > 0 && st.Bavail <= uint64(math.MaxInt64)/bsize {
+		avail = int64(st.Bavail * bsize) //nolint:gosec // G115: bounds-checked by the condition above
 	}
 	floor := c.FreeFloor
 	if floor <= 0 {
