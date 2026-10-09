@@ -48,15 +48,21 @@ darwin/amd64、darwin/arm64。Web 控制台、SQLite 控制面、迁移与调度
 内嵌在单文件里，无需 Docker；本地可用 `make release` 复现同一批产物。
 
 ```bash
-# 以 v0.1.0 / linux/amd64 为例，替换为实际标签与平台
-base=https://github.com/web-casa/supacove/releases/download/v0.1.0
-curl -LO "$base/supacove_0.1.0_linux_amd64.tar.gz" "$base/SHA256SUMS"
+# 以 <版本> / linux/amd64 为例，替换为实际标签与平台
+base=https://github.com/web-casa/supacove/releases/download/v<版本>
+curl -LO "$base/supacove_<版本>_linux_amd64.tar.gz" "$base/SHA256SUMS"
 sha256sum -c --ignore-missing SHA256SUMS
-tar xzf supacove_0.1.0_linux_amd64.tar.gz
-cd supacove_0.1.0_linux_amd64
+tar xzf supacove_<版本>_linux_amd64.tar.gz
+cd supacove_<版本>_linux_amd64
 ./supacove serve       # http://localhost:8080，数据写入 ./data
 ./supacove bootstrap   # 一次性管理员初始化 token
 ```
+
+> **产物名时序**：`supacove_*` 归档与 `ghcr.io/web-casa/supacove` 镜像自
+> **首个改名发布版本**起提供。改名前已发布的 `v0.1.0` 产物使用旧名
+> （`supabackup_0.1.0_*` 归档、`ghcr.io/web-casa/supabackup` 镜像、内部
+> 二进制 `supabackup`）——首个改名 tag 之前需要安装/试用请从源码构建
+> （`make build` / `make image`），或使用旧名产物并按上方小节完成升级。
 
 ### pg_dump 前提（唯一的外部依赖）
 

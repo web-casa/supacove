@@ -268,7 +268,7 @@ gitignore；加 `--hidden` 含 `.github/`、`.golangci.yml` 等约 563 处）`su
 | Step 3 | `a525500` | 数据文件迁移协议（六文件状态机/双锁/WAL/SHM 先迁主库最后/逐次 fsync）+ 测试矩阵 |
 | Step 4 | `bb1024b` | 对外契约改名 + 兼容别名（指标/webhook 头/套件环境变量） |
 | Step 5 | `a23dbb0` | 文档/品牌/元数据收尾 + 升级须知 |
-| Step 6 | 本次 | 终检（无代码变更，仅本记录） |
+| Step 6 | `2097726` | 终检 + 条件触发修正（ci.yml 旧名镜像双发步骤、deployment/CHANGELOG 同步）与执行记录 |
 
 终检结果：`make check` 全绿（lint/api-check 无漂移/api-breaking 无破坏/race 测试/
 vitest 31/31/完整构建）；e2e 5/5；镜像构建 + 容器 version/bootstrap/healthcheck
@@ -293,4 +293,7 @@ vitest 31/31/完整构建）；e2e 5/5；镜像构建 + 容器 version/bootstrap
 1. 为四处兼容 shim（metrics 别名、webhook 旧头、套件旧环境变量回退、旧锁持有）
    创建移除跟踪 issue（代码注释已标注"两个 tag 版本后移除"）；
 2. 刷新 `api/openapi-baseline.yaml`（按 Makefile 惯例随 release tag 人工刷新）；
-3. 发布说明置顶重命名变更与升级指引（CHANGELOG `[Unreleased]` 条目已备好）。
+3. 发布说明置顶重命名变更与升级指引（CHANGELOG `[Unreleased]` 条目已备好）；
+4. 删除 ci.yml 中"Mirror tags under the legacy image name (one release
+   only)"步骤（双发退出时点为**一个**版本，早于其余 shim 的两个版本，
+   单独跟踪）。

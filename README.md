@@ -43,6 +43,11 @@ docker exec <容器名> /app/supacove bootstrap   # 一次性管理员 token
 `<版本号>` 与 `latest` 标签），自带 PostgreSQL 客户端矩阵 14–18，无需
 宿主机 pg_dump。也可以本地构建：`docker build --target runtime -t supacove .`。
 
+> **产物名时序**：`ghcr.io/web-casa/supacove` 镜像与 `supacove_*` 二进制
+> 归档自首个改名发布版本起提供；此前请本地构建（`make image` /
+> `make build`），或使用旧名产物（`supabackup`）并按
+> [升级小节](docs/deployment.md#upgrade-from-supabackup) 操作。
+
 不想用 Docker 也可以直接跑 Release 页的**独立二进制**（linux/darwin ×
 amd64/arm64，tar.gz + SHA256SUMS）：Web 控制台与 SQLite 控制面全部内嵌，
 唯一外部依赖是本机 `pg_dump`——
