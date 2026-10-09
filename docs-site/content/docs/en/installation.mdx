@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: Image, source build and deployment topology; compose is development-only
+description: GHCR image, release binaries, source build and deployment topology; compose is development-only
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -11,19 +11,44 @@ One Go binary with the console embedded, plus two external runtime dependencies 
 
 | Dependency | Purpose | Version |
 |---|---|---|
-| PostgreSQL client tools | `pg_dump` / `pg_restore` | 14–18 (in image) |
+| PostgreSQL client tools | `pg_dump` / `pg_restore` | 14–18 (in image; install locally for binaries) |
 | age (library) | encryption/decryption | Go library `filippo.io/age` built in — **no** age CLI needed |
 | S3-compatible storage | remote commit (optional, recommended) | S3 / R2 / B2 / MinIO |
 
-## Image
+## Prebuilt artifacts (recommended)
+
+Two official channels, both published per `v*` tag after the full CI gate:
+
+**GHCR container image** (`linux/amd64` + `linux/arm64`, tags `<version>` and `latest`):
+
+```bash
+docker run -d -p 8080:8080 -v supabackup-data:/app/data \
+  ghcr.io/web-casa/supabackup:latest
+```
+
+The image ships the PostgreSQL client matrix 14–18 (no host pg_dump needed)
+and runs as non-root (UID 10001). For a production compose example and the
+environment variable table see the repository's
+[docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md).
+
+**Release binaries** (linux/darwin × amd64/arm64, tar.gz + SHA256SUMS): the
+web console and the SQLite control plane are embedded — no Docker needed.
+The only external dependency is a host `pg_dump` (`brew install
+postgresql@17` plus the keg-only bin directory in `PATH` on macOS;
+`postgresql-client-17` on Debian/Ubuntu; client major must be ≥ the source
+major). systemd example and upgrade steps: the standalone-binary section of
+[docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md).
+
+## Build the image locally (optional)
 
 ```bash
 docker build --target runtime -t supabackup:<tag> .
 ```
 
-<Callout type="warn">
-The default (last) stage is the experimental `runtime-spike` image with an
-embedded PostgreSQL server. Production builds MUST pass `--target runtime`.
+<Callout>
+The release `runtime` stage is the Dockerfile's default (last) stage; the
+ADR-004 experiment image (embedded PostgreSQL server) lives in a separate
+`Dockerfile.spike` and never ships.
 </Callout>
 
 ## Source

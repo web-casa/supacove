@@ -1,31 +1,30 @@
 ---
 title: Quickstart
-description: Build the image, initialize the instance, register a database, take the first encrypted backup
+description: Pull the image, initialize the instance, register a database, take the first encrypted backup
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-## 1. Build the image
+## 1. Run it
 
-```bash
-docker build --target runtime -t supabackup:local .
-```
-
-The image runs as non-root (UID 10001) and ships PostgreSQL clients 14–18; encryption uses the built-in age Go library (no external age CLI).
-
-## 2. Run it
+Use the published GHCR image (`linux/amd64` + `linux/arm64`; see
+[Installation](/docs/installation) for release binaries or a local build):
 
 ```bash
 docker run -d --name supabackup \
   -p 127.0.0.1:8080:8080 \
   -v supabackup-data:/app/data \
-  supabackup:local
+  ghcr.io/web-casa/supabackup:latest
 ```
+
+The image runs as non-root (UID 10001) and ships PostgreSQL clients 14–18
+(standalone binaries need a host `pg_dump`); encryption uses the built-in
+age Go library (no external age CLI).
 
 The data volume holds the master secret, the SQLite metadata database and
 staged ciphertext — it is your most important asset besides the bucket.
 
-## 3. Initialize the admin account
+## 2. Initialize the admin account
 
 A fresh instance can only be claimed with a local one-time token:
 
@@ -39,7 +38,7 @@ fresh instance with a CLI
 token", paste the token and pick a username plus a password of at least 12
 characters. Tokens live 15 minutes and are single-use.
 
-## 4. Create the age identity
+## 3. Create the age identity
 
 ```bash
 docker exec supabackup /app/supabackup age init > identity.txt
@@ -51,7 +50,7 @@ offline, encrypted. The instance keeps the public recipient only. Losing the
 identity means losing recoverability of existing backups.
 </Callout>
 
-## 5. Register a database and back it up
+## 4. Register a database and back it up
 
 Use "Register your first database", pick a platform (or self-hosted) and paste
 the connection string or fill the fields. The string is connection-tested
@@ -60,7 +59,7 @@ before saving, stored encrypted, and never shown again.
 Back in the overview, press "Back up now". The task appears under Recent
 backups; on success you can download the **recovery kit** and the ciphertext.
 
-## 6. Prove the restore (strongly recommended once)
+## 5. Prove the restore (strongly recommended once)
 
 ```bash
 AGE_IDENTITY_FILE=$PWD/identity.txt \

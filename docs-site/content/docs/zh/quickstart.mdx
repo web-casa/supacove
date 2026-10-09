@@ -1,30 +1,28 @@
 ---
 title: 快速开始
-description: 构建镜像、初始化实例、注册数据库并完成首次加密备份
+description: 拉取镜像、初始化实例、注册数据库并完成首次加密备份
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-## 1. 构建镜像
+## 1. 启动
 
-```bash
-docker build --target runtime -t supabackup:local .
-```
-
-镜像以非 root（UID 10001）运行，内置 PostgreSQL 客户端 14–18；加密使用内置 age 算法库（无需外部 age CLI）。
-
-## 2. 启动
+推荐直接使用 GHCR 发布镜像（`linux/amd64` + `linux/arm64`；也可在
+[安装部署](/zh/docs/installation)选择 Release 独立二进制或本地构建）：
 
 ```bash
 docker run -d --name supabackup \
   -p 127.0.0.1:8080:8080 \
   -v supabackup-data:/app/data \
-  supabackup:local
+  ghcr.io/web-casa/supabackup:latest
 ```
+
+镜像以非 root（UID 10001）运行，内置 PostgreSQL 客户端 14–18（二进制部署
+需本机 `pg_dump`）；加密使用内置 age 算法库（无需外部 age CLI）。
 
 数据卷保存主密钥、SQLite 元数据库与暂存密文——**它是除对象存储外最重要的资产**。
 
-## 3. 初始化管理员
+## 2. 初始化管理员
 
 实例是全新的：第一个管理员账号必须由本地一次性令牌创建。
 
@@ -46,7 +44,7 @@ Use it in the web UI to create the admin account. It will not be shown again.
 浏览器不保存 Secure cookie）。点“使用 CLI 令牌初始化新实例”，粘贴令牌并设置
 用户名与至少 12 位密码。令牌 15 分钟内有效、仅可用一次。
 
-## 4. 初始化 age 加密身份
+## 3. 初始化 age 加密身份
 
 ```bash
 docker exec supabackup /app/supabackup age init > identity.txt
@@ -57,7 +55,7 @@ docker exec supabackup /app/supabackup age init > identity.txt
 （recipient），不保存私钥。丢失私钥 = 备份不可恢复。
 </Callout>
 
-## 5. 注册数据库并备份
+## 4. 注册数据库并备份
 
 在控制台“注册第一个数据库”中选择平台或“自托管/其他”，粘贴或分字段填写连接串。
 保存前会先做一次真实连接测试；连接串加密存储，之后不再显示。
@@ -65,7 +63,7 @@ docker exec supabackup /app/supabackup age init > identity.txt
 回到总览，点该库的“立即备份”。任务在“近期任务”里显示状态；成功后可下载
 **恢复套件**（restore.sh）与密文工件。
 
-## 6. 验证恢复（强烈建议做一次）
+## 5. 验证恢复（强烈建议做一次）
 
 ```bash
 AGE_IDENTITY_FILE=$PWD/identity.txt \

@@ -1,6 +1,6 @@
 ---
 title: 安装部署
-description: 镜像、源码构建与部署拓扑；compose 仅用于开发
+description: GHCR 镜像、发行版二进制、源码构建与部署拓扑；compose 仅用于开发
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -11,19 +11,42 @@ SupaCove 是单个 Go 二进制（内嵌前端）。运行期外部依赖只有�
 
 | 依赖 | 用途 | 版本要求 |
 |---|---|---|
-| PostgreSQL 客户端工具 | `pg_dump` / `pg_restore` | 14–18（镜像内置） |
+| PostgreSQL 客户端工具 | `pg_dump` / `pg_restore` | 14–18（镜像内置；二进制部署装本机） |
 | age（算法库） | 加解密 | 服务内置 Go 库 filippo.io/age，**不需要** age CLI |
 | S3 兼容对象存储 | 远端提交（可选但推荐） | S3 / R2 / B2 / MinIO |
 
-## 镜像构建
+## 预构建制品（推荐）
+
+两种官方发行渠道，每个 `v*` 标签在完整 CI 门禁通过后同时发布：
+
+**GHCR 容器镜像**（`linux/amd64` + `linux/arm64`，标签 `<版本号>` 与 `latest`）：
+
+```bash
+docker run -d -p 8080:8080 -v supabackup-data:/app/data \
+  ghcr.io/web-casa/supabackup:latest
+```
+
+镜像自带 PostgreSQL 客户端矩阵 14–18，宿主机无需安装 pg_dump；以非
+root（UID 10001）运行。生产 compose 示例与环境变量表见仓库
+[docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md)。
+
+**Release 独立二进制**（linux/darwin × amd64/arm64，tar.gz + SHA256SUMS）：
+Web 控制台与 SQLite 控制面全部内嵌，无需 Docker；唯一外部依赖是本机
+`pg_dump`（macOS 上 `brew install postgresql@17` 并把 keg-only 的 bin 目录
+加入 `PATH`，Debian/Ubuntu 装 `postgresql-client-17`；客户端 major 需 ≥
+源库 major）。systemd 示例与升级步骤同样见
+[docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md)
+的「二进制发行版」。
+
+## 本地构建镜像（可选）
 
 ```bash
 docker build --target runtime -t supabackup:<tag> .
 ```
 
-<Callout type="warn">
-默认（最后）stage 是实验性的 `runtime-spike`（含内嵌 PostgreSQL 服务端）。
-生产必须显式 `--target runtime`。
+<Callout>
+发布用的 `runtime` 就是 Dockerfile 的默认（最后）stage；ADR-004 的实验
+镜像（含内嵌 PostgreSQL 服务端）在单独的 `Dockerfile.spike` 里，不会发布。
 </Callout>
 
 ## 源码构建
