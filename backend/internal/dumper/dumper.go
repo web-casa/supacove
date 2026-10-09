@@ -29,9 +29,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/redact"
 )
 
 // stderrKeep is how much sanitized stderr is RETAINED; the pipe is always

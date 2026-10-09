@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/jobs"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/jobs"
 )
 
 // helper accessors used by the tests below.

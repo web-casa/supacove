@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/storage"
+	"github.com/web-casa/supacove/backend/internal/storage"
 )
 
 // uploadAttempts is the number of full-upload attempts with the SAME staged

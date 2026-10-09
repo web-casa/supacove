@@ -6,7 +6,7 @@
 // job records stay English.
 package jobs
 
-import "github.com/cloudfan/supabackup/backend/internal/i18n"
+import "github.com/web-casa/supacove/backend/internal/i18n"
 
 // RemediationMsg returns the operator-facing troubleshooting steps for an
 // error class in both supported languages. Unknown/empty classes get a

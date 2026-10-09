@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
+	platformpkg "github.com/web-casa/supacove/backend/internal/platform"
 )
 
 // supaTOC is a table of contents as `pg_restore --list` prints it for a

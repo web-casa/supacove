@@ -24,18 +24,18 @@ import (
 
 	"crypto/sha256"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/auth"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/jobs"
-	"github.com/cloudfan/supabackup/backend/internal/limiter"
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
-	"github.com/cloudfan/supabackup/backend/internal/scheduler"
-	"github.com/cloudfan/supabackup/backend/internal/server"
-	"github.com/cloudfan/supabackup/backend/internal/staging"
-	"github.com/cloudfan/supabackup/backend/internal/stats"
-	"github.com/cloudfan/supabackup/backend/internal/verifier"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/auth"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/jobs"
+	"github.com/web-casa/supacove/backend/internal/limiter"
+	"github.com/web-casa/supacove/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/scheduler"
+	"github.com/web-casa/supacove/backend/internal/server"
+	"github.com/web-casa/supacove/backend/internal/staging"
+	"github.com/web-casa/supacove/backend/internal/stats"
+	"github.com/web-casa/supacove/backend/internal/verifier"
 )
 
 var (

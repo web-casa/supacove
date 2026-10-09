@@ -21,18 +21,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/jobs"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/jobs"
 
-	"github.com/cloudfan/supabackup/backend/internal/api"
-	"github.com/cloudfan/supabackup/backend/internal/auth"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
-	"github.com/cloudfan/supabackup/backend/internal/limiter"
-	"github.com/cloudfan/supabackup/backend/internal/web"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/web-casa/supacove/backend/internal/api"
+	"github.com/web-casa/supacove/backend/internal/auth"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/limiter"
+	"github.com/web-casa/supacove/backend/internal/web"
 )
 
 const (

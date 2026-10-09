@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/dumper"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/platform"
-	"github.com/cloudfan/supabackup/backend/internal/recovery"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/dumper"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/platform"
+	"github.com/web-casa/supacove/backend/internal/recovery"
 )
 
 // Standalone recovery (quality plan: "restore must work from the final

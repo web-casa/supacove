@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudfan/supabackup/backend/internal/manifest"
-	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
-	"github.com/cloudfan/supabackup/backend/internal/recovery"
+	"github.com/web-casa/supacove/backend/internal/manifest"
+	platformpkg "github.com/web-casa/supacove/backend/internal/platform"
+	"github.com/web-casa/supacove/backend/internal/recovery"
 )
 
 // BackfillRecoveryKits regenerates missing recovery kits for succeeded jobs

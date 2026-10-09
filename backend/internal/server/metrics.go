@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/outbox"
 )
 
 // promLabel renders a label value in the Prometheus text format: ONLY

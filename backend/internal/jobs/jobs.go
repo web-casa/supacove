@@ -19,17 +19,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/crypto"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/dumper"
-	"github.com/cloudfan/supabackup/backend/internal/manifest"
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
-	"github.com/cloudfan/supabackup/backend/internal/recovery"
-	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
-	"github.com/cloudfan/supabackup/backend/internal/stats"
-	"github.com/cloudfan/supabackup/backend/internal/storage"
+	"github.com/web-casa/supacove/backend/internal/crypto"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/dumper"
+	"github.com/web-casa/supacove/backend/internal/manifest"
+	"github.com/web-casa/supacove/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	platformpkg "github.com/web-casa/supacove/backend/internal/platform"
+	"github.com/web-casa/supacove/backend/internal/recovery"
+	redactpkg "github.com/web-casa/supacove/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/stats"
+	"github.com/web-casa/supacove/backend/internal/storage"
 )
 
 // dbExec is the minimal SQL execution interface shared by *sql.DB and *sql.Tx.

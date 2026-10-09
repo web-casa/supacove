@@ -28,7 +28,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/netguard"
+	"github.com/web-casa/supacove/backend/internal/netguard"
 )
 
 // Event types (also the webhook subscription keys in webhooks.events).

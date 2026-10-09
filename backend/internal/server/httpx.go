@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudfan/supabackup/backend/internal/api"
+	"github.com/web-casa/supacove/backend/internal/api"
 )
 
 func fsSub(fsys fs.FS, dir string) (fs.FS, error) { return fs.Sub(fsys, dir) }

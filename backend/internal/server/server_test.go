@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/auth"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/limiter"
-	"github.com/cloudfan/supabackup/backend/internal/web"
+	"github.com/web-casa/supacove/backend/internal/auth"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/limiter"
+	"github.com/web-casa/supacove/backend/internal/web"
 )
 
 // webfsStat reports whether the embedded SPA has a real index.html.

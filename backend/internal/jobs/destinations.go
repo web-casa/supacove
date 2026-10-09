@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudfan/supabackup/backend/internal/crypto"
-	"github.com/cloudfan/supabackup/backend/internal/storage"
+	"github.com/web-casa/supacove/backend/internal/crypto"
+	"github.com/web-casa/supacove/backend/internal/storage"
 )
 
 // DestinationView is the API-safe destination (no secrets).

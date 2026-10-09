@@ -14,7 +14,7 @@ import (
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 
-	_ "github.com/cloudfan/supabackup/backend/internal/db/migrations"
+	_ "github.com/web-casa/supacove/backend/internal/db/migrations"
 )
 
 // dbOpenForCLIWithOverlay opens a CLI store whose migration set contains a

@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/crypto"
+	"github.com/web-casa/supacove/backend/internal/crypto"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
 )
 
 // TestMain stops the shared PostgreSQL container after all tests.

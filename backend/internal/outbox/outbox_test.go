@@ -14,7 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/cloudfan/supabackup/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/db"
 )
 
 func testEvent(id string) Event {

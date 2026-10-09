@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
-	"github.com/cloudfan/supabackup/backend/internal/limiter"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/limiter"
 )
 
 // newI18nProbeServer builds a full Server with a nil auth store so the login

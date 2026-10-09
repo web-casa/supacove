@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/crypto"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/manifest"
-	"github.com/cloudfan/supabackup/backend/internal/outbox"
-	"github.com/cloudfan/supabackup/backend/internal/recovery"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/crypto"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/manifest"
+	"github.com/web-casa/supacove/backend/internal/outbox"
+	"github.com/web-casa/supacove/backend/internal/recovery"
 )
 
 // The canary secret travels the production failure entry; the four exits

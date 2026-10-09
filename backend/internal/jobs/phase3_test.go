@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
-	"github.com/cloudfan/supabackup/backend/internal/config"
-	"github.com/cloudfan/supabackup/backend/internal/db"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	"github.com/cloudfan/supabackup/backend/internal/redact"
-	"github.com/cloudfan/supabackup/backend/internal/storage"
+	"github.com/web-casa/supacove/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/config"
+	"github.com/web-casa/supacove/backend/internal/db"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	"github.com/web-casa/supacove/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/storage"
 )
 
 // fakeBackend implements storage.Backend for pipeline tests: records puts,

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/manifest"
-	"github.com/cloudfan/supabackup/backend/internal/pgclient"
-	redactpkg "github.com/cloudfan/supabackup/backend/internal/redact"
-	"github.com/cloudfan/supabackup/backend/internal/verifier"
+	"github.com/web-casa/supacove/backend/internal/manifest"
+	"github.com/web-casa/supacove/backend/internal/pgclient"
+	redactpkg "github.com/web-casa/supacove/backend/internal/redact"
+	"github.com/web-casa/supacove/backend/internal/verifier"
 )
 
 // fakeVerifyEngine records inputs and can block until released, letting

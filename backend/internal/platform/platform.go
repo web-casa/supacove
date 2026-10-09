@@ -7,7 +7,7 @@ package platform
 import (
 	"strings"
 
-	"github.com/cloudfan/supabackup/backend/internal/i18n"
+	"github.com/web-casa/supacove/backend/internal/i18n"
 )
 
 // Platform represents a known PostgreSQL hosting platform.

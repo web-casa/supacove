@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudfan/supabackup/backend/internal/agekey"
+	"github.com/web-casa/supacove/backend/internal/agekey"
 )
 
 func fileSHA256(path string) (string, error) {

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	platformpkg "github.com/cloudfan/supabackup/backend/internal/platform"
+	platformpkg "github.com/web-casa/supacove/backend/internal/platform"
 )
 
 // KitInput carries everything needed to generate a recovery kit.
