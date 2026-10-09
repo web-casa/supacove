@@ -56,6 +56,11 @@ gitignore；加 `--hidden` 含 `.github/`、`.golangci.yml` 等约 563 处）`su
    `docs/dev-plan.md`、`docs/followup-fix-plan.md`、
    `docs/release-scan-evidence.md`、`docs/seo-plan.md`（它们记录的是当时的
    决策与证据，改写即失真；Step 5 起列入白名单）。
+   【交付后维护者决策（2026-10-09）】上述四份历史文档的产品名引用也已
+   更新为 supacove，涉及当时实际产物名/旧标题的位置以"当时名为…"括注
+   保留史实；README 改为默认英文并新增 README.zh-CN.md（两文顶部互导航）；
+   新增 docs/architecture.md，并在 deployment.md 增加部署拓扑图与升级
+   状态机图（mermaid，全部经渲染验证）。
 2. CHANGELOG 历史条目（以当时名字发布的版本）；仅新增 `[Unreleased]` 条目并更新文件头。
 3. **`supabase` 平台名词**：`guides/supabase-backup.mdx` 的文件名与 slug、
    `spike1-supabase-restore.sh`、`ADR-003-supabase-recovery-profile.md`、

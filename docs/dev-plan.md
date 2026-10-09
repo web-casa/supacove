@@ -1,4 +1,4 @@
-# cloudfan-supabackup 开发方案（9 Phase）· v2
+# supacove（原 cloudfan-supabackup）开发方案（9 Phase）· v2
 
 > 状态：v2，已根据 Codex 评审（[codex-review-1.md](reviews/codex-review-1.md)，30 项发现：P0×8 / P1×18 / P2×4）修正。P0、P1 全部采纳，P2 采纳 3 项、部分采纳 1 项，处置表见文末。
 > 定位：面向独立开发者与 1–20 人小型 SaaS 团队的**纯开源、自部署** PostgreSQL 逻辑备份工具，重点适配 Supabase / Neon / Railway，备份存入用户自带的 R2 / S3 / B2。

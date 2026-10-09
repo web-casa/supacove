@@ -1,5 +1,7 @@
 # Pre-release scan evidence
 
+> 本文档记录改名（supabackup → supacove）之前的一次发布前扫描；为保持文档与现状一致，正文中的产品名已更新为 supacove，涉及当时实际产物名的位置以括注说明。
+
 Point-in-time local runs of the same gates CI enforces, recorded against the
 commit they scanned. Re-run after every release-candidate commit; these
 results say nothing about later states of the tree.
@@ -10,7 +12,7 @@ results say nothing about later states of the tree.
 |---|---|---|---|
 | Secret scan, full history | gitleaks 8.30.1 | `gitleaks detect --source . --log-opts=--all --redact` | **PASS** — 98 commits, ~3.82 MB, `no leaks found` |
 | Go vulnerability audit | govulncheck v1.8.0 (Go 1.26.6, vuln DB 2026-10-07) | `govulncheck ./...` | **PASS** — 0 vulnerabilities affecting called code (1 in a required module, not called) |
-| Image CVE gate (CI-equivalent) | trivy 0.66.0 | `trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 supabackup:runtime` | **PASS** — OS layer (debian 12.15) 0 findings, Go binary 0 findings |
+| Image CVE gate (CI-equivalent) | trivy 0.66.0 | `trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 supacove:runtime`（当时镜像名为 supabackup:runtime） | **PASS** — OS layer (debian 12.15) 0 findings, Go binary 0 findings |
 | Release image builds | docker buildx | `docker build --target runtime` / `-f Dockerfile.spike` / default (no `--target`) | **PASS** — all three rc=0; default build equals the runtime stage |
 
 ### Note on the image scan
@@ -36,11 +38,11 @@ against the same code:
 
 | Acceptance | How it was run | Result |
 |---|---|---|
-| Real promtool on live `/metrics` | `supabackup serve` on 127.0.0.1:18099, bootstrap 201 + login 200 via cookie jar, scraped `/metrics` (41 lines, 14 `supabackup_*` families) piped to `docker run --entrypoint promtool prom/prometheus check metrics` | **PASS — promtool rc=0** |
+| Real promtool on live `/metrics` | `supacove serve`（当时二进制名为 supabackup）on 127.0.0.1:18099, bootstrap 201 + login 200 via cookie jar, scraped `/metrics` (41 lines, 14 families, 当时前缀 `supabackup_*`) piped to `docker run --entrypoint promtool prom/prometheus check metrics` | **PASS — promtool rc=0** |
 | MinIO storage tests ×2, no residue | `go test -count=1 ./backend/internal/storage/ -run 'MinIO|AbortIncomplete'` twice (4.2s / 3.5s) | **PASS both runs; `docker ps -a --filter name=sb-minio` → 0 leftovers** |
 | govulncheck v1.8.0 networked scan | already recorded above for a645869; unchanged code paths | **PASS — 0 called vulnerabilities** |
 
-Operational note captured during this run: two stale `supabackup serve`
+Operational note captured during this run: two stale `supacove serve`（当时名为 supabackup）
 processes from an earlier acceptance attempt kept 127.0.0.1:18099 bound, so
 a fresh server silently failed to bind and curl hit the stale instance
 (deleted data dir → bogus 403/401). Killed by exact PID (never `pkill -f`,

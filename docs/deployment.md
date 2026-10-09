@@ -6,6 +6,30 @@
 - 或者：发布页直接下载独立二进制（见下文「二进制发行版」）+ 本机 `pg_dump` 客户端
 - 或者：Go 1.26.9+ 从源码编译（与 go.mod 一致）+ PostgreSQL 客户端工具 14–18 + age 加密工具
 
+组件与备份/恢复/通知流程的完整图示见 [architecture.md](architecture.md)。
+部署拓扑一览：
+
+```mermaid
+flowchart LR
+    U["管理员浏览器"] -->|"HTTPS（建议反代终止 TLS）"| C
+    subgraph C["supacove 容器 ghcr.io/web-casa/supacove
+非 root uid 10001 · :8080"]
+        direction TB
+        APP["内嵌 SPA + API + 调度器
+PG 客户端矩阵 14–18
+（+ 恢复验证用的 PG 18 服务端）"]
+        VOL[("卷 /app/data
+supacove.db · secret.key · staging/ · backups/")]
+        APP --- VOL
+    end
+    C -->|"pg_dump / 连接探测"| PG[("源数据库
+Supabase / Neon / Railway / 自托管")]
+    C -->|"HTTPS 分片上传 + 读回校验"| S3[("对象存储
+R2 / S3 / B2 / MinIO")]
+    C -->|"HTTPS（经 SSRF 边界）"| HOOK["Webhook / 心跳"]
+    P["Prometheus"] -->|"/metrics 抓取（需登录）"| C
+```
+
 ## Docker（GHCR 发布镜像）
 
 每个 `v*` 标签在完整 CI 门禁通过后，向 GHCR 发布多架构镜像
@@ -58,11 +82,11 @@ cd supacove_<版本>_linux_amd64
 ./supacove bootstrap   # 一次性管理员初始化 token
 ```
 
-> **产物名时序**：`supacove_*` 归档与 `ghcr.io/web-casa/supacove` 镜像自
-> **首个改名发布版本**起提供。改名前已发布的 `v0.1.0` 产物使用旧名
-> （`supabackup_0.1.0_*` 归档、`ghcr.io/web-casa/supabackup` 镜像、内部
-> 二进制 `supabackup`）——首个改名 tag 之前需要安装/试用请从源码构建
-> （`make build` / `make image`），或使用旧名产物并按上方小节完成升级。
+> **产物名时序**：GHCR 镜像与 Release 归档是标准安装渠道，`supacove` 新名
+> 产物自首个改名发布版本起提供；改名前已发布的 `v0.1.0` 使用旧名
+> （`supabackup_0.1.0_*`、`ghcr.io/web-casa/supabackup`）。在首个改名 tag
+> 之前试用请从源码构建（`make build` / `make image`），或安装旧名产物后按
+> [升级小节](#upgrade-from-supabackup) 完成升级。
 
 ### pg_dump 前提（唯一的外部依赖）
 
@@ -113,6 +137,24 @@ sudo -u supacove SB_DATA_DIR=/var/lib/supacove /usr/local/bin/supacove bootstrap
 <a id="upgrade-from-supabackup"></a>
 
 ## 从 supabackup 升级到 SupaCove（改名须知）
+
+首次启动时数据目录按下面的状态机迁移（六个文件：旧/新 × db/wal/shm；
+只放行三种状态，其余拒绝启动并列出文件清单与指引）：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Fresh: 全新目录
+    Fresh --> Current: 创建 supacove.db
+    [*] --> Current: 已是当前命名（升级后再启动）
+    [*] --> LegacyPending: 旧 supabackup.db 存在（无新主库、无同类双份）
+    LegacyPending --> Current: 持锁迁移（WAL/SHM 先行 · 主库最后 · 逐次 fsync）
+    LegacyPending --> LegacyPending: 中断后重跑续迁（逐文件幂等）
+    Current --> [*]
+    REFUSED: 拒绝启动 + 文件清单与处置指引
+    [*] --> REFUSED: 有侧文件而无主库 / 双主库 / 同类侧文件双份
+    Current --> REFUSED: 新主库旁出现旧侧文件
+```
+
 
 产品已由 `supabackup` 更名为 `supacove`。升级是"一次重启 + 自动迁移"，
 但以下事项必须遵守（**第 1 条是硬性要求**）：
