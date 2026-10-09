@@ -52,7 +52,10 @@ gitignore；加 `--hidden` 含 `.github/`、`.golangci.yml` 等约 563 处）`su
 
 ## 3. 明确不改清单（负面清单）
 
-1. `docs/reviews/**`：历史评审记录。
+1. `docs/reviews/**`：历史评审记录。同类历史规划/证据文档一并保留原名：
+   `docs/dev-plan.md`、`docs/followup-fix-plan.md`、
+   `docs/release-scan-evidence.md`、`docs/seo-plan.md`（它们记录的是当时的
+   决策与证据，改写即失真；Step 5 起列入白名单）。
 2. CHANGELOG 历史条目（以当时名字发布的版本）；仅新增 `[Unreleased]` 条目并更新文件头。
 3. **`supabase` 平台名词**：`guides/supabase-backup.mdx` 的文件名与 slug、
    `spike1-supabase-restore.sh`、`ADR-003-supabase-recovery-profile.md`、
@@ -218,11 +221,12 @@ gitignore；加 `--hidden` 含 `.github/`、`.golangci.yml` 等约 563 处）`su
   ```sh
   rg -n -i --hidden 'supabackup' . -g '!.git/**' -g '!docs/reviews/**'
   ```
-  白名单逐条核对：CHANGELOG 历史条目；README "formerly" 行；兼容别名及其测试
+  白名单逐条核对：CHANGELOG 历史条目（含 [Unreleased] 重命名条目中对旧
+  卷名/旧环境变量的升级指引）；README "formerly" 行；兼容别名及其测试
   （metrics 旧名、**webhook 旧头（outbox.go 与 api_phase7.go 两条路径）**、套件旧
   环境变量回退）；db.go 迁移代码中的旧文件名及迁移测试；openapi-baseline.yaml
   （待 release tag 刷新）；compose.yaml MinIO 开发凭据；部署文档升级小节中的旧
-  卷名/旧目录引用；本方案文档自身。
+  卷名/旧目录引用；§3.1 所列历史规划/证据文档；本方案文档自身。
 - 全量验证：`make check`、`make e2e`（含并入的 promtool 指标校验）、frontend 构建
   + Playwright、`make docs-build`、`make release` 冒烟。
 - 手工场景：旧版本建库存数据 → 新版本启动 → 数据完整；全新安装；回滚演练（新→旧）。

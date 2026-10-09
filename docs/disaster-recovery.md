@@ -12,7 +12,7 @@
 恢复步骤：
 
 1. 重新启动 SupaCove（空数据目录），bootstrap 管理员。
-2. `supabackup age show` 会提示未配置——**不要**重新 `age init`（会生成新
+2. `supacove age show` 会提示未配置——**不要**重新 `age init`（会生成新
    密钥对）；旧密文仍然只能用原 recipient 解密。把原 recipient 重新写回：
    `INSERT INTO settings (key,value) VALUES ('age_recipient','<原recipient>'),('age_key_id','<原指纹>');`
    （recipient 是公钥，从你的 manifest 或旧记录里都能找到。）
@@ -77,7 +77,7 @@ psql "$TARGET" -c "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_c
 ```
 
 表数核对只是初步检查，不等于完整的数据一致性验证；正式演练用
-`supabackup` 内嵌验证或逐表断言。
+`supacove` 内嵌验证或逐表断言。
 
 manifest.json 内含 dump 工具版本、服务端版本、依赖扩展/角色、表数量基线
 与源库物理体积，恢复前先读它。`restore.sh` 恢复套件把以上流程（含哈希

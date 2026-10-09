@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest — supabackup is a safety-critical tool (backups), so
+Thanks for your interest — SupaCove is a safety-critical tool (backups), so
 the bar for changes is "provably does not fake success".
 
 ## Ground rules

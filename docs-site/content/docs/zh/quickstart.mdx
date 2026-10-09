@@ -11,10 +11,12 @@ import { Callout } from "fumadocs-ui/components/callout";
 [安装部署](/zh/docs/installation)选择 Release 独立二进制或本地构建）：
 
 ```bash
-docker run -d --name supabackup \
+# 全新安装示例——从改名前的 supabackup 部署升级必须保留原来的
+# supabackup-data 卷：见「安装」页的升级说明。
+docker run -d --name supacove \
   -p 127.0.0.1:8080:8080 \
-  -v supabackup-data:/app/data \
-  ghcr.io/web-casa/supabackup:latest
+  -v supacove-data:/app/data \
+  ghcr.io/web-casa/supacove:latest
 ```
 
 镜像以非 root（UID 10001）运行，内置 PostgreSQL 客户端 14–18（二进制部署
@@ -27,7 +29,7 @@ docker run -d --name supabackup \
 实例是全新的：第一个管理员账号必须由本地一次性令牌创建。
 
 ```bash
-docker exec supabackup /app/supabackup bootstrap
+docker exec supacove /app/supacove bootstrap
 ```
 
 输出形如：
@@ -47,7 +49,7 @@ Use it in the web UI to create the admin account. It will not be shown again.
 ## 3. 初始化 age 加密身份
 
 ```bash
-docker exec supabackup /app/supabackup age init > identity.txt
+docker exec supacove /app/supacove age init > identity.txt
 ```
 
 <Callout type="error" title="私钥只出现这一次">

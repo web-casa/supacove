@@ -20,7 +20,7 @@ sh restore-job7.sh 'postgresql://user@host:5432/restored?sslmode=require' backup
 manifest 的 `backupId` 是实例内标识（`job-N`），不是桶内对象键（对象键使用备份 UUID）。
 
 <Callout title="Supabase 的备份">
-这类备份的套件使用 `supabase` 模式恢复：需要一台带有 Supabase 扩展的服务器、一个新建的空库和超级用户连接，套件会在写入任何内容之前检查这三项。环境变量 `SUPABACKUP_PROFILE=generic` 或 `supabase` 可以覆盖套件的默认值。完整步骤：[备份 Supabase 数据库](/zh/docs/guides/supabase-backup#恢复一份备份)。
+这类备份的套件使用 `supabase` 模式恢复：需要一台带有 Supabase 扩展的服务器、一个新建的空库和超级用户连接，套件会在写入任何内容之前检查这三项。环境变量 `SUPACOVE_PROFILE=generic` 或 `supabase` 可以覆盖套件的默认值（旧名 `SUPABACKUP_PROFILE` 仍然有效）。完整步骤：[备份 Supabase 数据库](/zh/docs/guides/supabase-backup#恢复一份备份)。
 </Callout>
 
 ## 独立恢复：不依赖本实例

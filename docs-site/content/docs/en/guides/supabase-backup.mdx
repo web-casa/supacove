@@ -174,7 +174,7 @@ its kit into a second server running the same image.
 | Kit, as `postgres` | Refused: not a superuser. Nothing decrypted |
 | Kit, as `supabase_admin` | **Completed.** One entry left out, 11 tables |
 | Kit, against plain PostgreSQL 16 | Refused: `pg_graphql`, `pgjwt`, `supabase_vault` and `vector` are not installable there. Nothing written |
-| Kit with `SUPABACKUP_PROFILE=generic` | Stopped inside `pg_restore`, as an unedited Supabase archive does |
+| Kit with `SUPACOVE_PROFILE=generic` | Stopped inside `pg_restore`, as an unedited Supabase archive does |
 
 After the completed run the 500 test rows matched the source by checksum,
 row level security and its policy were in place, the grants to `anon`,
@@ -191,8 +191,8 @@ reading every reported error before you trust the result.
 
 Databases whose host is a Supabase address, and databases you registered
 with the platform set to Supabase. Register a self-hosted Supabase as
-Supabase to get it. `SUPABACKUP_PROFILE=supabase` or `generic` in the
-environment overrides the kit's default.
+Supabase to get it. `SUPACOVE_PROFILE=supabase` or `generic` in the
+environment overrides the kit's default (the pre-rename `SUPABACKUP_PROFILE` still works).
 
 <Callout type="warn" title="Not a path back into a new Supabase project">
 This restores the database onto a server you run. Restoring into a fresh

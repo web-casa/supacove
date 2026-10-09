@@ -9,14 +9,14 @@
 ## Docker（GHCR 发布镜像）
 
 每个 `v*` 标签在完整 CI 门禁通过后，向 GHCR 发布多架构镜像
-（linux/amd64 + linux/arm64）：`ghcr.io/web-casa/supabackup:<版本号>` 与
+（linux/amd64 + linux/arm64）：`ghcr.io/web-casa/supacove:<版本号>` 与
 `:latest`。镜像以非 root（UID 10001）运行，自带 PostgreSQL 客户端矩阵
 14–18，宿主机无需安装 pg_dump。
 
 ```bash
-docker run -d -p 8080:8080 -v supabackup-data:/app/data \
-  ghcr.io/web-casa/supabackup:latest
-docker exec <容器名> /app/supabackup bootstrap   # 一次性管理员 token
+docker run -d -p 8080:8080 -v supacove-data:/app/data \
+  ghcr.io/web-casa/supacove:latest
+docker exec <容器名> /app/supacove bootstrap   # 一次性管理员 token
 ```
 
 生产 compose 示例（版本建议固定到具体版本号；cookie 需要 HTTPS 反代，
@@ -24,17 +24,17 @@ docker exec <容器名> /app/supabackup bootstrap   # 一次性管理员 token
 
 ```yaml
 services:
-  supabackup:
-    image: ghcr.io/web-casa/supabackup:latest   # 固定版本：ghcr.io/web-casa/supabackup:0.1.0
+  supacove:
+    image: ghcr.io/web-casa/supacove:latest   # 固定版本：ghcr.io/web-casa/supacove:0.1.0
     restart: unless-stopped
     ports: ["8080:8080"]
-    volumes: ["supabackup-data:/app/data"]
+    volumes: ["supacove-data:/app/data"]
 ```
 
 应用启动后访问 http://localhost:8080，用 `bootstrap` 输出的一次性 token
 在 Web UI 中创建管理员账号。
 
-不想用发布镜像也可以本地构建：`docker build --target runtime -t supabackup .`。
+不想用发布镜像也可以本地构建：`docker build --target runtime -t supacove .`。
 
 > 仓库自带的 `compose.yaml` 是**开发环境**脚手架（内置 `SB_INSECURE_COOKIE=1`、
 > 固定开发口令和本地 PG/MinIO），只用于本地试用（`docker compose up -d`），
@@ -50,12 +50,12 @@ darwin/amd64、darwin/arm64。Web 控制台、SQLite 控制面、迁移与调度
 ```bash
 # 以 v0.1.0 / linux/amd64 为例，替换为实际标签与平台
 base=https://github.com/web-casa/supacove/releases/download/v0.1.0
-curl -LO "$base/supabackup_0.1.0_linux_amd64.tar.gz" "$base/SHA256SUMS"
+curl -LO "$base/supacove_0.1.0_linux_amd64.tar.gz" "$base/SHA256SUMS"
 sha256sum -c --ignore-missing SHA256SUMS
-tar xzf supabackup_0.1.0_linux_amd64.tar.gz
-cd supabackup_0.1.0_linux_amd64
-./supabackup serve       # http://localhost:8080，数据写入 ./data
-./supabackup bootstrap   # 一次性管理员初始化 token
+tar xzf supacove_0.1.0_linux_amd64.tar.gz
+cd supacove_0.1.0_linux_amd64
+./supacove serve       # http://localhost:8080，数据写入 ./data
+./supacove bootstrap   # 一次性管理员初始化 token
 ```
 
 ### pg_dump 前提（唯一的外部依赖）
@@ -77,17 +77,17 @@ cd supabackup_0.1.0_linux_amd64
 ### systemd 示例
 
 ```ini
-# /etc/systemd/system/supabackup.service
+# /etc/systemd/system/supacove.service
 [Unit]
-Description=SupaCove (supabackup) backup control plane
+Description=SupaCove backup control plane
 After=network-online.target
 
 [Service]
-User=supabackup
-StateDirectory=supabackup
+User=supacove
+StateDirectory=supacove
 Environment=SB_ADDR=:8080
-Environment=SB_DATA_DIR=/var/lib/supabackup
-ExecStart=/usr/local/bin/supabackup serve
+Environment=SB_DATA_DIR=/var/lib/supacove
+ExecStart=/usr/local/bin/supacove serve
 Restart=on-failure
 
 [Install]
@@ -95,14 +95,50 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now supabackup
+sudo systemctl daemon-reload && sudo systemctl enable --now supacove
 # bootstrap 必须指向同一个数据目录：
-sudo -u supabackup SB_DATA_DIR=/var/lib/supabackup /usr/local/bin/supabackup bootstrap
+sudo -u supacove SB_DATA_DIR=/var/lib/supacove /usr/local/bin/supacove bootstrap
 ```
 
 升级：停服 → 替换二进制 → 启动（SQLite 迁移随启动自动执行，数据目录
 不动）。反代 HTTPS 与 cookie 要求同 Docker 部署（`SB_PUBLIC_ORIGIN` /
 `SB_INSECURE_COOKIE`）。
+
+<a id="upgrade-from-supabackup"></a>
+
+## 从 supabackup 升级到 SupaCove（改名须知）
+
+产品已由 `supabackup` 更名为 `supacove`。升级是"一次重启 + 自动迁移"，
+但以下事项必须遵守（**第 1 条是硬性要求**）：
+
+1. **先停止所有旧版本进程**——旧 server 和旧 CLI（如 `supabackup age`）
+   都要停，并**关闭旧服务的自动重启**（systemd restart / Docker restart
+   policy），此后只运行新二进制。旧版 CLI 不参与文件锁，运行中的旧连接
+   会与文件名迁移互相干扰；新二进制虽然会在运行期间终身持有旧锁文件、
+   阻止旧 server 同时启动，但被锁拒绝的旧 server 仍可能先创建一个空的
+   `supabackup.db`，使新版本下次启动因新旧主库并存而拒绝——防范只能靠
+   "停干净 + 禁止回涌"。
+2. **Docker 升级保留原卷**：卷名只是挂载标识，继续用
+   `-v supabackup-data:/app/data`，只把镜像换成
+   `ghcr.io/web-casa/supacove:<版本>`。**不要**顺手换成新卷名
+   `supacove-data`——新卷是空目录，启动迁移找不到旧库，效果等于重置。
+   上方示例面向新安装，才使用新卷名。
+3. **systemd 升级不要顺手改** `User=supabackup`、
+   `StateDirectory=supabackup`、`SB_DATA_DIR=/var/lib/supabackup`：
+   `SB_*` 变量名未变、数据目录不变，`supabackup.db → supacove.db`
+   会在新版本首次启动时自动完成（含 WAL/SHM，已提交数据不丢）。要换
+   用户或目录，按 disaster-recovery 的停机迁移步骤操作。上方 unit
+   示例同样面向新安装。
+4. **镜像地址已变更**：GHCR 不做重定向，`ghcr.io/web-casa/supabackup`
+   的旧 tag 仍可拉取但不再更新，请尽快改用新地址。
+5. 数据文件名迁移遇到异常组合（如双主库并存）会**拒绝启动**并给出
+   文件清单与处置指引；回滚步骤见 disaster-recovery.md（按目标版本
+   选择恢复文件名，并隔离两组三件套）。
+6. **指标与 webhook 头过渡期双名并存**：`supacove_*` 与旧
+   `supabackup_*` 指标同值双发、`X-Supacove-Event(-ID)` 与旧头同值
+   双发，两个正式版本后移除旧名——监控与接收方应尽快切换到新名。
+   恢复套件环境变量改用 `SUPACOVE_PROFILE` /
+   `SUPACOVE_ALLOW_NONEMPTY`（旧名仍有效）。
 
 ## 环境变量
 
@@ -161,9 +197,9 @@ services:
 ## 初始化流程
 
 1. `docker compose up -d` → 应用启动，自动运行数据库迁移
-2. `docker compose exec app /app/supabackup bootstrap` → 获取一次性 token
+2. `docker compose exec app /app/supacove bootstrap` → 获取一次性 token
 3. 在 Web UI 中输入 token + 管理员用户名/密码
-4. `docker compose exec app /app/supabackup age init > age-identity.txt` → 生成 age 密钥对
+4. `docker compose exec app /app/supacove age init > age-identity.txt` → 生成 age 密钥对
    - **将 stdout 内容保存到离线安全位置**（私钥不再显示）
 5. 在 Web UI 中注册数据库（需要连接串）
 6. 在 Web UI 中注册存储目的地（需要 S3 兼容凭据）

@@ -4,8 +4,11 @@
 > 自部署单容器，备份存入你自己的对象存储（R2 / S3 / B2），age 加密，
 > 凭备份文件 + 离线私钥即可在**没有任何本工具组件**的情况下恢复。
 
-文档站：<https://supacove.com>。本项目原名 supabackup：二进制、镜像、指标名、
-webhook 请求头与 `SB_*` 环境变量目前仍沿用该名称，下文的命令均按实际写法给出。
+文档站：<https://supacove.com>。本项目原名 supabackup，现已全量更名为
+supacove：二进制、镜像（`ghcr.io/web-casa/supacove`）、指标名与 webhook
+请求头都已使用新名（过渡期旧名作为等值别名并存）；`SB_*` 环境变量前缀
+保持不变。从旧版本升级请先读
+[docs/deployment.md 的升级小节](docs/deployment.md)。
 
 ## 功能
 
@@ -31,21 +34,21 @@ webhook 请求头与 `SB_*` 环境变量目前仍沿用该名称，下文的命�
 ## 快速开始
 
 ```bash
-docker run -d -p 8080:8080 -v supabackup-data:/app/data \
-  ghcr.io/web-casa/supabackup:latest
-docker exec <容器名> /app/supabackup bootstrap   # 一次性管理员 token
+docker run -d -p 8080:8080 -v supacove-data:/app/data \
+  ghcr.io/web-casa/supacove:latest
+docker exec <容器名> /app/supacove bootstrap   # 一次性管理员 token
 ```
 
 镜像来自 GHCR（每个 `v*` 标签发布 `linux/amd64` + `linux/arm64`，打
 `<版本号>` 与 `latest` 标签），自带 PostgreSQL 客户端矩阵 14–18，无需
-宿主机 pg_dump。也可以本地构建：`docker build --target runtime -t supabackup .`。
+宿主机 pg_dump。也可以本地构建：`docker build --target runtime -t supacove .`。
 
 不想用 Docker 也可以直接跑 Release 页的**独立二进制**（linux/darwin ×
 amd64/arm64，tar.gz + SHA256SUMS）：Web 控制台与 SQLite 控制面全部内嵌，
 唯一外部依赖是本机 `pg_dump`——
 
 ```bash
-./supabackup serve && ./supabackup bootstrap
+./supacove serve && ./supacove bootstrap
 ```
 
 安装步骤、pg_dump 版本矩阵与 systemd 示例见

@@ -22,8 +22,8 @@ SupaCove 是单个 Go 二进制（内嵌前端）。运行期外部依赖只有�
 **GHCR 容器镜像**（`linux/amd64` + `linux/arm64`，标签 `<版本号>` 与 `latest`）：
 
 ```bash
-docker run -d -p 8080:8080 -v supabackup-data:/app/data \
-  ghcr.io/web-casa/supabackup:latest
+docker run -d -p 8080:8080 -v supacove-data:/app/data \
+  ghcr.io/web-casa/supacove:latest
 ```
 
 镜像自带 PostgreSQL 客户端矩阵 14–18，宿主机无需安装 pg_dump；以非
@@ -41,7 +41,7 @@ Web 控制台与 SQLite 控制面全部内嵌，无需 Docker；唯一外部依�
 ## 本地构建镜像（可选）
 
 ```bash
-docker build --target runtime -t supabackup:<tag> .
+docker build --target runtime -t supacove:<tag> .
 ```
 
 <Callout>
@@ -54,7 +54,7 @@ docker build --target runtime -t supabackup:<tag> .
 ```bash
 # 需要 Node 22（控制台前端）；Go 最终生效版本须 1.26.9+（与 go.mod 一致；
 # 本地工具链更旧且允许自动下载时 GOTOOLCHAIN 会拉取满足版本，否则编译失败）
-make build     # = frontend + backend：先构建控制台并嵌入，再产出 bin/supabackup
+make build     # = frontend + backend：先构建控制台并嵌入，再产出 bin/supacove
 ```
 
 <Callout type="warn">
@@ -80,6 +80,13 @@ systemd，并确保：
 2. 数据卷独立备份（它是主密钥所在地）。
 
 ## 升级
+
+> 本页的安装命令是**全新安装示例**（因此使用 `supacove-data` 卷）。从改名前的
+> `supabackup` 部署升级**不能**直接照抄这些命令：需先停止所有旧进程（server
+> 与 CLI），并保留原来的 `supabackup-data` 卷 / systemd 数据目录——数据文件
+> 会在新版本首次启动时自动迁移。完整须知见仓库
+> [docs/deployment.md](https://github.com/web-casa/supacove/blob/main/docs/deployment.md#upgrade-from-supabackup)
+> 的「从 supabackup 升级到 SupaCove」小节。
 
 二进制自升级：停止 → 替换二进制/镜像 → 启动。启动时会自动迁移 SQLite schema，
 并在迁移前按版本保留快照（pre-migrate snapshot）。停机撞上正在运行的备份时，该任务记为 `interrupted` 而非失败；满足续传条件（interrupted + 本地已提交 + 已记录远端意图 + 工件与 manifest

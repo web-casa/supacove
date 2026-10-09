@@ -12,7 +12,7 @@ description: 三种事件、outbox 重试语义与投递日志
 
 每个事件向每个匹配的 webhook 各发送一次 JSON POST（一次轮询可能向多个目标 POST；
 失败重试时会再次访问上一轮已成功的目标），带
-`X-Supabackup-Event` 与 `X-Supabackup-Event-ID` 头（稳定去重键）。
+`X-Supacove-Event` 与 `X-Supacove-Event-ID` 头（稳定去重键；过渡期同值发送改名前的 `X-Supabackup-*` 旧头）。
 
 ## 投递语义（outbox）
 

@@ -40,9 +40,9 @@ export function KeyCard({ t }: { t: HomeCopy }) {
 
 // Verbatim from the quickstart (content/docs/*/quickstart.mdx, steps 1–3).
 const COMMANDS: string[][] = [
-  ["docker build --target runtime -t supabackup:local ."],
-  ["docker run -d --name supabackup \\", "  -p 127.0.0.1:8080:8080 \\", "  -v supabackup-data:/app/data \\", "  supabackup:local"],
-  ["docker exec supabackup /app/supabackup bootstrap"],
+  ["docker build --target runtime -t supacove:local ."],
+  ["docker run -d --name supacove \\", "  -p 127.0.0.1:8080:8080 \\", "  -v supacove-data:/app/data \\", "  supacove:local"],
+  ["docker exec supacove /app/supacove bootstrap"],
 ];
 const OUTPUT = ["One-time bootstrap token (valid 15m0s):", "", "  jkwioY…"];
 

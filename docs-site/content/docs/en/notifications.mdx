@@ -15,7 +15,7 @@ description: Three events, outbox retry semantics and the delivery log
 Each event is delivered to every matching webhook as one JSON POST each (a
 single outbox pass may POST to several targets, and a failed round re-visits
 targets that already succeeded in the previous round), with
-`X-Supabackup-Event` and `X-Supabackup-Event-ID` headers (a stable dedup key).
+`X-Supacove-Event` and `X-Supacove-Event-ID` headers (a stable dedup key; the pre-rename `X-Supabackup-*` headers are sent with identical values during the transition).
 
 ## Delivery semantics (outbox)
 

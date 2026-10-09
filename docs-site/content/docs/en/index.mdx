@@ -13,9 +13,11 @@ PostgreSQL. It streams `pg_dump` output through
 age encryption into **your own** object storage (S3 / R2 / B2 / MinIO) and
 keeps a downloadable ciphertext copy in local staging.
 
-The binary, the container image, the metric names and the webhook headers
-still carry the earlier name `supabackup`. Commands and identifiers in these
-docs are shown exactly as the software expects them.
+The product was originally called `supabackup`; the binary, image, metric
+names and webhook headers now use the `supacove` name, with the pre-rename
+metric names and headers still served as equal-valued aliases during the
+transition. `SB_*` environment variables keep their prefix. Commands and
+identifiers in these docs are shown exactly as the software expects them.
 
 ## Four guarantees
 

@@ -121,7 +121,7 @@ sh restore-job7.sh 'postgresql://supabase_admin@host:5432/restored' backup-job7.
 | 套件，以 `postgres` 身份 | 被拒绝：不是超级用户。没有解密任何内容 |
 | 套件，以 `supabase_admin` 身份 | **完成。** 跳过 1 个条目，共 11 张表 |
 | 套件，目标为普通 PostgreSQL 16 | 被拒绝：那里装不上 `pg_graphql`、`pgjwt`、`supabase_vault` 和 `vector`。没有写入任何内容 |
-| 套件加 `SUPABACKUP_PROFILE=generic` | 在 `pg_restore` 中途中止，未经处理的 Supabase 归档就是这样 |
+| 套件加 `SUPACOVE_PROFILE=generic` | 在 `pg_restore` 中途中止，未经处理的 Supabase 归档就是这样 |
 
 恢复完成后，500 行测试数据与源库的校验和一致，行级安全及其策略都在，对 `anon`、`authenticated`、`service_role` 的授权已恢复，`auth` 的表和全部八个扩展也都在。
 
@@ -129,7 +129,7 @@ sh restore-job7.sh 'postgresql://supabase_admin@host:5432/restored' backup-job7.
 
 ### 哪些备份会用这个模式
 
-主机是 Supabase 地址的数据库，以及注册时平台选了 Supabase 的数据库。自托管的 Supabase 请按 Supabase 注册，才能得到这个模式。在环境变量里设置 `SUPABACKUP_PROFILE=supabase` 或 `generic` 可以覆盖套件的默认值。
+主机是 Supabase 地址的数据库，以及注册时平台选了 Supabase 的数据库。自托管的 Supabase 请按 Supabase 注册，才能得到这个模式。在环境变量里设置 `SUPACOVE_PROFILE=supabase` 或 `generic` 可以覆盖套件的默认值（旧名 `SUPABACKUP_PROFILE` 仍然有效）。
 
 <Callout type="warn" title="这不是恢复到新 Supabase 项目的方法">
 这里是把数据库恢复到你自己运行的服务器上。恢复到一个全新的 Supabase 项目会与它的托管 schema、系统角色和托管扩展冲突；项目之间的迁移请按 Supabase 官方指南操作。
