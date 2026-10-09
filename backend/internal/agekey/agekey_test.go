@@ -71,7 +71,7 @@ func TestTruncatedCiphertextFails(t *testing.T) {
 
 func TestParseIdentityAcceptsCommentHeader(t *testing.T) {
 	id, rcp, _ := Generate()
-	withComment := "# created by supabackup\n" + id
+	withComment := "# created by supacove\n" + id
 	parsed, err := ParseIdentity(withComment)
 	if err != nil {
 		t.Fatalf("comment header must be tolerated: %v", err)

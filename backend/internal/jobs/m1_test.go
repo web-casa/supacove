@@ -287,7 +287,7 @@ func TestM1_FullKernelChain(t *testing.T) {
 		t.Fatalf("success record incomplete: %+v", tk)
 	}
 
-	// --- the restore half: NO supabackup, ONLY artifact + offline identity + PG tools ---
+	// --- the restore half: NO supacove, ONLY artifact + offline identity + PG tools ---
 	artifact, err := os.ReadFile(filepath.Join(stagingDir, fmt.Sprintf("backup-job%d.dump.age", jobID)))
 	if err != nil {
 		t.Fatal(err)

@@ -206,10 +206,10 @@ func TestMetricsExpositionFormat(t *testing.T) {
 	const oddName = "we\"ird\\name\n\tx"
 	found := false
 	for key := range seen {
-		if !strings.HasPrefix(key, "supabackup_last_success_timestamp{") {
+		if !strings.HasPrefix(key, "supacove_last_success_timestamp{") {
 			continue
 		}
-		labels := strings.TrimSuffix(strings.TrimPrefix(key, "supabackup_last_success_timestamp{"), "}")
+		labels := strings.TrimSuffix(strings.TrimPrefix(key, "supacove_last_success_timestamp{"), "}")
 		v := labelPairRe.FindStringSubmatch(labels)
 		if v == nil {
 			continue
@@ -227,5 +227,220 @@ func TestMetricsExpositionFormat(t *testing.T) {
 		if !helps[name] {
 			t.Errorf("family %s has TYPE but no HELP", name)
 		}
+	}
+}
+
+// scrapeSamples fetches /metrics and returns the parsed samples
+// (name{labels} -> value) and HELP lines (name -> line).
+func scrapeSamples(t *testing.T, env *testEnv) (map[string]string, map[string]string) {
+	t.Helper()
+	resp, err := env.client.Get(env.base + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("metrics status = %d", resp.StatusCode)
+	}
+	bodyBytes, rerr := io.ReadAll(resp.Body)
+	if rerr != nil {
+		t.Fatalf("read scrape: %v", rerr)
+	}
+	samples := map[string]string{}
+	helps := map[string]string{}
+	for _, line := range strings.Split(string(bodyBytes), "\n") {
+		if strings.HasPrefix(line, "# HELP ") {
+			fields := strings.SplitN(line, " ", 4)
+			if len(fields) >= 3 {
+				helps[fields[2]] = line
+			}
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, labels, value, ok := parseSample(line)
+		if !ok {
+			t.Fatalf("unparsable sample line %q", line)
+		}
+		samples[name+"{"+labels+"}"] = value
+	}
+	return samples, helps
+}
+
+// TestMetricRenameAliasParity pins the supabackup->supacove rename
+// transition guarantee with REAL data in every family: each supacove_
+// sample has a same-valued supabackup_ twin and vice versa (except the two
+// pre-rename shortcut gauges, which stay legacy-only), every legacy family
+// announces its deprecation, and the shortcut gauges get no twins.
+func TestMetricRenameAliasParity(t *testing.T) {
+	env := newTestEnv(t)
+	env.bootstrapAdmin(t)
+
+	// Seed every SQL-backed family: two databases (one backed up
+	// successfully, one never), one failed job, so jobs / verification /
+	// last_success_timestamp / databases_protection all carry samples.
+	seed := func(name string) int64 {
+		var id int64
+		if err := env.store.DB.QueryRow(
+			`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
+			 VALUES (?, 'generic', '', 'x', 0, 0) RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	baked, fresh := seed("parity-backed"), seed("parity-fresh")
+	for _, q := range []string{
+		`INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at)
+		 VALUES (?, 'succeeded', 0, 0, 1, 2)`,
+		`INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at)
+		 VALUES (?, 'failed', 0, 0, 1, 2)`,
+	} {
+		if _, err := env.store.DB.Exec(q, baked); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = fresh
+
+	samples, helps := scrapeSamples(t, env)
+
+	mustFamilies := []string{
+		"supacove_uptime_seconds", "supacove_go_goroutines", "supacove_heap_alloc_bytes",
+		"supacove_jobs", "supacove_remote_commits", "supacove_remote_upload_failures",
+		"supacove_verification", "supacove_last_success_timestamp", "supacove_staging_bytes",
+		"supacove_outbox_pending", "supacove_outbox_dead", "supacove_databases_protection",
+	}
+	for _, fam := range mustFamilies {
+		if !anySample(samples, fam) {
+			t.Errorf("family %s has no samples (seed incomplete?)", fam)
+		}
+	}
+	for key, value := range samples {
+		name := key[:strings.IndexByte(key, '{')]
+		if strings.HasPrefix(name, "supacove_") {
+			legacy := "supabackup_" + strings.TrimPrefix(name, "supacove_") + key[strings.IndexByte(key, '{'):]
+			if lv, ok := samples[legacy]; !ok {
+				t.Errorf("sample %s has no legacy alias", key)
+			} else if lv != value {
+				t.Errorf("alias value diverges for %s: legacy %s vs current %s", key, lv, value)
+			}
+		}
+	}
+	for key := range samples {
+		name := key[:strings.IndexByte(key, '{')]
+		if !strings.HasPrefix(name, "supabackup_") {
+			continue
+		}
+		if name == "supabackup_jobs_succeeded" || name == "supabackup_jobs_failed" {
+			continue
+		}
+		current := "supacove_" + strings.TrimPrefix(name, "supabackup_") + key[strings.IndexByte(key, '{'):]
+		if _, ok := samples[current]; !ok {
+			t.Errorf("legacy-only sample %s (current twin missing)", key)
+		}
+	}
+	for name, help := range helps {
+		if strings.HasPrefix(name, "supabackup_") && !strings.Contains(help, "DEPRECATED") {
+			t.Errorf("legacy family %s does not announce deprecation: %s", name, help)
+		}
+	}
+	for _, name := range []string{"supabackup_jobs_succeeded", "supabackup_jobs_failed"} {
+		if _, ok := helps[name]; !ok {
+			t.Errorf("pre-rename shortcut %s missing", name)
+		}
+		if anySample(samples, "supacove_"+strings.TrimPrefix(name, "supabackup_")) {
+			t.Errorf("shortcut %s must not get a supacove_ twin", name)
+		}
+	}
+}
+
+func anySample(samples map[string]string, family string) bool {
+	for key := range samples {
+		if strings.HasPrefix(key, family+"{") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestMetricAliasesOnCollectorFailure pins the failure contract: a failing
+// collector surfaces under BOTH names in supacove_scrape_errors. A staging
+// failure still emits staging_bytes (0) in both generations — only the
+// scrape_errors marker distinguishes it — while a SQL collector failure
+// (jobs table gone) omits every dependent family from BOTH generations: a
+// query outage must never appear as a credible zero in either.
+func TestMetricAliasesOnCollectorFailure(t *testing.T) {
+	env := newTestEnv(t)
+	env.bootstrapAdmin(t)
+	// One job so the (healthy) jobs family actually carries samples.
+	var dbID int64
+	if err := env.store.DB.QueryRow(
+		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
+		 VALUES ('failure-probe', 'generic', '', 'x', 0, 0) RETURNING id`).Scan(&dbID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.store.DB.Exec(
+		`INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at)
+		 VALUES (?, 'succeeded', 0, 0, 1, 2)`, dbID); err != nil {
+		t.Fatal(err)
+	}
+	// Point the staging walk at a path that cannot exist: the staging
+	// collector fails, every SQL collector stays healthy.
+	env.srv.SetRunner(nil, "/nonexistent-supacove-staging-parity-test")
+
+	samples, _ := scrapeSamples(t, env)
+	if v, ok := samples[`supacove_scrape_errors{collector="staging"}`]; !ok || v != "1" {
+		t.Errorf("supacove_scrape_errors{collector=\"staging\"} missing or wrong: %q", v)
+	}
+	if v, ok := samples[`supabackup_scrape_errors{collector="staging"}`]; !ok || v != "1" {
+		t.Errorf("supabackup_scrape_errors{collector=\"staging\"} missing or wrong: %q", v)
+	}
+	// The jobs collector stayed healthy: its family must be present under
+	// BOTH names (absence is the contract only for a FAILED collector).
+	if !anySample(samples, "supacove_jobs") || !anySample(samples, "supabackup_jobs") {
+		t.Errorf("jobs family must stay present under both names with a healthy collector")
+	}
+	if !anySample(samples, "supacove_uptime_seconds") || !anySample(samples, "supabackup_uptime_seconds") {
+		t.Errorf("uptime must not depend on any collector")
+	}
+
+	// SQL collector failure: hide the jobs table; every jobs-dependent
+	// family must vanish from BOTH generations, and the failure itself must
+	// be marked under both scrape_errors names.
+	env2 := newTestEnv(t)
+	env2.bootstrapAdmin(t)
+	var sqlDB int64
+	if err := env2.store.DB.QueryRow(
+		`INSERT INTO databases (name, platform, env_tag, conn_encrypted, created_at, updated_at)
+		 VALUES ('failure-sql', 'generic', '', 'x', 0, 0) RETURNING id`).Scan(&sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env2.store.DB.Exec(
+		`INSERT INTO jobs (database_id, status, scheduled_at, created_at, started_at, finished_at)
+		 VALUES (?, 'succeeded', 0, 0, 1, 2)`, sqlDB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env2.store.DB.Exec(`ALTER TABLE jobs RENAME TO jobs_hidden`); err != nil {
+		t.Fatal(err)
+	}
+	samples2, _ := scrapeSamples(t, env2)
+	for _, fam := range []string{
+		"jobs", "verification", "last_success_timestamp",
+		"remote_commits", "remote_upload_failures", "databases_protection",
+	} {
+		if anySample(samples2, "supacove_"+fam) || anySample(samples2, "supabackup_"+fam) {
+			t.Errorf("family %s must be absent from both generations when its collector fails", fam)
+		}
+	}
+	for _, name := range []string{"supacove_scrape_errors", "supabackup_scrape_errors"} {
+		if v, ok := samples2[name+`{collector="jobs"}`]; !ok || v != "1" {
+			t.Errorf("%s{collector=\"jobs\"} missing or wrong: %q", name, v)
+		}
+	}
+	if !anySample(samples2, "supacove_outbox_pending") || !anySample(samples2, "supabackup_outbox_pending") {
+		t.Errorf("the outbox collector did not touch jobs and must stay healthy")
+	}
+	if !anySample(samples2, "supacove_uptime_seconds") || !anySample(samples2, "supabackup_uptime_seconds") {
+		t.Errorf("uptime must not depend on any collector")
 	}
 }

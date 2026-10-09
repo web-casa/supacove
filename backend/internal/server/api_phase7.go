@@ -376,6 +376,13 @@ func (s *Server) testWebhookDelivery(ctx context.Context, url, eventType, eventI
 		return false, "request build failed"
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Supacove-Event", eventType)
+	req.Header.Set("X-Supacove-Event-ID", eventID)
+	// Mirror the production delivery (outbox.post): legacy names stay during
+	// the rename transition so a receiver that matches on them behaves the
+	// same for test and real deliveries. Remove two tagged releases after
+	// the rename ships (docs/rename-supabackup-to-supacove-plan.md §4.4 —
+	// file the removal issue when the first post-rename tag ships).
 	req.Header.Set("X-Supabackup-Event", eventType)
 	req.Header.Set("X-Supabackup-Event-ID", eventID)
 	resp, err := client.Do(req)

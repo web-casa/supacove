@@ -99,8 +99,21 @@ func TestPhase7WebhookAPI(t *testing.T) {
 	env.bootstrapAdmin(t)
 
 	var hits atomic.Int32
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		// The console's test delivery must mirror the production outbox
+		// delivery: both header generations, identical event ids.
+		if r.Header.Get("X-Supacove-Event") == "" || r.Header.Get("X-Supacove-Event-ID") == "" {
+			t.Error("test delivery missing X-Supacove-Event(-ID) headers")
+		}
+		if r.Header.Get("X-Supabackup-Event") != r.Header.Get("X-Supacove-Event") {
+			t.Errorf("legacy event header diverges: %q vs %q",
+				r.Header.Get("X-Supabackup-Event"), r.Header.Get("X-Supacove-Event"))
+		}
+		if r.Header.Get("X-Supabackup-Event-ID") != r.Header.Get("X-Supacove-Event-ID") {
+			t.Errorf("legacy event-id header diverges: %q vs %q",
+				r.Header.Get("X-Supabackup-Event-ID"), r.Header.Get("X-Supacove-Event-ID"))
+		}
 		w.WriteHeader(200)
 	}))
 	defer receiver.Close()
@@ -206,6 +219,13 @@ func TestPhase7OverviewAndNotifications(t *testing.T) {
 	}
 	metrics := readAll(t, resp)
 	for _, want := range []string{
+		"supacove_jobs",
+		"supacove_last_success_timestamp",
+		"supacove_outbox_pending",
+		"supacove_databases_protection",
+		"supacove_verification",
+		// Legacy aliases from the supabackup->supacove rename: pinned so the
+		// transition guarantee (dashboards keep firing) cannot silently rot.
 		"supabackup_jobs",
 		"supabackup_last_success_timestamp",
 		"supabackup_outbox_pending",

@@ -240,7 +240,7 @@ func (h *harness) tempDirLeftovers(t *testing.T) []string {
 	entries, _ := os.ReadDir("/tmp")
 	var left []string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "supabackup-restore.") {
+		if strings.HasPrefix(e.Name(), "supacove-restore.") {
 			left = append(left, e.Name())
 		}
 	}
@@ -312,10 +312,26 @@ func TestNonEmptyTargetRefused(t *testing.T) {
 	if strings.Contains(h.argvLog(t), "TOOL:pg_restore") {
 		t.Fatal("restore ran on a non-empty target")
 	}
-	if err := h.run(t, binDir,
-		[]string{testEnv, "SUPABACKUP_ALLOW_NONEMPTY=1"}, testTarget, testEnc); err != nil {
-		t.Fatalf("override run failed: %v", err)
+	// Both the current and the pre-rename variable must override.
+	for _, kv := range []string{"SUPACOVE_ALLOW_NONEMPTY=1", "SUPABACKUP_ALLOW_NONEMPTY=1"} {
+		if err := h.run(t, binDir, []string{testEnv, kv}, testTarget, testEnc); err != nil {
+			t.Fatalf("override run (%s) failed: %v", kv, err)
+		}
 	}
+}
+
+// TestAllowNonEmptyPrecedence: the current variable wins over the legacy
+// one when both are set.
+func TestAllowNonEmptyPrecedence(t *testing.T) {
+	h, binDir := newHarness(t, hopt{psqlFirst: "12"})
+	// Legacy =1 would allow the restore; current =0 must still refuse.
+	mustFail(t, h.run(t, binDir,
+		[]string{testEnv, "SUPABACKUP_ALLOW_NONEMPTY=1", "SUPACOVE_ALLOW_NONEMPTY=0"},
+		testTarget, testEnc), "non-empty target")
+	// Explicitly empty variables behave as unset: the refusal stands.
+	mustFail(t, h.run(t, binDir,
+		[]string{testEnv, "SUPACOVE_ALLOW_NONEMPTY=", "SUPABACKUP_ALLOW_NONEMPTY="},
+		testTarget, testEnc), "non-empty target")
 }
 
 // TestInlinePasswordRefused: a conninfo carrying a password is refused

@@ -38,6 +38,7 @@ type testEnv struct {
 	client    *http.Client // cookie jar: acts as the browser
 	authStore *auth.Store
 	store     *db.Store
+	srv       *Server
 }
 
 func testConfig(t *testing.T) *config.Config {
@@ -64,7 +65,7 @@ func newTestEnvWithConfig(t *testing.T, cfg *config.Config) *testEnv {
 	srv := New(store, authStore, cfg, key, limiter.New(), slog.New(slog.NewTextHandler(io.Discard, nil)), BuildInfo{Version: "test"})
 	ts := httptestServer(t, srv.Router())
 	jar, _ := cookiejar.New(nil)
-	return &testEnv{t: t, base: ts.URL, authStore: authStore, store: store, client: &http.Client{Jar: jar}}
+	return &testEnv{t: t, base: ts.URL, authStore: authStore, store: store, srv: srv, client: &http.Client{Jar: jar}}
 }
 
 func newTestEnv(t *testing.T) *testEnv {

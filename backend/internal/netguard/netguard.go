@@ -1,5 +1,5 @@
 // Package netguard centralizes the SSRF dial boundary for every outbound
-// request supabackup makes on behalf of configuration (webhooks, heartbeat).
+// request supacove makes on behalf of configuration (webhooks, heartbeat).
 // Link-local targets are always refused; the IPv6 cloud-metadata endpoint
 // (fd00:ec2::254) and NAT64/WKP encodings of link-local addresses are
 // refused too. Private and loopback ranges stay allowed on purpose: LAN

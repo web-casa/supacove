@@ -28,11 +28,15 @@ const supaTOC = `;
 `
 
 type supaOpt struct {
-	toc        string // table of contents the pg_restore stub prints (default supaTOC)
-	profileEnv string // SUPABACKUP_PROFILE override ("" = kit default)
-	platform   platformpkg.Platform
-	super      string // rolsuper answer, default "t"
-	available  string // pg_available_extensions rows
+	toc         string // table of contents the pg_restore stub prints (default supaTOC)
+	profileEnv  string // SUPACOVE_PROFILE override ("" = not set)
+	legacyEnv   string // SUPABACKUP_PROFILE override (rename-transition fallback)
+	emptyNew    bool   // set SUPACOVE_PROFILE to an explicitly empty value
+	emptyLegacy bool   // set SUPABACKUP_PROFILE to an explicitly empty value
+
+	platform  platformpkg.Platform
+	super     string // rolsuper answer, default "t"
+	available string // pg_available_extensions rows
 }
 
 // runSupa runs a kit against stubs that answer by QUERY text rather than by
@@ -111,7 +115,16 @@ esac
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=" + binDir, testEnv, "PGPASSWORD=sup3rsecret"}
 	if o.profileEnv != "" {
-		cmd.Env = append(cmd.Env, "SUPABACKUP_PROFILE="+o.profileEnv)
+		cmd.Env = append(cmd.Env, "SUPACOVE_PROFILE="+o.profileEnv)
+	}
+	if o.legacyEnv != "" {
+		cmd.Env = append(cmd.Env, "SUPABACKUP_PROFILE="+o.legacyEnv)
+	}
+	if o.emptyNew {
+		cmd.Env = append(cmd.Env, "SUPACOVE_PROFILE=")
+	}
+	if o.emptyLegacy {
+		cmd.Env = append(cmd.Env, "SUPABACKUP_PROFILE=")
 	}
 	b, err := cmd.CombinedOutput()
 	lb, _ := os.ReadFile(logPath)
@@ -186,8 +199,44 @@ func TestProfileOverride(t *testing.T) {
 	}
 	out, argv, _, err := runSupa(t, supaOpt{profileEnv: "nonsense"})
 	mustFail(t, err, "unknown profile")
-	if !strings.Contains(out, "SUPABACKUP_PROFILE") || strings.Contains(argv, "TOOL:") {
+	if !strings.Contains(out, "SUPACOVE_PROFILE") || strings.Contains(argv, "TOOL:") {
 		t.Fatalf("unknown profile must be refused before any tool runs:\n%s\n%s", out, argv)
+	}
+	// Rename-transition fallback: the pre-rename variable still overrides.
+	_, argv, _, err = runSupa(t, supaOpt{platform: platformpkg.Generic, legacyEnv: "supabase"})
+	if err != nil || !strings.Contains(argv, "--use-list") {
+		t.Fatalf("legacy SUPABACKUP_PROFILE=supabase must take the supabase path (err=%v): %s", err, argv)
+	}
+	// And the current variable wins when both are set.
+	_, argv, _, err = runSupa(t, supaOpt{platform: platformpkg.Supabase,
+		profileEnv: "generic", legacyEnv: "supabase"})
+	if err != nil || strings.Contains(argv, "--use-list") || strings.Contains(argv, "rolsuper") {
+		t.Fatalf("SUPACOVE_PROFILE must win over SUPABACKUP_PROFILE (err=%v): %s", err, argv)
+	}
+}
+
+// TestKitProfileEmptyEnvValues pins the ${VAR:-default} semantics: an
+// explicitly empty variable behaves as unset, so the fallback chain still
+// resolves (new-empty falls through to legacy, both-empty to the kit
+// default).
+func TestKitProfileEmptyEnvValues(t *testing.T) {
+	// New empty, legacy set: the legacy value applies.
+	_, argv, _, err := runSupa(t, supaOpt{platform: platformpkg.Generic,
+		emptyNew: true, legacyEnv: "supabase"})
+	if err != nil || !strings.Contains(argv, "--use-list") {
+		t.Fatalf("empty SUPACOVE_PROFILE must fall back to SUPABACKUP_PROFILE (err=%v): %s", err, argv)
+	}
+	// Both empty, generic kit: the plain default path applies.
+	_, argv, _, err = runSupa(t, supaOpt{platform: platformpkg.Generic,
+		emptyNew: true, emptyLegacy: true})
+	if err != nil || strings.Contains(argv, "--use-list") || strings.Contains(argv, "rolsuper") {
+		t.Fatalf("both profile variables empty must use the kit default (err=%v): %s", err, argv)
+	}
+	// Both empty, supabase kit: the supabase default path applies.
+	_, argv, _, err = runSupa(t, supaOpt{platform: platformpkg.Supabase,
+		emptyNew: true, emptyLegacy: true})
+	if err != nil || !strings.Contains(argv, "--use-list") {
+		t.Fatalf("both profile variables empty must use the kit default (err=%v): %s", err, argv)
 	}
 }
 

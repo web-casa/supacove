@@ -15,8 +15,8 @@ func RemediationMsg(class string) i18n.Msg {
 	switch class {
 	case ClassNetwork:
 		return i18n.Msg{
-			En: "The database host could not be reached or timed out. Check: host/port reachability from the supabackup host; DNS; firewall rules; for Neon, cold starts can take seconds (retry once before investigating); for Railway, verify the TCP proxy is from an allowed location.",
-			Zh: "无法连接数据库主机或连接超时。请检查：supabackup 所在主机到目标主机/端口的连通性；DNS；防火墙规则；Neon 冷启动可能需要数秒（先重试一次再排查）；Railway 请确认 TCP 代理所在区域是允许的位置。",
+			En: "The database host could not be reached or timed out. Check: host/port reachability from the supacove host; DNS; firewall rules; for Neon, cold starts can take seconds (retry once before investigating); for Railway, verify the TCP proxy is from an allowed location.",
+			Zh: "无法连接数据库主机或连接超时。请检查：supacove 所在主机到目标主机/端口的连通性；DNS；防火墙规则；Neon 冷启动可能需要数秒（先重试一次再排查）；Railway 请确认 TCP 代理所在区域是允许的位置。",
 		}
 	case ClassAuth:
 		return i18n.Msg{
