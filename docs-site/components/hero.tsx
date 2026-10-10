@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
+import { GithubMark } from "@/components/github-mark";
 import { Mark } from "@/components/logo";
 import { Rotator } from "@/components/rotator";
 import { GITHUB_URL } from "@/lib/site";
@@ -67,13 +68,16 @@ export function Hero({ t, docs }: { t: HomeCopy; docs: string }) {
           </span>
         </Link>
         <a
-          className="lp-link"
+          className="lp-btn lp-btn-ghost"
           href={GITHUB_URL}
           target="_blank"
           rel="noopener noreferrer"
         >
+          <GithubMark size={18} />
           GitHub
-          <ArrowUpRight aria-hidden />
+          <span className="lp-btn-arrow lp-btn-arrow-soft">
+            <ArrowUpRight aria-hidden />
+          </span>
         </a>
         <Link className="lp-link" href={`${docs}/restore`}>
           {t.secondary}

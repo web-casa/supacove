@@ -579,3 +579,24 @@ div.prose {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Sidebar footer GitHub entrance (docs pages). */
+.sb-sidebar-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.25rem 0.5rem 0.75rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 0.55rem;
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.sb-sidebar-github:hover {
+  color: var(--color-fd-foreground);
+  background-color: var(--color-fd-muted);
+}

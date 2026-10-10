@@ -5,10 +5,11 @@ import { baseOptions } from "@/app/layout.config";
 import { Features } from "@/components/features";
 import { CipherStream } from "@/components/cipher-stream";
 import { Hero } from "@/components/hero";
+import { GithubMark } from "@/components/github-mark";
 import { Mark } from "@/components/logo";
 import { Equation, KeyCard, Poster, Terminal } from "@/components/showcase";
 import { homeCopy } from "@/lib/home-copy";
-import { localePath } from "@/lib/site";
+import { GITHUB_URL, localePath } from "@/lib/site";
 import { source } from "@/lib/source";
 import "@/app/home.css";
 
@@ -276,6 +277,15 @@ export function Home({ lang }: { lang: "zh" | "en" }) {
               <Mark size={18} />
               SupaCove
             </span>
+            <a
+              className="lp-footer-github"
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <GithubMark size={16} />
+              GitHub
+            </a>
             <span>{t.footer.license}</span>
             <a href="#nd-page">{t.footer.top} ↑</a>
           </div>

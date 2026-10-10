@@ -185,6 +185,53 @@
   font-weight: 500;
 }
 
+/* Outline pill for secondary hero actions (GitHub): the primary button's
+   geometry, inverted scheme — hairline border, page background, octocat
+   mark carrying the accent on hover. */
+.lp-btn-ghost {
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem 0.4rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--color-fd-foreground) 22%, transparent);
+  background: transparent;
+  color: var(--color-fd-foreground);
+}
+
+.lp-btn-ghost svg {
+  color: var(--color-fd-muted-foreground);
+  transition: color 0.3s var(--sb-ease);
+}
+
+.lp-btn-ghost:hover {
+  border-color: color-mix(in srgb, var(--color-fd-foreground) 45%, transparent);
+  box-shadow: none;
+  transform: none;
+}
+
+.lp-btn-ghost:hover svg {
+  color: var(--color-fd-foreground);
+}
+
+/* The soft arrow chip: tinted instead of the primary's solid accent. */
+.lp-btn-arrow-soft {
+  background: color-mix(in srgb, var(--color-fd-foreground) 8%, transparent);
+}
+
+:root:not(.dark) .lp-btn-arrow-soft {
+  background: color-mix(in srgb, var(--color-fd-foreground) 10%, transparent);
+}
+
+.lp-footer-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-fd-muted-foreground);
+  transition: color 0.2s var(--sb-ease);
+}
+
+.lp-footer-github:hover {
+  color: var(--color-fd-foreground);
+}
+
 .lp-link::after {
   content: "";
   position: absolute;
